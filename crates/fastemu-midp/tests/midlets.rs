@@ -72,8 +72,9 @@ fn keys_and_pointer_events_reach_the_canvas() {
     run.wait_log("released -5");
     run.tap(Key::Num2);
     run.wait_log("pressed 50 action 1 name 2");
+    // Held until it repeats, however late the event thread gets to it.
     run.key(Key::Up, KeyAction::Press);
-    std::thread::sleep(Duration::from_millis(700));
+    run.wait_log("repeated -1");
     run.key(Key::Up, KeyAction::Release);
     run.wait_log("released -1");
     let lines = run.lines();
