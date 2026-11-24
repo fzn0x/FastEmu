@@ -558,6 +558,39 @@ fn opened_files_are_added_and_started(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_game_that_starts_after_the_window_closed_is_stopped(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.view.update_in(h.cx, |v, window, cx| {
+        let id = v.library.entries()[0].id;
+        v.launch(id, window, cx);
+        window.remove_window();
+    });
+    h.cx.run_until_parked();
+    assert_eq!(h.launcher.count(), 1, "the launch went ahead");
+    assert_eq!(
+        h.launcher.instance(0).status(),
+        InstanceStatus::Exited,
+        "nothing shows it, so it must not keep running"
+    );
+}
+
+#[gpui::test]
+fn a_restart_that_ends_after_the_window_closed_is_stopped(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    h.view.update_in(h.cx, |v, window, cx| {
+        let id = v.tiles[0].id;
+        v.restart_tile(id, window, cx);
+        window.remove_window();
+    });
+    h.cx.run_until_parked();
+    assert_eq!(h.launcher.count(), 2, "the restart went ahead");
+    assert_eq!(h.launcher.instance(1).status(), InstanceStatus::Exited);
+}
+
+#[gpui::test]
 fn relative_paths_are_stored_absolute(cx: &mut TestAppContext) {
     let mut h = open(cx);
     // As `fastemu snake.jar` passes it from the shell's folder.

@@ -43,6 +43,14 @@ fn start(
     launcher.launch(request)
 }
 
+/// Stops an instance that finished starting after its window or view
+/// went away: no tile shows it and nothing else would ever stop it.
+fn stop_if_orphaned(shown: bool, started: Option<Arc<dyn Instance>>) {
+    if !shown && let Some(instance) = started {
+        instance.stop();
+    }
+}
+
 impl FastEmuView {
     fn tile(&self, id: TileId) -> Option<&Tile> {
         self.tiles.iter().find(|t| t.id == id)
@@ -107,7 +115,8 @@ impl FastEmuView {
             let result = cx
                 .background_spawn(async move { start(&*launcher, sent) })
                 .await;
-            this.update_in(cx, |this, _, cx| {
+            let started = result.as_ref().ok().map(Arc::clone);
+            let shown = this.update_in(cx, |this, _, cx| {
                 this.launching.retain(|l| *l != (entry, slot));
                 match result {
                     Ok(instance) => this.add_tile(entry, slot, request, instance, cx),
@@ -117,8 +126,8 @@ impl FastEmuView {
                         cx,
                     ),
                 }
-            })
-            .ok();
+            });
+            stop_if_orphaned(shown.is_ok(), started);
         })
         .detach();
     }
@@ -196,7 +205,12 @@ impl FastEmuView {
 
     /// Stops a game and starts it again in the same save slot, with the
     /// entry's current settings.
-    fn restart_tile(&mut self, id: TileId, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn restart_tile(
+        &mut self,
+        id: TileId,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         let Some((entry, slot)) = self
             .tile(id)
             .filter(|t| !t.restarting)
@@ -218,7 +232,8 @@ impl FastEmuView {
             let result = cx
                 .background_spawn(async move { start(&*launcher, sent) })
                 .await;
-            this.update_in(cx, |this, window, cx| {
+            let started = result.as_ref().ok().map(Arc::clone);
+            let shown = this.update_in(cx, |this, window, cx| {
                 let Some(tile) = this.tile_mut(id) else {
                     if let Ok(instance) = result {
                         instance.stop();
@@ -242,8 +257,8 @@ impl FastEmuView {
                     }
                 }
                 cx.notify();
-            })
-            .ok();
+            });
+            stop_if_orphaned(shown.is_ok(), started);
         })
         .detach();
         cx.notify();
