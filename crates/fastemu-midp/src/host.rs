@@ -1,14 +1,15 @@
 //! The link between an instance's virtual machine and the app that shows
-//! it: the latest frame, the status and the log.
+//! it: the latest frame, the status, the log, and the messages natives
+//! send to the instance's control thread.
 //!
 //! A [`HostLink`] holds no Java references and no `Vm`, so it may live in
 //! the virtual machine (inside [`crate::env::InstanceEnv`]) and in the
-//! app's side of the instance at once. Every method returns quickly; the
-//! ones the VM calls run with the VM lock held.
+//! app's [`crate::instance::MidpInstance`] at once. Every method returns
+//! quickly; the ones the VM calls run with the VM lock held.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, mpsc};
 
 use fastemu_core::{Frame, InstanceId, InstanceStatus, LogLevel, LogLine, Notify};
 use parking_lot::Mutex;
@@ -16,6 +17,26 @@ use parking_lot::Mutex;
 /// The most log lines kept between two [`HostLink::drain_log`] calls; the
 /// oldest go first, so a game that prints in a loop cannot exhaust memory.
 const MAX_LOG_LINES: usize = 10_000;
+
+/// What the virtual machine prints when a panic ends one of its threads.
+const INTERNAL_ERROR: &str = "internal error in the virtual machine";
+
+/// Messages to the instance's control thread, which owns the `Vm`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Control {
+    /// The app paused the instance.
+    Pause,
+    /// The app resumed it.
+    Resume,
+    /// The MIDlet called `resumeRequest`.
+    ResumeRequest,
+    /// The app stopped it, or dropped it.
+    Stop,
+    /// The MIDlet called `notifyDestroyed`.
+    Exited,
+    /// The game hit an error the runtime cannot recover from.
+    Crashed(String),
+}
 
 struct HostState {
     status: InstanceStatus,
@@ -31,6 +52,7 @@ struct Inner {
     pending: AtomicBool,
     state: Mutex<HostState>,
     errors: AtomicU64,
+    control: Mutex<Option<mpsc::Sender<Control>>>,
 }
 
 /// One instance's side of the app: cheap to clone, shared by the VM's
@@ -59,6 +81,7 @@ impl HostLink {
                 log: VecDeque::new(),
             }),
             errors: AtomicU64::new(0),
+            control: Mutex::new(None),
         }))
     }
 
@@ -70,6 +93,12 @@ impl HostLink {
     /// The instance's status.
     pub fn status(&self) -> InstanceStatus {
         self.0.pending.store(false, Ordering::Release);
+        self.0.state.lock().status.clone()
+    }
+
+    /// The status, read by the runtime itself without counting as the app
+    /// having looked.
+    pub(crate) fn peek_status(&self) -> InstanceStatus {
         self.0.state.lock().status.clone()
     }
 
@@ -100,6 +129,18 @@ impl HostLink {
         }
     }
 
+    /// Changes the status. A finished status (exited or crashed) is final.
+    pub(crate) fn set_status(&self, status: InstanceStatus) {
+        {
+            let mut state = self.0.state.lock();
+            if state.status.is_finished() || state.status == status {
+                return;
+            }
+            state.status = status;
+        }
+        self.changed();
+    }
+
     /// Shows a new frame.
     pub(crate) fn present(&self, frame: Frame) {
         self.0.state.lock().frame = Some(frame);
@@ -107,10 +148,15 @@ impl HostLink {
     }
 
     /// Adds a line to the log. Lines that report an uncaught exception
-    /// count as errors.
+    /// count as errors; an internal error of the VM crashes the instance.
     pub(crate) fn log(&self, line: LogLine) {
-        if line.level == LogLevel::Err && line.text.starts_with("Exception in thread") {
-            self.count_error();
+        if line.level == LogLevel::Err {
+            if line.text.starts_with("Exception in thread") {
+                self.count_error();
+            } else if line.text.starts_with(INTERNAL_ERROR) {
+                self.count_error();
+                self.control(Control::Crashed(line.text.clone()));
+            }
         }
         {
             let mut state = self.0.state.lock();
@@ -125,6 +171,19 @@ impl HostLink {
     /// Counts an exception the runtime caught and logged.
     pub(crate) fn count_error(&self) {
         self.0.errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Where the control thread listens.
+    pub(crate) fn set_control(&self, sender: mpsc::Sender<Control>) {
+        *self.0.control.lock() = Some(sender);
+    }
+
+    /// Sends a message to the control thread, if there is one (tests that
+    /// run natives without a launcher have none).
+    pub(crate) fn control(&self, message: Control) {
+        if let Some(sender) = &*self.0.control.lock() {
+            let _ = sender.send(message);
+        }
     }
 
     /// A log sink for the VM's configuration that writes to this link.
@@ -160,24 +219,35 @@ mod tests {
         });
         assert_eq!(count.load(Ordering::Relaxed), 1);
         assert_eq!(link.frame().map(|f| f.serial()), Some(2));
-        link.present(Frame::filled(1, 1, 0, 3));
+        link.set_status(InstanceStatus::Running);
         assert_eq!(count.load(Ordering::Relaxed), 2);
         assert_eq!(link.drain_log().len(), 1);
         assert!(link.drain_log().is_empty());
     }
 
     #[test]
-    fn uncaught_exceptions_count_as_errors() {
+    fn finished_statuses_are_final() {
         let (link, _) = counting();
+        link.set_status(InstanceStatus::Exited);
+        link.set_status(InstanceStatus::Running);
+        assert_eq!(link.status(), InstanceStatus::Exited);
+    }
+
+    #[test]
+    fn uncaught_exceptions_count_and_internal_errors_crash() {
+        let (link, _) = counting();
+        let (tx, rx) = mpsc::channel();
+        link.set_control(tx);
         link.log(LogLine {
             level: LogLevel::Err,
             text: "Exception in thread \"main\" java.lang.Error".into(),
         });
         link.log(LogLine {
-            level: LogLevel::Out,
-            text: "Exception in thread, but printed by the game".into(),
+            level: LogLevel::Err,
+            text: format!("{INTERNAL_ERROR}: boom; stopping it"),
         });
-        assert_eq!(link.error_count(), 1);
+        assert_eq!(link.error_count(), 2);
+        assert!(matches!(rx.try_recv(), Ok(Control::Crashed(_))));
     }
 
     #[test]
