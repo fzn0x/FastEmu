@@ -85,7 +85,10 @@ public class Timers {
 
     public static void main(String[] args) throws InterruptedException {
         final Timer timer = new Timer();
-        timer.schedule(new Named("c"), 120);
+        // Scheduled out of order. Each delay counts from its own call, so
+        // "c" comes last unless the next calls are 330 ms late, far more
+        // than a busy machine delays them.
+        timer.schedule(new Named("c"), 400);
         timer.schedule(new Named("a"), 20);
         timer.schedule(new Named("b"), 70);
         await(3);
