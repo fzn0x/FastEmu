@@ -125,6 +125,11 @@ fn for_name(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         return throw(ctx, "java/lang/ClassNotFoundException", &head);
     }
     let name = ctx.string(name_obj)?;
+    // The limits are in bytes of the name, which a unit takes up to three
+    // of.
+    if name.len() > limit {
+        return throw(ctx, "java/lang/ClassNotFoundException", &short(&name));
+    }
     let internal = internal_name(&name);
     // Class.forName takes binary names; an internal name with slashes is
     // not one. A class that exists but fails to link throws its linkage

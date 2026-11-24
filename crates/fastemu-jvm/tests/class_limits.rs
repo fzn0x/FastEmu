@@ -324,6 +324,28 @@ fn a_class_name_over_the_limit_is_a_java_error_with_a_short_message() {
 }
 
 #[test]
+fn a_class_name_of_wide_characters_over_the_limit_is_not_found() {
+    // The limit is in bytes, and a character takes two of them here: 127
+    // characters fit, 128 do not, and 200 are under the limit of units but
+    // over that of bytes.
+    let lines = run(
+        vec![("Probe".to_owned(), probe("Probe"))],
+        no_natives,
+        |ctx| {
+            [127, 128, 200]
+                .map(|n| for_name(ctx, &"\u{e9}".repeat(n)))
+                .to_vec()
+        },
+    );
+    for line in &lines {
+        assert!(
+            line.starts_with("java.lang.ClassNotFoundException: \u{e9}\u{e9}\u{e9}"),
+            "{lines:?}"
+        );
+    }
+}
+
+#[test]
 fn a_new_array_of_arrays_of_the_most_dimensions_is_a_java_error() {
     let lines = run(Vec::new(), no_natives, |ctx| {
         let deepest = ctx.find_class(&array_name(255)).expect("255 dimensions");
