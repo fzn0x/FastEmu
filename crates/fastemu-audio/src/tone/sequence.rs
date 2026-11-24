@@ -34,6 +34,10 @@ const DEFAULT_RESOLUTION: u64 = 64;
 /// that play blocks can grow without bound. Even at the shortest note
 /// length this is minutes of sound; real sequences hold a few hundred.
 const MAX_EVENTS: usize = 1 << 16;
+/// The tones kept across the main list and every block together. Each
+/// list stays under [`MAX_EVENTS`], but 128 blocks that each copy a full
+/// one would hold millions; this keeps a sequence to a few megabytes.
+const MAX_STORED: usize = 4 * MAX_EVENTS;
 
 /// Reads a tone sequence into the tones it plays, blocks and repeats
 /// unrolled.
@@ -49,6 +53,8 @@ struct Parser<'a> {
     volume: u8,
     /// The unrolled tones of each defined block.
     blocks: Vec<Option<Vec<Event>>>,
+    /// Tones added to any list so far, for [`MAX_STORED`].
+    stored: usize,
 }
 
 /// A tone before volume is applied: blocks keep these, since a block
@@ -75,7 +81,18 @@ impl<'a> Parser<'a> {
             resolution: DEFAULT_RESOLUTION,
             volume: 100,
             blocks: vec![None; 128],
+            stored: 0,
         }
+    }
+
+    /// Checks that `adding` more tones fit in a list holding `held` and
+    /// in the sequence as a whole, and counts them.
+    fn reserve(&mut self, at: usize, held: usize, adding: usize) -> Result<(), AudioError> {
+        if held + adding > MAX_EVENTS || self.stored + adding > MAX_STORED {
+            return Err(error(at, "the sequence unrolls to too many tones"));
+        }
+        self.stored += adding;
+        Ok(())
     }
 
     fn peek(&self) -> Option<i8> {
@@ -172,15 +189,18 @@ impl<'a> Parser<'a> {
             PLAY_BLOCK => {
                 let number = self.value("block number", 0..=127)?;
                 let block = self.blocks[number as usize]
-                    .as_ref()
+                    .take()
                     .ok_or_else(|| error(at, format!("block {number} is not defined")))?;
-                if events.len() + block.len() > MAX_EVENTS {
-                    return Err(error(at, "the sequence unrolls to too many tones"));
+                let reserved = self.reserve(at, events.len(), block.len());
+                if reserved.is_ok() {
+                    events.extend_from_slice(&block);
                 }
-                events.extend_from_slice(block);
+                self.blocks[number as usize] = Some(block);
+                reserved?;
             }
             SET_VOLUME => {
                 let volume = self.value("volume", 0..=100)?;
+                self.reserve(at, events.len(), 1)?;
                 events.push(Event::Volume(volume as u8));
             }
             REPEAT => {
@@ -188,16 +208,12 @@ impl<'a> Parser<'a> {
                 let note_at = self.at;
                 let note = self.next("repeated note")?;
                 let tone = self.tone(note_at, note)?;
-                if events.len() + times as usize > MAX_EVENTS {
-                    return Err(error(at, "the sequence unrolls to too many tones"));
-                }
+                self.reserve(at, events.len(), times as usize)?;
                 events.extend(std::iter::repeat_n(tone, times as usize));
             }
             note => {
                 let tone = self.tone(at, note)?;
-                if events.len() >= MAX_EVENTS {
-                    return Err(error(at, "the sequence unrolls to too many tones"));
-                }
+                self.reserve(at, events.len(), 1)?;
                 events.push(tone);
             }
         }
@@ -385,6 +401,28 @@ mod tests {
         );
         // TEMPO after the first event is not a note.
         assert_eq!(offset_of(parse_i8(&[VERSION, 1, C4, 8, TEMPO, 30])), 4);
+    }
+
+    #[test]
+    fn refuses_blocks_that_hold_too_many_tones_together() {
+        // Block 16 holds 65536 tones, within the limit for one list, and
+        // blocks 17 to 127 each copy it: without a limit across blocks a
+        // sequence under a kilobyte would hold over 100 MB.
+        let mut seq = vec![VERSION, 1, BLOCK_START, 0, C4, 1, BLOCK_END, 0];
+        for n in 1..=127i8 {
+            let previous = if n <= 16 { n - 1 } else { 16 };
+            seq.extend_from_slice(&[BLOCK_START, n, PLAY_BLOCK, previous]);
+            if n <= 16 {
+                seq.extend_from_slice(&[PLAY_BLOCK, previous]);
+            }
+            seq.extend_from_slice(&[BLOCK_END, n]);
+        }
+        seq.extend_from_slice(&[PLAY_BLOCK, 0]);
+        assert!(seq.len() < 1024);
+        assert!(matches!(
+            parse_i8(&seq),
+            Err(AudioError::InvalidToneSequence { .. })
+        ));
     }
 
     #[test]
