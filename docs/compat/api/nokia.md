@@ -79,7 +79,7 @@ Backlight and vibration.
 |---|---|---|---|---|---|---|
 | 2 | `void setLights(int num, int level)` | `setLights(II)V` | static | 1.0 | `IllegalArgumentException` if light num is not supported or level is not between 0-100 | Light 0 is the display backlight; level 0 to 100. Throws `IllegalArgumentException` for other lights or levels. Some games call it often to keep the screen on, so it must be cheap. |
 | 3 | `void flashLights(long duration)` | `flashLights(J)V` | static deprecated | 1.0 | `IllegalArgumentException` if duration < 0 |  |
-| 2 | `void startVibra(int freq, long duration)` | `startVibra(IJ)V` | static deprecated | 1.0 | `IllegalStateException` For freq values 1-100: the use of vibration is not allowed or the system does not have vibration support. For frequency value 0: the device does not have vibration; `IllegalArgumentException` if duration or freq is 100 | Frequency 0 to 100 and duration in milliseconds. FastEmu can show vibration in its window or ignore it. |
+| 2 | `void startVibra(int freq, long duration)` | `startVibra(IJ)V` | static deprecated | 1.0 | `IllegalStateException` For freq values 1-100: the use of vibration is not allowed or the system does not have vibration support. For frequency value 0: the device does not have vibration; `IllegalArgumentException` if duration or freq is < 0, or freq is > 100 | Frequency 0 to 100 and duration in milliseconds. FastEmu can show vibration in its window or ignore it. |
 | 2 | `void stopVibra()` | `stopVibra()V` | static deprecated | 1.0 |  |  |
 
 Added by a later edition ([nokiaapi2](https://nikita36078.github.io/J2ME_Docs/docs/nokiaapi2/com/nokia/mid/ui/DeviceControl.html)):

@@ -1152,8 +1152,8 @@ A tile grid with sprites, like `TiledLayer` and `LayerManager` together.
 
 | T | Constructor | Descriptor | Flags | Throws | Notes |
 |---|---|---|---|---|---|
-| 3 | `(int columns, int rows, Image img, int tWidth, int tHeight)` | `<init>(IILjavax/microedition/lcdui/Image;II)V` |  | `NullPointerException` if img is null; `IllegalArgumentException` if rows |  |
-| 3 | `(int columns, int rows, int cellWidth, int cellHeight)` | `<init>(IIII)V` |  | `IllegalArgumentException` if rows |  |
+| 3 | `(int columns, int rows, Image img, int tWidth, int tHeight)` | `<init>(IILjavax/microedition/lcdui/Image;II)V` |  | `NullPointerException` if img is null; `IllegalArgumentException` if `rows < 1 \|\| columns < 1 \|\| tWidth < 1 \|\| tHeight < 1 \|\| img.getWidth() % tWidth != 0 \|\| img.getHeight() % tHeight != 0` |  |
+| 3 | `(int columns, int rows, int cellWidth, int cellHeight)` | `<init>(IIII)V` |  | `IllegalArgumentException` if `rows < 1 \|\| columns < 1 \|\| cellWidth < 1 \|\| cellHeight < 1` |  |
 
 | T | Method | Descriptor | Flags | Throws | Notes |
 |---|---|---|---|---|---|
@@ -1177,7 +1177,7 @@ A tile grid with sprites, like `TiledLayer` and `LayerManager` together.
 | 3 | `boolean collidesWithAnyTile(Sprite s)` | `collidesWithAnyTile(Lcom/motorola/game/Sprite;)Z` |  | `NullPointerException` if s is null |  |
 | 3 | `boolean collidesWithTiles(int col, int row, int width, int height, Sprite s, boolean pixelLevel)` | `collidesWithTiles(IIIILcom/motorola/game/Sprite;Z)Z` |  | `NullPointerException` if s is null; `ArrayIndexOutOfBoundsException` if the rectangular region defined by the parameters extends beyond the bounds of the PlayField grid |  |
 | 3 | `void setStaticTileImage(int staticTileIdx, Image img, int x, int y)` | `setStaticTileImage(ILjavax/microedition/lcdui/Image;II)V` |  | `IndexOutOfBoundsException` if there is no static tile with index staticTileIdx or if the rectangular region required for the tile extends beyond the bounds of the Image; `NullPointerException` if img is null |  |
-| 3 | `void setStaticTileSet(Image img, int tWidth, int tHeight)` | `setStaticTileSet(Ljavax/microedition/lcdui/Image;II)V` |  | `NullPointerException` if img is null; `IllegalArgumentException` if tWidth |  |
+| 3 | `void setStaticTileSet(Image img, int tWidth, int tHeight)` | `setStaticTileSet(Ljavax/microedition/lcdui/Image;II)V` |  | `NullPointerException` if img is null; `IllegalArgumentException` if `tWidth < 1 \|\| tHeight < 1 \|\| img.getWidth() % tWidth != 0 \|\| img.getHeight() % tHeight != 0` |  |
 | 3 | `void setViewWindow(int x, int y, int width, int height)` | `setViewWindow(IIII)V` |  |  |  |
 
 ### SoundEffect
@@ -1199,7 +1199,7 @@ Tier 3. Javadoc: [Motorola_Gaming_API](https://nikita36078.github.io/J2ME_Docs/d
 | T | Constructor | Descriptor | Flags | Throws | Notes |
 |---|---|---|---|---|---|
 | 3 | `(Image img)` | `<init>(Ljavax/microedition/lcdui/Image;)V` |  | `NullPointerException` if img is null |  |
-| 3 | `(Image img, int fWidth, int fHeight)` | `<init>(Ljavax/microedition/lcdui/Image;II)V` |  | `NullPointerException` if img is null; `IllegalArgumentException` if fWidth |  |
+| 3 | `(Image img, int fWidth, int fHeight)` | `<init>(Ljavax/microedition/lcdui/Image;II)V` |  | `NullPointerException` if img is null; `IllegalArgumentException` if `fWidth < 1 \|\| fHeight < 1 \|\| img.getWidth() % fWidth != 0 \|\| img.getHeight() % fHeight != 0` |  |
 | 3 | `(Sprite s)` | `<init>(Lcom/motorola/game/Sprite;)V` |  | `NullPointerException` if s is null |  |
 
 | T | Method | Descriptor | Flags | Throws | Notes |
@@ -1213,7 +1213,7 @@ Tier 3. Javadoc: [Motorola_Gaming_API](https://nikita36078.github.io/J2ME_Docs/d
 | 3 | `int getHeight()` | `getHeight()I` |  |  |  |
 | 3 | `int getWidth()` | `getWidth()I` |  |  |  |
 | 3 | `boolean collidesWith(Sprite s, boolean pixelLevel)` | `collidesWith(Lcom/motorola/game/Sprite;Z)Z` |  | `NullPointerException` if s is null |  |
-| 3 | `void setFrame(int f)` | `setFrame(I)V` |  | `ArrayIndexOutOfBoundsException` if f = (getFrameSequence().length) |  |
+| 3 | `void setFrame(int f)` | `setFrame(I)V` |  | `ArrayIndexOutOfBoundsException` if `f < 0 \|\| f >= getFrameSequence().length` |  |
 | 3 | `int getFrame()` | `getFrame()I` |  |  |  |
 | 3 | `int getNumRawFrames()` | `getNumRawFrames()I` |  |  |  |
 | 3 | `void nextFrame()` | `nextFrame()V` |  |  |  |
@@ -1223,7 +1223,7 @@ Tier 3. Javadoc: [Motorola_Gaming_API](https://nikita36078.github.io/J2ME_Docs/d
 | 3 | `void draw(Graphics g)` | `draw(Ljavax/microedition/lcdui/Graphics;)V` | final | `NullPointerException` if g is null |  |
 | 3 | `void setFrameSequence(int[] seq)` | `setFrameSequence([I)V` |  | `ArrayIndexOutOfBoundsException` if seq is non-null and any member of the array has a value less than 0 or greater than or equal to getNumRawFrames() |  |
 | 3 | `int[] getFrameSequence()` | `getFrameSequence()[I` |  |  |  |
-| 3 | `void setImage(Image img, int fWidth, int fHeight)` | `setImage(Ljavax/microedition/lcdui/Image;II)V` |  | `NullPointerException` if img is null; `IllegalArgumentException` if fWidth |  |
+| 3 | `void setImage(Image img, int fWidth, int fHeight)` | `setImage(Ljavax/microedition/lcdui/Image;II)V` |  | `NullPointerException` if img is null; `IllegalArgumentException` if `fWidth < 1 \|\| fHeight < 1 \|\| img.getWidth() % fWidth != 0 \|\| img.getHeight() % fHeight != 0` |  |
 
 ## Motorola: com.motorola.funlight
 
