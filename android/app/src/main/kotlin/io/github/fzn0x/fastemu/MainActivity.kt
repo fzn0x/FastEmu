@@ -3,6 +3,7 @@ package io.github.fzn0x.fastemu
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Bundle
 import android.os.Process
@@ -14,6 +15,7 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.EditText
+import java.io.File
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -101,15 +103,25 @@ class MainActivity : GameActivity() {
         }
     }
 
-    /** A game another app opened with FastEmu ("Open with"). */
+    /**
+     * A game another app opened with FastEmu ("Open with"). A debuggable
+     * build also opens the file named by the `fastemu.open` extra, for
+     * testing from adb: `am start -n ... --es fastemu.open /data/local/tmp/game.jar`.
+     */
     private fun openFromIntent(intent: Intent?) {
-        if (intent?.action != Intent.ACTION_VIEW) return
-        val uri = intent.data ?: return
+        val uri = when {
+            intent?.action == Intent.ACTION_VIEW -> intent.data
+            isDebuggable() -> intent?.getStringExtra(DEBUG_OPEN_EXTRA)?.let { Uri.fromFile(File(it)) }
+            else -> null
+        } ?: return
         thread(name = "fastemu_open") {
             val copy = GameFiles.copyIn(this, listOf(uri)).firstOrNull() ?: return@thread
             NativeBridge.nativeOpenUrl(Uri.fromFile(copy).toString())
         }
     }
+
+    private fun isDebuggable(): Boolean =
+        (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     /**
      * Shows Android's document picker for games. Picking a `.jad` and its
@@ -236,5 +248,8 @@ class MainActivity : GameActivity() {
 
     private companion object {
         const val TAG = "fastemu_activity"
+
+        /** The path a debuggable build opens on start, for adb tests. */
+        const val DEBUG_OPEN_EXTRA = "fastemu.open"
     }
 }
