@@ -284,15 +284,20 @@ pub fn class() -> NativeClass {
         .extends(super::ITEM)
         .abstract_class()
         .payload_with(|| Box::new(ItemData::new(Kind::Custom(CustomState::default()))))
-        .constant("TRAVERSE_HORIZONTAL", "I", int(TRAVERSE_HORIZONTAL))
-        .constant("TRAVERSE_VERTICAL", "I", int(TRAVERSE_VERTICAL))
-        .constant("KEY_PRESS", "I", int(4))
-        .constant("KEY_RELEASE", "I", int(8))
-        .constant("KEY_REPEAT", "I", int(16))
-        .constant("POINTER_PRESS", "I", int(32))
-        .constant("POINTER_RELEASE", "I", int(64))
-        .constant("POINTER_DRAG", "I", int(128))
-        .constant("NONE", "I", int(0))
+        .constant_with(
+            "TRAVERSE_HORIZONTAL",
+            "I",
+            int(TRAVERSE_HORIZONTAL),
+            PROTECTED,
+        )
+        .constant_with("TRAVERSE_VERTICAL", "I", int(TRAVERSE_VERTICAL), PROTECTED)
+        .constant_with("KEY_PRESS", "I", int(4), PROTECTED)
+        .constant_with("KEY_RELEASE", "I", int(8), PROTECTED)
+        .constant_with("KEY_REPEAT", "I", int(16), PROTECTED)
+        .constant_with("POINTER_PRESS", "I", int(32), PROTECTED)
+        .constant_with("POINTER_RELEASE", "I", int(64), PROTECTED)
+        .constant_with("POINTER_DRAG", "I", int(128), PROTECTED)
+        .constant_with("NONE", "I", int(0), PROTECTED)
         .method_with("<init>", "(Ljava/lang/String;)V", PROTECTED, |ctx, a| {
             let item = ctx.non_null(a[0])?;
             data_mut(ctx, item)?.label = a[1].obj();
