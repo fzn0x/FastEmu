@@ -1,11 +1,11 @@
-//! `equals` as the collections call it: through the game's own
-//! overrides, but computed in Rust for the elements games use most
-//! (strings, boxed numbers, and objects that keep `Object`'s identity),
-//! which no game code can change.
+//! `equals` and `hashCode` as the collections call them: through the
+//! game's own overrides, but computed in Rust for the keys games use
+//! most (strings, boxed numbers, and objects that keep `Object`'s
+//! identity), which no game code can change.
 
 use crate::class::ClassId;
 use crate::ctx::{Ctx, JResult};
-use crate::heap::Body;
+use crate::heap::{Body, identity_hash};
 use crate::lang::string;
 use crate::value::{ObjRef, Value};
 
@@ -20,6 +20,25 @@ enum Boxed {
     Float(u32),
     /// `Double`, by `doubleToLongBits`.
     Double(u64),
+}
+
+impl Boxed {
+    /// `hashCode()` of the box.
+    fn hash(self) -> i32 {
+        match self {
+            Boxed::Int(v) => v,
+            Boxed::Long(v) => (v ^ (v >> 32)) as i32,
+            Boxed::Bool(v) => {
+                if v {
+                    1231
+                } else {
+                    1237
+                }
+            }
+            Boxed::Float(bits) => bits as i32,
+            Boxed::Double(bits) => (bits ^ (bits >> 32)) as i32,
+        }
+    }
 }
 
 /// The class and value of `obj` if it is a boxed primitive.
@@ -69,6 +88,20 @@ fn keeps_object_method(ctx: &Ctx<'_>, obj: ObjRef, name: &str, desc: &str) -> bo
     class
         .virtual_method(selector)
         .is_some_and(|m| Some(m.class) == classes.lookup("java/lang/Object"))
+}
+
+/// `obj.hashCode()`.
+pub(crate) fn hash_code(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<i32> {
+    if let Some(h) = string::cached_hash(&mut ctx.state, obj) {
+        return Ok(h);
+    }
+    if let Some((_, value)) = boxed(ctx, obj) {
+        return Ok(value.hash());
+    }
+    if keeps_object_method(ctx, obj, "hashCode", "()I") {
+        return Ok(identity_hash(obj));
+    }
+    Ok(ctx.call_virtual(obj, "hashCode", "()I", &[])?.int())
 }
 
 /// `a.equals(b)`.

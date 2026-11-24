@@ -187,6 +187,7 @@ programs! {
     exceptions: "Exceptions", 8;
     float_math: "FloatMath", 8;
     gc_stress: "GcStress", 4;
+    hashtables: "Hashtables", 8;
     hello: "Hello", 8;
     inheritance: "Inheritance", 8;
     print_streams: "PrintStreams", 8;

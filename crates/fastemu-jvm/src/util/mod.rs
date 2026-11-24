@@ -1,6 +1,7 @@
 //! The CLDC 1.1 `java.util` classes, implemented in Rust: the
 //! collections and their `Enumeration`.
 
+mod hashtable;
 mod keys;
 mod vector;
 
@@ -15,5 +16,6 @@ pub(crate) fn classes() -> Vec<NativeClass> {
             .abstract_method("nextElement", "()Ljava/lang/Object;"),
     ];
     all.extend(vector::classes());
+    all.extend(hashtable::classes());
     all
 }
