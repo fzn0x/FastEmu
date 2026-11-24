@@ -2,8 +2,9 @@
 
 The `fastemu-jvm` crate is the Java virtual machine every FastEmu instance
 runs its game in: class file parsing, linking, the bytecode interpreter,
-the heap and its collector, Java threads, and the CLDC 1.1 `java.lang`
-classes implemented in Rust. It runs real J2ME games: class versions 45.3
+the heap and its collector, Java threads, and the CLDC 1.1 class library
+(`java.lang`, `java.io`, `java.util`, with MIDP's `Timer`) implemented in
+Rust. It runs real J2ME games: class versions 45.3
 (javac 1.1) to 52 (Java 8), ProGuard-obfuscated, preverified (StackMap
 attributes are skipped), with `jsr` and `ret`.
 
@@ -59,7 +60,10 @@ code must follow, and how to define a Java class in Rust.
 | `ctx` | The `Ctx` API for natives. |
 | `native` | `NativeClass`, the builder for classes defined in Rust. |
 | `vm` | `Vm`, `VmConfig`, the shared state. |
-| `lang` | `java.lang` (and the parts of `java.io` it needs) in Rust. |
+| `lang` | `java.lang` in Rust, and the helpers the other library modules share. |
+| `io` | `java.io` in Rust. |
+| `util` | `java.util` in Rust, with MIDP's `Timer` and `TimerTask`. |
+| `charset` | The character encodings every conversion between bytes and text uses. |
 
 ## Using a virtual machine from the host
 
@@ -101,7 +105,9 @@ vm.spawn("main", |ctx| {
 - `properties`: system properties on top of `microedition.configuration`
   (`CLDC-1.1`), `microedition.encoding` (`UTF-8`), `microedition.platform`
   and `microedition.locale`. `microedition.encoding` is the charset of
-  `new String(byte[])` and `String.getBytes()`.
+  every conversion that names none (see the class library below); one
+  FastEmu lacks means ISO-8859-1. No host property (`os.name`,
+  `user.home` and the like) is set, so a game reads them as `null`.
 - `log`: receives `System.out` and `System.err` line by line
   (`LogLevel::Out`, `LogLevel::Err`, uncaught exceptions included) and
   warnings (`LogLevel::Warn`, diagnostics among them). It is called with
@@ -322,7 +328,7 @@ The builder:
 | `.static_field(name, desc)` | A public static field. |
 | `.constant(name, desc, value)`, `.string_constant(name, text)` | A `public static final` with a constant value. |
 | `.method(name, desc, f)`, `.static_method(...)`, `.method_with(name, desc, access, f)` | A method implemented by `f`. Add `access::SYNCHRONIZED` to hold the monitor of `this` (or the class) around it. |
-| `.abstract_method(name, desc)` | An abstract method for subclasses to implement. |
+| `.abstract_method(name, desc)`, `.abstract_method_with(name, desc, access)` | An abstract method for subclasses to implement: public, or with the given flags, such as `PROTECTED`. |
 | `.static_init(f)` | The static initializer, run once on first active use. |
 | `.payload::<T>()`, `.payload_with(f)` | A payload for every new instance of the class and its subclasses. |
 
@@ -491,27 +497,92 @@ iteration, on the development machine. Phones ran 1 to 20 million.
 
 ## The class library
 
-Implemented in Rust (`src/lang`): `Object`, `Class` (`getName`,
-`forName`, `newInstance`, `isInstance`, `isAssignableFrom`, `isArray`,
-`isInterface`, `getResourceAsStream`), `String` (every CLDC 1.1
-constructor and method, with UTF-8, ISO-8859-1, US-ASCII and
-windows-1251), `StringBuffer` and `StringBuilder`, `Math`, `Integer`,
-`Long`, `Short`, `Byte`, `Boolean`, `Character`, `Float`, `Double`
-(parsing as Java does, and printing with the `FloatingDecimal` algorithm
-of Java before 19, which phones ran: `1e23` prints as
-`9.999999999999999E22`, where Java 19 and later print `1.0E23`),
-`Number`, `System`, `Runtime`,
-`Thread`, `Runnable`, `Throwable` and the exceptions, `ref.Reference` and
-`ref.WeakReference`, and from `java.io` `InputStream`,
-`ByteArrayInputStream`, `OutputStream` and `PrintStream`. A few Java SE
-members that `javac --release 8` output or common code uses are there
-too (`StringBuilder`, `CharSequence`, `Integer.valueOf(int)` for
-autoboxing, `Math.pow`).
+Every class, constant, constructor and method that
+`docs/compat/api/cldc-java-lang.md`, `cldc-java-util.md` and
+`cldc-java-io.md` list exists, with the listed descriptor and flags; a
+unit test (`src/inventory.rs`) checks all 665 members against those files.
+The behaviour follows the JDK wherever games can see it, and the
+differential tests compare it with the JDK.
 
-The rest of `java.util` and `java.io` (`Vector`, `Hashtable`, `Random`,
-`Calendar`, `DataInputStream` and the others) comes next, as native
-classes defined the same way; `InputStream` and `ByteArrayInputStream`
-here are what they extend.
+- **`java.lang`** (`src/lang`): `Object`, `Class` (`getName`, `forName`,
+  `newInstance`, `isInstance`, `isAssignableFrom`, `isArray`,
+  `isInterface`, `getResourceAsStream`), `String`, `StringBuffer` and
+  `StringBuilder`, `Math`, `Integer`, `Long`, `Short`, `Byte`, `Boolean`,
+  `Character`, `Float`, `Double` (parsing as Java does, and printing with
+  the `FloatingDecimal` algorithm of Java before 19, which phones ran:
+  `1e23` prints as `9.999999999999999E22`, where Java 19 and later print
+  `1.0E23`), `Number`, `System`, `Runtime`, `Thread`, `Runnable`,
+  `Throwable` and the exceptions, `ref.Reference` and `ref.WeakReference`.
+  A few Java SE members that `javac --release 8` output or common code
+  uses are there too (`StringBuilder`, `CharSequence`,
+  `Integer.valueOf(int)` for autoboxing, `Math.pow`). `Thread` has no
+  `stop`, `suspend` or `resume`, so a game's `Thread` subclass may declare
+  its own.
+- **`java.io`** (`src/io`): `InputStream`, `OutputStream`,
+  `ByteArrayInputStream`, `ByteArrayOutputStream`, `DataInput`,
+  `DataOutput`, `DataInputStream`, `DataOutputStream` (big-endian
+  primitives, modified UTF-8 with the JDK's `UTFDataFormatException`
+  messages), `Reader`, `Writer`, `InputStreamReader`,
+  `OutputStreamWriter` and `PrintStream`.
+- **`java.util`** (`src/util`): `Vector`, `Stack`, `Enumeration`,
+  `Hashtable`, `Random`, `Date`, `TimeZone`, `Calendar`, and MIDP's
+  `Timer` and `TimerTask`.
+
+What natives and games can rely on:
+
+- **Subclasses work.** Classes keep their protected fields where Java
+  does (`Vector.elementData`, `ByteArrayOutputStream.buf`,
+  `DataInputStream.in`, `Calendar.fields`), and every method reads them
+  afresh. Wrappers (the data streams, readers, writers, `PrintStream`)
+  call the wrapped stream's methods through virtual dispatch, and base
+  classes call their own overridable methods as the JDK does
+  (`InputStream.skip` reads through `read(byte[], int, int)`,
+  `Random.nextInt` through `next(int)`, `PrintStream.print` through
+  `write(byte[], int, int)`), so a game's own stream, generator or
+  calendar sees the same calls as on Java. An object of exactly the
+  library's own class (a plain `ByteArrayInputStream` under a
+  `DataInputStream`, a plain `Random`) takes a Rust fast path instead;
+  `src/io/access.rs` is the byte-level access the wrappers share.
+- **Collections.** The methods Java declares `synchronized` on `Vector`,
+  `Stack` and `Hashtable` hold the object's monitor. `Hashtable` is the
+  JDK's design bucket for bucket (11 buckets, chains with new entries
+  first, rehash to `2n + 1` past a load of 0.75, enumeration from the last
+  bucket down), so keys come out in Java's order and removing while
+  enumerating behaves as there. Keys and elements are hashed and compared
+  through their own `hashCode` and `equals`; strings, boxed numbers and
+  objects that keep `Object`'s methods are hashed and compared in Rust
+  (`src/util/keys.rs`).
+- **Encodings** (`src/charset`): UTF-8, ISO-8859-1, US-ASCII,
+  windows-1250, windows-1251, windows-1252, ISO-8859-2 and KOI8-R, each
+  converting as the JDK's charset does: unassigned bytes decode to
+  U+FFFD, what a charset cannot encode becomes `?`, and malformed UTF-8
+  becomes as many U+FFFD as in Java (a surrogate in three bytes, or a
+  sequence cut off at the end, is one). Every conversion that names no
+  charset uses `microedition.encoding`: `new String(byte[])`,
+  `getBytes()`, `InputStreamReader`, `OutputStreamWriter`, `PrintStream`,
+  `ByteArrayOutputStream.toString()` and `System.out` itself. A name that
+  is not one of these throws `UnsupportedEncodingException` where the API
+  declares it.
+- **Readers and writers** behave as on CLDC phones rather than as Java
+  SE's buffered ones: `InputStreamReader` takes bytes from its stream
+  only as it needs them for the characters asked for (and passes `mark`
+  and `reset` to it), and `OutputStreamWriter` writes through at once.
+- **`PrintStream`** never throws `IOException`: a failure of the stream
+  under it sets the flag `checkError` returns.
+- **Time.** `Date`, `Random()`, `Calendar` and `Timer` read the clock
+  through `lang::system::current_time_millis`, the one place a
+  pause-aware or offset clock would go. `Random` is the javadoc's 48-bit
+  generator, so seeded sequences match every phone. `Calendar` behaves as
+  Java's lenient `GregorianCalendar` (proleptic: no Julian dates before
+  1582), with weeks from Sunday as in the US locale. `TimeZone` has GMT,
+  UTC and custom `GMT+hh:mm` zones, gives GMT for an ID it does not know,
+  and defaults to the host's zone, with the host's daylight saving rules
+  (from the jiff crate), under the `GMT+hh:mm` ID of its standard offset
+  so the host's zone name never reaches the game.
+- **`Timer`** runs its tasks on a Java thread of its own, `Timer-n`, with
+  a Rust body. A task that throws is reported as uncaught and cancelled,
+  and the timer goes on with its other tasks, as J2ME Loader does; on
+  Java SE the whole timer would end.
 
 ## Testing
 
@@ -519,7 +590,13 @@ here are what they extend.
 - `tests/differential.rs` compiles the programs in `tests/java/` with
   `javac --release 8`, runs each on the installed JDK and on FastEmu, and
   compares their output. Without a JDK the tests pass with a note,
-  unless `FASTEMU_REQUIRE_JAVA=1` is set.
+  unless `FASTEMU_REQUIRE_JAVA=1` is set. The class library has one
+  program per area (`Vectors`, `Hashtables`, `RandomSequences`,
+  `CalendarFields`, `Timers`, `DataStreams`, `Readers`, `PrintStreams`),
+  each with game subclasses of the library classes.
+- `src/inventory.rs` checks the class library against the API inventory
+  in `docs/compat/api`, and `tests/encoding.rs` that the encoding setting
+  reaches every implicit conversion.
 - `tests/old_bytecode.rs` runs `jsr`/`ret` and a version 45.3 class built
   with the small assembler in `tests/support`.
 - `tests/native_api.rs` covers this page's API: native classes extended
