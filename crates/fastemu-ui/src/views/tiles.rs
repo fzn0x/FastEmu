@@ -161,6 +161,7 @@ impl FastEmuView {
                 && log_open
             {
                 tile.session.log.mark_seen();
+                self.log_scroll.scroll_to_bottom();
             }
             cx.notify();
         }
@@ -320,14 +321,18 @@ impl FastEmuView {
             && let Some(tile) = self.focused_tile_mut()
         {
             tile.session.log.mark_seen();
+            self.log_scroll.scroll_to_bottom();
         }
         cx.notify();
     }
 
-    /// Reads every game's latest frame, status and log lines.
+    /// Reads every game's latest frame, status and log lines. The open log
+    /// follows its game's new lines while it shows the last line; scrolled
+    /// up to read older ones, it stays where it is.
     pub(super) fn poll_tiles(&mut self) {
         let focused = self.focused;
         let log_open = self.log_open;
+        let following = self.log_scroll.is_scrolled_to_end().unwrap_or(true);
         let mut scroll_to = None;
         for tile in &mut self.tiles {
             let before = tile.session.log.len() + tile.session.log.dropped() as usize;
@@ -340,7 +345,9 @@ impl FastEmuView {
                 }
             }
         }
-        if let Some(last) = scroll_to {
+        if let Some(last) = scroll_to
+            && following
+        {
             self.log_scroll.scroll_to_item(last, ScrollStrategy::Bottom);
         }
     }

@@ -8,7 +8,9 @@ use fastemu_core::{
     Frame, InputEvent, Instance, InstanceId, InstanceStatus, Key, KeyAction, LaunchError,
     LaunchRequest, Launcher, LogLevel, LogLine, PointerAction, SuiteInfo,
 };
-use gpui::{Entity, KeyDownEvent, KeyUpEvent, Keystroke, TestAppContext, VisualTestContext};
+use gpui::{
+    Entity, KeyDownEvent, KeyUpEvent, Keystroke, ScrollStrategy, TestAppContext, VisualTestContext,
+};
 
 use super::*;
 use crate::settings::LayoutMode;
@@ -535,6 +537,66 @@ fn logs_collect_and_flag_problems(cx: &mut TestAppContext) {
     });
     h.redraw();
     assert_eq!(unseen(&mut h), (2, 0), "new lines in an open log are seen");
+}
+
+#[gpui::test]
+fn log_lines_arrive_through_notify_while_nothing_animates(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    h.view.update(h.cx, |v, cx| {
+        v.tiles[0].session.toggle_pause();
+        v.toggle_log(cx);
+    });
+    h.redraw();
+    assert!(!h.read(|v| v.animating), "a paused game asks for no frames");
+    let game = h.launcher.instance(0);
+    lock(&game.log).push(LogLine {
+        level: LogLevel::Out,
+        text: "saved".into(),
+    });
+    let notify = h.launcher.request(0).notify.expect("a notify callback");
+    notify(game.id());
+    h.cx.run_until_parked();
+    assert_eq!(
+        h.read(|v| v.tiles[0].session.log.len()),
+        2,
+        "the callback alone brings the line in"
+    );
+}
+
+#[gpui::test]
+fn the_log_follows_new_lines_until_scrolled_up(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    h.view.update(h.cx, FastEmuView::toggle_log);
+    let game = h.launcher.instance(0);
+    let write = |h: &mut Harness<'_>, count: usize| {
+        lock(&game.log).extend((0..count).map(|i| LogLine {
+            level: LogLevel::Out,
+            text: format!("line {i}"),
+        }));
+        h.redraw();
+        h.redraw();
+    };
+    write(&mut h, 50);
+    let at_end = |h: &mut Harness<'_>| h.read(|v| v.log_scroll.is_scrolled_to_end());
+    assert_eq!(at_end(&mut h), Some(true), "the log follows new lines");
+    h.view.update(h.cx, |v, _| {
+        v.log_scroll.scroll_to_item(0, ScrollStrategy::Top);
+    });
+    h.redraw();
+    write(&mut h, 5);
+    assert_eq!(at_end(&mut h), Some(false), "reading older lines stays put");
+    h.view.update(h.cx, |v, _| v.log_scroll.scroll_to_bottom());
+    h.redraw();
+    write(&mut h, 5);
+    assert_eq!(
+        at_end(&mut h),
+        Some(true),
+        "back at the end, it follows again"
+    );
 }
 
 #[gpui::test]
