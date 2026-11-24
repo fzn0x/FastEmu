@@ -217,7 +217,7 @@ where
     let channels = usize::from(config.channels.max(1));
     let engine = engine.clone();
     let mut mix = vec![0.0f32; INITIAL_FRAMES * 2];
-    let control = Mutex::new(control.clone());
+    let control = control.clone();
     let last_error = Arc::clone(last_error);
     device
         .build_output_stream::<T, _, _>(
@@ -240,10 +240,7 @@ where
                 );
                 record(&last_error, err.to_string());
                 if broken {
-                    let _ = control
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .send(Control::Rebuild);
+                    let _ = control.send(Control::Rebuild);
                 }
             },
             None,
