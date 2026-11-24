@@ -8,14 +8,19 @@ that do not work.
 
 You need:
 
-- **Rust**, stable. `rust-toolchain.toml` pins the channel and the
+- **Rust 1.99.0**. `rust-toolchain.toml` pins the release and the
   components, so [rustup](https://rustup.rs) installs the right ones on the
   first build.
-- **A JDK, version 8 or newer**, for the virtual machine's differential
-  tests. They compile small Java programs, run them on a real JVM and on
-  `fastemu-jvm`, and compare the output. Without a JDK they skip, unless
-  `FASTEMU_REQUIRE_JAVA=1` is set, as CI does, in which case they fail.
-- **Linux system packages** for the GPUI apps. On Debian and Ubuntu:
+- **A JDK, version 9 or newer**; CI uses 17. The tests compile small Java
+  programs with `javac --release 8`, which JDK 8 lacks. The virtual
+  machine's differential tests run them on a real JVM and on
+  `fastemu-jvm` and compare the output, and the MIDP tests pack them into
+  MIDlets and run them through the launcher. Without a JDK they skip,
+  unless `FASTEMU_REQUIRE_JAVA=1` is set, as CI does, in which case they
+  fail.
+- **Linux system packages**. The emulator crates need `build-essential`,
+  `pkg-config` and `libasound2-dev`. The GPUI apps need these too, and
+  more. On Debian and Ubuntu, everything:
 
   ```sh
   sudo apt-get install build-essential pkg-config clang cmake lld \
@@ -32,9 +37,10 @@ You need:
   Windows SDK.
 - **For the Android app**: the Android SDK and NDK, the Rust targets
   `aarch64-linux-android` and `x86_64-linux-android`, and
-  [cargo-ndk](https://github.com/bbqsrc/cargo-ndk) (`cargo install
-  cargo-ndk`). [docs/building-android.md](docs/building-android.md) has the
-  steps.
+  [cargo-ndk](https://github.com/bbqsrc/cargo-ndk) 4.1.2 (`cargo install
+  cargo-ndk --version 4.1.2 --locked`), and a JDK 17.
+  [docs/building-android.md](docs/building-android.md) has the versions and
+  the steps.
 
 ```sh
 git clone https://github.com/fzn0x/FastEmu.git
@@ -51,14 +57,15 @@ cargo run -p fastemu
 | `crates/fastemu-jvm` | The virtual machine and the `java.*` classes written in Rust |
 | `crates/fastemu-gfx` | 2D graphics |
 | `crates/fastemu-audio` | Sound and MIDI |
-| `crates/fastemu-midp` | MIDP, the game API, MMAPI and the Nokia UI API |
+| `crates/fastemu-midp` | MIDP, the game API, MMAPI, connections, messaging, and the Nokia and other makers' APIs |
 | `crates/fastemu-ui` | The GPUI interface that desktop and Android share |
 | `crates/fastemu` | The desktop program and the headless runner |
 | `crates/fastemu-android` | The Android app's Rust side |
+| `crates/gpui_android` | GPUI's Android backend, a trimmed copy of the Zed Android port's |
 | `tools/xtask` | Repository tasks, run as `cargo xtask` |
 | `android/` | The Android app's Gradle project |
-| `site/` | The documentation site |
-| `docs/` | Architecture and building notes |
+| `site/` | The website: the landing page, and the guides in `docs/` |
+| `docs/` | The guides, the architecture notes and the API inventory |
 | `changelog.d/` | Changelog fragments waiting for a release |
 
 `fastemu-core` is the contract between the runtime and the apps. Change it
@@ -81,12 +88,62 @@ cargo xtask changelog --check                       # the changelog fragments
 ```
 
 Before you open a pull request, run the first, second and fifth commands
-for the crates you touched. CI runs them on Linux, Windows and macOS, and
-checks that no em-dash or en-dash is in the tree. Use a comma, a colon, a
-period or a plain hyphen.
+for the crates you touched. CI runs Clippy and the emulator crates' tests
+on Linux, Windows and macOS, builds and lints the desktop app on all
+three, checks the format and the changelog fragments, and checks that no
+em-dash or en-dash is in the tree. Use a comma, a colon, a period or a
+plain hyphen.
 
 Tests need no network and no game files. A test that needs a game uses a
 small one made for the test, which the repository can hold.
+
+## Test tools
+
+Besides the unit tests beside the code, these check FastEmu against what
+games expect:
+
+- **The differential tests** (`cargo test -p fastemu-jvm --test
+  differential`) run the Java programs in `crates/fastemu-jvm/tests/java`
+  on a JDK and on `fastemu-jvm` and compare what they print.
+- **The conformance MIDlets** (`cargo test -p fastemu-midp --test
+  conformance_midlets`) are small MIDlets in
+  `crates/fastemu-midp/tests/conformance/`, one folder per area: events,
+  media, records, resources and suites. They compile against stubs of
+  exactly the classes FastEmu registers, so a test that calls something
+  FastEmu lacks fails to compile, and run through the launcher like real
+  games, with their logs and frames checked. The other MIDP tests
+  (`screens`, `game_api`, `media_players`, `nokia_ui`, the `io_*` and
+  `vendor_*` tests and more) do the same per API, against stubs in their
+  own folders.
+- **`cargo xtask stubs`** writes a Java stub of every class FastEmu
+  registers, with the throws clauses of `docs/compat/api`, and compiles
+  them into `fastemu-stubs.jar` in the target folder (`--out DIR` puts it
+  elsewhere). Compile a test MIDlet against it to see whether FastEmu has
+  everything the MIDlet calls. It needs a JDK.
+- **`cargo xtask coverage`** compares the classes FastEmu registers with
+  the API inventory in [docs/compat/api](docs/compat/api/README.md), tier
+  by tier, and writes [docs/compat/coverage.md](docs/compat/coverage.md).
+  Run it after changing the runtime's classes or the inventory, and commit
+  the result.
+- **`cargo xtask compat DIR`** runs every JAR under `DIR` without a window,
+  each in a process of its own, for 20 seconds (`--seconds`), pressing 5
+  and then the arrows and fire (`--keys`), and writes `compat.md` and
+  `compat.json` with each game's status, frames, errors, the classes it
+  asked for that FastEmu lacks, a screenshot and its log, into
+  `compat` in the target folder (`--out DIR`). `--profile ID` and
+  `--jobs N` pick the phone and how many games run at once.
+  [docs/compatibility.md](docs/compatibility.md) lists the free games it
+  was run with.
+- **`fastemu run`** runs one game without a window, presses keys and
+  touches the screen from a script, and saves a screenshot or every frame.
+  [docs/getting-started.md](docs/getting-started.md#run-without-a-window)
+  has its options.
+
+Two more tasks serve the releases: `cargo xtask icons` renders
+`assets/icon.svg` into `packaging/icons` and the Android launcher icons,
+and `cargo xtask release-notes` writes a release's notes from
+CHANGELOG.md and [.github/release-notes.md](.github/release-notes.md), as
+the release workflow does.
 
 ## Commits
 
@@ -99,12 +156,12 @@ fix(gfx): clip drawRegion at the frame's edge
 docs: explain the launcher's lifetime
 ```
 
-Types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`,
-`chore`. A scope names the crate or area: `core`, `jvm`, `gfx`, `audio`,
-`midp`, `ui`, `desktop`, `android`, `xtask`, `site`. The body, wrapped at 72
-columns, says why the change is needed. End it with `Part of #N`, or
-`Closes #N` when it finishes the issue. Each commit builds and passes its
-tests.
+Types: `feat`, `fix`, `perf`, `refactor`, `style`, `docs`, `test`,
+`build`, `ci`, `chore`. A scope names the crate or area, such as `core`,
+`jvm`, `gfx`, `audio`, `midp`, `ui`, `app`, `android`, `xtask`, `compat`
+or `site`. The body, wrapped at 72 columns, says why the change is
+needed. End it with `Part of #N`, or `Closes #N` when it finishes the
+issue. Each commit builds and passes its tests.
 
 ## Pull requests
 
@@ -147,8 +204,12 @@ keys, soft keys and the hooks for screens and GameCanvas),
    say so in a comment.
 2. Put the class in the module of its package and keep the file small.
 3. Test it. For `java.*` classes the differential tests run the same Java
-   program on a JDK and on FastEmu and compare the output.
-4. Add a fragment to `changelog.d/added/`, if people will notice.
+   program on a JDK and on FastEmu and compare the output. For MIDP and
+   vendor classes, a small MIDlet runs through the launcher (see
+   [Test tools](#test-tools)).
+4. Run `cargo xtask coverage` and commit the new
+   [docs/compat/coverage.md](docs/compat/coverage.md).
+5. Add a fragment to `changelog.d/added/`, if people will notice.
 
 ## Reporting a game that does not work
 
@@ -166,15 +227,17 @@ Security problems go through
 
 ## Releases
 
-1. Make sure every issue of the version's milestone is closed and `main`'s
-   CI is green.
+1. Make sure every issue of the version's milestone is closed, `main`'s
+   CI is green, and a dry run of the release workflow on `main` (run it by
+   hand; `dry_run` is the default) builds every file and the notes.
 2. Run `cargo xtask changelog --release X.Y.Z`. It folds the fragments into
    CHANGELOG.md under `## [X.Y.Z] - date`, adds an empty `## [Unreleased]`
    and deletes the fragments.
 3. Set `version` in the root `Cargo.toml` to `X.Y.Z` and run `cargo update
    --workspace`, which writes the new version into `Cargo.lock`. CI builds
    with `--locked`, so the lock must change with it. Commit the three files
-   as `chore: release vX.Y.Z`. This is the last commit before the tag.
+   and the deleted fragments as `chore: release vX.Y.Z`. This is the last
+   commit before the tag.
 4. Tag the merged commit and push the tag. The release workflow builds the
    downloads and fills in [.github/release-notes.md](.github/release-notes.md).
 
