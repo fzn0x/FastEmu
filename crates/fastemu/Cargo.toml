@@ -25,3 +25,8 @@ gpui_platform = { git = "https://github.com/Dylanmurzello/zed-android-port", rev
 
 [lints]
 workspace = true
+
+# build.rs embeds the icon and the version information in fastemu.exe. The
+# version GPUI already builds with for its manifest.
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3"
