@@ -1,10 +1,16 @@
 //! [`MidpInstance`]: one running MIDlet, as the app sees it.
 //!
-//! Every method of [`Instance`] returns at once. Input is posted to the
-//! VM for the event thread. Pause, resume and stop go to the instance's
-//! control thread, a host thread that owns the `Vm` and runs each change
-//! in order:
+//! Every method of [`Instance`] returns at once and never waits for the
+//! VM lock, which a game thread may hold for a long time: the apps call
+//! them on their UI thread for every game. Input, pause, resume and stop
+//! go to the instance's control thread, a host thread that owns the `Vm`
+//! and runs each in the order the app sent them:
 //!
+//! - input: posted to the VM for the event thread once the control thread
+//!   is done with what came before it, such as a pause still under way
+//!   (which waits up to a second each for `hideNotify` and `pauseApp`).
+//!   Input sent after a pause, until the resume, or after a stop is
+//!   dropped;
 //! - pause: `hideNotify` on the event thread, `pauseApp` on a lifecycle
 //!   thread once the lifecycle calls before it have returned (each waited
 //!   for up to a second), then the VM and the sound group pause;
@@ -109,6 +115,9 @@ struct Controller {
     host: HostLink,
     group: Option<Group>,
     rx: mpsc::Receiver<Control>,
+    /// A message taken from the channel while gathering input, handled
+    /// next.
+    held: Option<Control>,
     /// Whether the VM is paused.
     frozen: bool,
     /// The turn the next lifecycle call takes; the launch took 0.
@@ -117,8 +126,9 @@ struct Controller {
 
 impl Controller {
     fn run(mut self) {
-        while let Ok(message) = self.rx.recv() {
+        while let Some(message) = self.held.take().or_else(|| self.rx.recv().ok()) {
             match message {
+                Control::Input(event) => self.input(event),
                 Control::Pause => self.pause(),
                 Control::Resume | Control::ResumeRequest => self.resume(),
                 Control::Stop => {
@@ -132,6 +142,31 @@ impl Controller {
                 }
             }
         }
+    }
+
+    /// Posts `first`, and the input queued right behind it, to the event
+    /// thread as one task, so a backlog takes the VM lock once. Input that
+    /// comes while the app has the instance paused, or once it is
+    /// stopping, is dropped.
+    fn input(&mut self, first: InputEvent) {
+        let mut events = vec![first];
+        while let Ok(message) = self.rx.try_recv() {
+            if let Control::Input(event) = message {
+                events.push(event);
+            } else {
+                self.held = Some(message);
+                break;
+            }
+        }
+        if self.frozen || self.vm.is_stopping() {
+            return;
+        }
+        self.vm.post(move |ctx| {
+            for event in events {
+                lcdui::input::queue(ctx, event);
+            }
+            Ok(())
+        });
     }
 
     fn pause(&mut self) {
@@ -211,7 +246,8 @@ pub struct MidpInstance {
     host: HostLink,
     vm: Vm,
     group: Option<Group>,
-    control: parking_lot::Mutex<mpsc::Sender<Control>>,
+    /// The control thread's channel. Sending on it never blocks.
+    control: mpsc::Sender<Control>,
 }
 
 impl std::fmt::Debug for MidpInstance {
@@ -241,6 +277,7 @@ impl MidpInstance {
             host: host.clone(),
             group: group.clone(),
             rx,
+            held: None,
             frozen: false,
             next_turn: 1,
         };
@@ -262,12 +299,12 @@ impl MidpInstance {
             host,
             vm,
             group,
-            control: parking_lot::Mutex::new(tx),
+            control: tx,
         }))
     }
 
     fn send_control(&self, message: Control) {
-        let _ = self.control.lock().send(message);
+        let _ = self.control.send(message);
     }
 
     /// Exceptions the game let escape and internal errors since launch.
@@ -304,14 +341,14 @@ impl Instance for MidpInstance {
         self.host.frame()
     }
 
+    /// Hands the event to the control thread, which posts it to the
+    /// event thread in its turn among pause, resume and stop. Returns at
+    /// once, however long a game thread holds the VM lock.
     fn send(&self, event: InputEvent) {
         if self.vm.is_stopping() {
             return;
         }
-        self.vm.post(move |ctx| {
-            lcdui::input::queue(ctx, event);
-            Ok(())
-        });
+        self.send_control(Control::Input(event));
     }
 
     fn pause(&self) {

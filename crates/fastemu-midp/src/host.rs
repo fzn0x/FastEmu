@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 
-use fastemu_core::{Frame, InstanceId, InstanceStatus, LogLevel, LogLine, Notify};
+use fastemu_core::{Frame, InputEvent, InstanceId, InstanceStatus, LogLevel, LogLine, Notify};
 use parking_lot::Mutex;
 
 /// The most log lines kept between two [`HostLink::drain_log`] calls; the
@@ -25,6 +25,8 @@ const INTERNAL_ERROR: &str = "internal error in the virtual machine";
 /// Messages to the instance's control thread, which owns the `Vm`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Control {
+    /// Input from the app, for the event thread.
+    Input(InputEvent),
     /// The app paused the instance.
     Pause,
     /// The app resumed it.
