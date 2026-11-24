@@ -168,6 +168,9 @@ fn ensure_layout(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<()> {
             item::height_at(ctx, items[k], &fonts, w)
         })?;
         let f = form_mut(ctx, obj)?;
+        // A CustomItem's size methods may have added or removed items:
+        // then the next layout places them.
+        f.stale = f.items != items;
         f.laid = items
             .into_iter()
             .zip(boxes)
@@ -175,7 +178,6 @@ fn ensure_layout(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<()> {
             .collect();
         f.height = height + 2 * MARGIN;
         f.laid_for = Some(size);
-        f.stale = false;
     }
     let f = form_mut(ctx, obj)?;
     if std::mem::take(&mut f.reveal)

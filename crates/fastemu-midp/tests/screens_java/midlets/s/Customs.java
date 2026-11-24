@@ -9,12 +9,13 @@ import javax.microedition.midlet.MIDlet;
 
 /**
  * A form with a game-drawn item above a text field, given the focus
- * from startApp, off the event thread.
+ * from startApp, off the event thread. The item adds one more item to
+ * the form while the form measures it.
  */
 public class Customs extends MIDlet {
     protected void startApp() {
         Form form = new Form("Custom");
-        Box box = new Box();
+        Box box = new Box(form);
         form.append(box);
         form.append(new TextField("Below", "", 5, TextField.ANY));
         Display.getDisplay(this).setCurrent(form);
@@ -27,8 +28,12 @@ public class Customs extends MIDlet {
 }
 
 class Box extends CustomItem {
-    Box() {
+    final Form form;
+    boolean grown;
+
+    Box(Form form) {
         super(null);
+        this.form = form;
     }
 
     protected int getMinContentWidth() {
@@ -44,6 +49,10 @@ class Box extends CustomItem {
     }
 
     protected int getPrefContentHeight(int width) {
+        if (!grown) {
+            grown = true;
+            form.append(new Late());
+        }
         return 30;
     }
 
@@ -73,5 +82,37 @@ class Box extends CustomItem {
 
     protected void showNotify() {
         System.out.println("show");
+    }
+}
+
+/** The item Box adds; it says when it is first painted. */
+class Late extends CustomItem {
+    boolean painted;
+
+    Late() {
+        super(null);
+    }
+
+    protected int getMinContentWidth() {
+        return 10;
+    }
+
+    protected int getMinContentHeight() {
+        return 10;
+    }
+
+    protected int getPrefContentWidth(int height) {
+        return 10;
+    }
+
+    protected int getPrefContentHeight(int width) {
+        return 10;
+    }
+
+    protected void paint(Graphics g, int w, int h) {
+        if (!painted) {
+            painted = true;
+            System.out.println("late paint");
+        }
     }
 }

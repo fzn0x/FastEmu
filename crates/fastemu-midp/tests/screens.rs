@@ -309,6 +309,9 @@ fn screens_custom_item_gets_its_callbacks() {
         60 * 30,
         "exactly the item's pixels"
     );
+    // The item the box added while being measured is laid out too,
+    // before any key lays the form out again.
+    run.wait_log("late paint");
     run.tap(Key::Num5);
     run.wait_log("key 53");
     run.tap(Key::Down);
