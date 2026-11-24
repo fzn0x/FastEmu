@@ -149,6 +149,19 @@ fn new_line(ctx: &mut Ctx<'_>, ps: ObjRef) -> JResult<()> {
     print_chars(ctx, ps, &[u16::from(b'\n')])
 }
 
+/// The body of `println(x)` for `x` of type `desc`: `print(x)`, whose
+/// descriptor is `print_desc`, then the line break.
+fn println(ctx: &mut Ctx<'_>, ps: ObjRef, desc: &str, print_desc: &str, x: Value) -> JResult<()> {
+    if ctx
+        .call_if_overridden(ps, PS, "print", print_desc, &[x])?
+        .is_none()
+    {
+        let chars = text(ctx, desc, x)?;
+        print_chars(ctx, ps, &chars)?;
+    }
+    new_line(ctx, ps)
+}
+
 /// The text `print(Object)` writes.
 fn object_text(ctx: &mut Ctx<'_>, v: Value) -> JResult<Vec<u16>> {
     let Some(obj) = v.obj() else {
@@ -317,18 +330,15 @@ fn print_stream() -> NativeClass {
             Ok(Value::Void)
         });
         // Java's println(x) is print(x), through a game's override of it,
-        // then the line break.
+        // then the line break, both holding the stream's monitor so that
+        // another thread's output never lands between them.
         let (d, print) = (desc.to_owned(), format!("({desc})V"));
         class = class.method("println", &format!("({desc})V"), move |ctx, a| {
             let ps = this(a);
-            if ctx
-                .call_if_overridden(ps, PS, "print", &print, &[a[1]])?
-                .is_none()
-            {
-                let chars = text(ctx, &d, a[1])?;
-                print_chars(ctx, ps, &chars)?;
-            }
-            new_line(ctx, ps)?;
+            ctx.monitor_enter(ps)?;
+            let printed = println(ctx, ps, &d, &print, a[1]);
+            ctx.monitor_exit(ps)?;
+            printed?;
             Ok(Value::Void)
         });
     }

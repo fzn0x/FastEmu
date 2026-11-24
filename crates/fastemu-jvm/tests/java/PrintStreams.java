@@ -146,6 +146,64 @@ public class PrintStreams {
         System.out.println("empty print on a closed stream: error " + closed.checkError());
     }
 
+    // A stream that lets other threads run in the middle of each write.
+    static class Slow extends OutputStream {
+        final StringBuffer seen = new StringBuffer();
+
+        public void write(int b) {
+            seen.append((char) b);
+        }
+
+        public void write(byte[] buf, int off, int len) {
+            for (int i = 0; i < len; i++) {
+                seen.append((char) buf[off + i]);
+            }
+            try {
+                Thread.sleep(1);
+            } catch (InterruptedException e) {
+                // Nothing interrupts these threads.
+            }
+        }
+    }
+
+    // println holds the print stream's monitor across its text and its
+    // line break, so lines from two threads never mix.
+    static void threads() throws InterruptedException {
+        final Slow slow = new Slow();
+        final PrintStream ps = new PrintStream(slow);
+        Thread[] writers = new Thread[2];
+        for (int t = 0; t < writers.length; t++) {
+            final String line = t == 0 ? "aaaa" : "bbbb";
+            writers[t] = new Thread() {
+                public void run() {
+                    for (int i = 0; i < 20; i++) {
+                        ps.println(line);
+                    }
+                }
+            };
+            writers[t].start();
+        }
+        for (int t = 0; t < writers.length; t++) {
+            writers[t].join();
+        }
+        String s = slow.seen.toString();
+        int lines = 0;
+        boolean intact = true;
+        int start = 0;
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) == '\n') {
+                String l = s.substring(start, i);
+                if (l.endsWith("\r")) {
+                    l = l.substring(0, l.length() - 1);
+                }
+                intact &= l.equals("aaaa") || l.equals("bbbb");
+                lines++;
+                start = i + 1;
+            }
+        }
+        System.out.println("threads: " + lines + " lines, intact " + intact + ", rest " + (s.length() - start));
+    }
+
     static String text(ByteArrayOutputStream bytes) {
         String s = bytes.toString();
         StringBuffer sb = new StringBuffer();
@@ -157,7 +215,7 @@ public class PrintStreams {
         return sb.toString();
     }
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, InterruptedException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         PrintStream ps = new PrintStream(bytes);
         ps.print(true);
@@ -234,5 +292,6 @@ public class PrintStreams {
             System.out.println("null stream NPE");
         }
         overrides();
+        threads();
     }
 }

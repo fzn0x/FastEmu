@@ -660,7 +660,9 @@ What natives and games can rely on:
   reads and writes its byte order mark once, and `ISO-2022-JP` keeps its
   shift state until the writer closes.
 - **`PrintStream`** never throws `IOException`: a failure of the stream
-  under it sets the flag `checkError` returns.
+  under it sets the flag `checkError` returns. `println(x)` holds the
+  stream's monitor across its text and its line break, as Java's does,
+  so lines two threads print never mix.
 - **Time.** `System.currentTimeMillis`, `Date`, `Random()` and `Calendar`
   read the wall clock through `lang::system::current_time_millis`;
   `Timer` schedules on the run time (see [Run time](#run-time)).
