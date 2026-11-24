@@ -273,12 +273,16 @@ impl Running {
     /// Starts MIDlet `midlet` of `suite` on `profile`.
     pub fn launch_on(suite: &Path, midlet: usize, profile: DeviceProfile) -> Self {
         let data = suite.with_extension("data");
-        let request = LaunchRequest {
+        Self::start(LaunchRequest {
             midlet,
             profile,
             settings: InstanceSettings::default(),
             ..LaunchRequest::new(suite, data)
-        };
+        })
+    }
+
+    /// Starts the instance `request` asks for, without sound.
+    pub fn start(request: LaunchRequest) -> Self {
         let instance = MidpLauncher::new(None)
             .launch_midp(request)
             .expect("launching the test MIDlet");

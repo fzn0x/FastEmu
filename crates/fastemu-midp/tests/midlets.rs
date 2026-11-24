@@ -6,11 +6,13 @@
 mod support;
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use fastemu_core::{
-    InputEvent, Instance, InstanceStatus, Key, KeyAction, Launcher, LogLevel, PointerAction,
-    builtin_profiles,
+    InputEvent, Instance, InstanceStatus, Key, KeyAction, LaunchRequest, Launcher, LogLevel,
+    Notify, PointerAction, builtin_profiles,
 };
 use fastemu_midp::MidpLauncher;
 use support::{Running, classes, midlet, rgb, scratch, write_suite};
@@ -100,6 +102,156 @@ fn keys_and_pointer_events_reach_the_canvas() {
     assert_eq!(drags, 1, "{}", run.dump());
     assert_eq!(run.instance.error_count(), 1);
     assert_eq!(run.instance.status(), InstanceStatus::Running);
+}
+
+/// How long the test below keeps the event thread holding the VM lock.
+const HOLD: Duration = Duration::from_millis(500);
+
+/// The longest a send may take while the VM lock is held: far under
+/// [`HOLD`], with room for a loaded CI machine. It takes microseconds.
+const SEND_LIMIT: Duration = Duration::from_millis(100);
+
+/// Holds the event thread for [`HOLD`] the first time it calls the
+/// instance's notify function after [`Holder::arm`]. The VM's threads call
+/// it with the VM lock held, so the lock stays held all that time, as when
+/// a game thread runs Java for long or its OS thread is not scheduled.
+#[derive(Default)]
+struct Holder {
+    armed: AtomicBool,
+    holding: AtomicBool,
+}
+
+impl Holder {
+    fn notify(self: &Arc<Self>) -> Notify {
+        let holder = Arc::clone(self);
+        Arc::new(move |_| {
+            let event_thread = std::thread::current().name() == Some("java event");
+            if event_thread && holder.armed.swap(false, Ordering::AcqRel) {
+                holder.holding.store(true, Ordering::Release);
+                std::thread::sleep(HOLD);
+            }
+        })
+    }
+
+    fn arm(&self) {
+        self.armed.store(true, Ordering::Release);
+    }
+}
+
+#[test]
+fn input_never_waits_for_a_game_holding_its_vm_lock() {
+    let Some(jar) = suite("held-lock") else {
+        return;
+    };
+    let holder = Arc::new(Holder::default());
+    let mut run = Running::start(LaunchRequest {
+        midlet: midlet::KEYS,
+        notify: Some(holder.notify()),
+        ..LaunchRequest::new(&jar, jar.with_extension("data"))
+    });
+    run.wait_log("shown pointer");
+    // The first press throws; the event thread logs it and carries on.
+    run.tap(Key::Num5);
+    run.wait_log("released 53");
+    // The press's log line is the next news for the app: the event thread
+    // logs it with the VM lock held, and the notify function holds it
+    // there. Reading the frame lets the next news notify the app again; a
+    // held key keeps making news with its repeats.
+    holder.arm();
+    let _ = run.instance.frame();
+    run.key(Key::Num1, KeyAction::Press);
+    let start = Instant::now();
+    while !holder.holding.load(Ordering::Acquire) {
+        assert!(
+            start.elapsed() < support::TIMEOUT,
+            "the event thread never held the VM lock:\n{}",
+            run.dump()
+        );
+        let _ = run.instance.frame();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    // The app's input returns at once while the lock is held.
+    let started = Instant::now();
+    run.key(Key::Num1, KeyAction::Release);
+    let mut slowest = started.elapsed();
+    let keys = [
+        Key::Num2,
+        Key::Num3,
+        Key::Num4,
+        Key::Num5,
+        Key::Num6,
+        Key::Num7,
+        Key::Num8,
+        Key::Num9,
+    ];
+    for key in keys {
+        for action in [KeyAction::Press, KeyAction::Release] {
+            let sent = Instant::now();
+            run.key(key, action);
+            slowest = slowest.max(sent.elapsed());
+        }
+    }
+    let asked = Instant::now();
+    let _ = run.instance.heap_stats();
+    let waited = asked.elapsed();
+    assert!(
+        slowest < SEND_LIMIT,
+        "a send took {slowest:?} while a game thread held the VM lock"
+    );
+    assert!(
+        waited >= HOLD / 5,
+        "the VM lock was free {waited:?} after the sends, so they proved nothing"
+    );
+
+    // Every event still reaches the game afterwards, in order.
+    run.wait_log("released 57");
+    let lines = run.lines();
+    let keys: Vec<&str> = lines
+        .iter()
+        .filter(|l| l.starts_with("pressed ") || l.starts_with("released "))
+        .map(|l| l.split(" action").next().unwrap_or(l))
+        .collect();
+    let from = keys
+        .iter()
+        .position(|&l| l == "pressed 49")
+        .expect("the press that held the lock");
+    let want: Vec<String> = std::iter::once("released 49".to_owned())
+        .chain((50..=57).flat_map(|code| [format!("pressed {code}"), format!("released {code}")]))
+        .collect();
+    assert_eq!(keys[from + 1..], want, "{}", lines.join("\n"));
+    assert_eq!(run.instance.error_count(), 1, "{}", run.dump());
+    assert_eq!(run.instance.status(), InstanceStatus::Running);
+}
+
+#[test]
+fn input_keeps_its_place_among_pause_resume_and_stop() {
+    let Some(jar) = suite("input-order") else {
+        return;
+    };
+    let mut run = Running::launch(&jar, midlet::LIFECYCLE);
+    run.wait_log("showNotify");
+    // A key sent after pause is dropped, even before the pause is done.
+    run.instance.pause();
+    run.tap(Key::Num1);
+    run.wait_status(|s| *s == InstanceStatus::Paused);
+    // A key sent after resume comes after showNotify, even before the
+    // resume is done.
+    run.instance.resume();
+    run.tap(Key::Num2);
+    run.wait_log("keyPressed 50");
+    let lines = run.lines();
+    let shown = lines.iter().rposition(|l| l == "showNotify");
+    let pressed = lines.iter().position(|l| l == "keyPressed 50");
+    assert!(shown.is_some() && shown < pressed, "{}", lines.join("\n"));
+    // A key sent after stop is dropped.
+    run.instance.stop();
+    run.tap(Key::Num3);
+    run.wait_status(|s| *s == InstanceStatus::Exited);
+    assert!(run.has("destroyApp true"), "{}", run.dump());
+    assert!(!run.has("keyPressed 49"), "{}", run.dump());
+    assert!(!run.has("keyPressed 51"), "{}", run.dump());
+    assert_eq!(run.instance.error_count(), 0, "{}", run.dump());
 }
 
 #[test]
