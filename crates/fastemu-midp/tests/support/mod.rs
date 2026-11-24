@@ -35,7 +35,7 @@ pub fn scratch(name: &str) -> PathBuf {
 }
 
 /// The JDK tool `name`, from `JAVA_HOME` first, then the `PATH`.
-fn tool(name: &str) -> Option<PathBuf> {
+pub fn tool(name: &str) -> Option<PathBuf> {
     let exe = if cfg!(windows) {
         format!("{name}.exe")
     } else {
