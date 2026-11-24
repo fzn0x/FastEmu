@@ -20,6 +20,12 @@ const MU_LAW: u16 = 0x0007;
 const IMA_ADPCM: u16 = 0x0011;
 const EXTENSIBLE: u16 = 0xFFFE;
 
+/// The highest sample rate accepted, the same as the engine's highest
+/// output rate. The mixer reads the source at its rate over the output
+/// rate, so a garbage rate field would have it read billions of frames
+/// for every frame it plays, with the mixer locked.
+const MAX_RATE: u32 = 384_000;
+
 /// The parts of a `fmt ` chunk the decoders use.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FormatChunk {
@@ -133,8 +139,8 @@ fn parse_format(body: &[u8]) -> Result<FormatChunk, AudioError> {
     if format.channels == 0 {
         return Err(malformed("zero channels"));
     }
-    if format.rate == 0 {
-        return Err(malformed("zero sample rate"));
+    if format.rate == 0 || format.rate > MAX_RATE {
+        return Err(malformed(format!("sample rate {} Hz", format.rate)));
     }
     Ok(format)
 }
@@ -466,5 +472,18 @@ pub(crate) mod tests {
         wav.extend_from_slice(&[1, 0, 1, 0, 0x40, 0x1F, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF]);
         wav.extend_from_slice(b"data\x04\0\0\0\0\0\0\0");
         assert!(matches!(decode(&wav), Err(AudioError::Malformed { .. })));
+    }
+
+    #[test]
+    fn refuses_sample_rates_no_device_plays() {
+        // The mixer steps through the source at its rate over the output
+        // rate; a garbage rate would make it read billions of frames for
+        // each one it plays.
+        let mut wav = wav_bytes(PCM, 1, 8000, 16, 2, &[], &[0, 0]);
+        // The rate field follows the tag and the channel count.
+        wav[24..28].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(matches!(decode(&wav), Err(AudioError::Malformed { .. })));
+        let wav = wav_bytes(PCM, 1, MAX_RATE, 16, 2, &[], &[0, 0]);
+        assert_eq!(decode(&wav).unwrap().rate, MAX_RATE);
     }
 }
