@@ -1,10 +1,16 @@
 //! Ways to keep the engine running: the system audio device (feature
 //! `output`), or a clock that renders in real time and keeps nothing.
 
+#[cfg(feature = "output")]
+mod device;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+#[cfg(feature = "output")]
+pub use device::{AudioOutput, OutputError, OutputInfo};
 
 use crate::engine::Engine;
 

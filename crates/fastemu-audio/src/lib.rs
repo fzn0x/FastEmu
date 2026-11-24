@@ -63,5 +63,7 @@ pub use group::Group;
 pub use midi::soundfont::SoundFont;
 pub use mixer::GroupId;
 pub use output::NullOutput;
+#[cfg(feature = "output")]
+pub use output::{AudioOutput, OutputError, OutputInfo};
 pub use player::Player;
 pub use voice::PlayerState;
