@@ -21,6 +21,7 @@ public class HttpTest {
         head();
         notFound();
         untilClose();
+        cutShort();
         notHttp();
         states();
         urlParts();
@@ -118,6 +119,22 @@ public class HttpTest {
         HttpConnection c = (HttpConnection) Connector.open(base + "/close");
         System.out.println("close " + c.getResponseCode() + " " + c.getLength()
                 + " " + readAll(c.openInputStream()));
+        c.close();
+    }
+
+    static void cutShort() throws IOException {
+        HttpConnection c = (HttpConnection) Connector.open(base + "/short");
+        InputStream in = c.openInputStream();
+        byte[] buf = new byte[100];
+        int n = in.read(buf);
+        String then;
+        try {
+            then = "read " + in.read(buf);
+        } catch (IOException e) {
+            then = e.getMessage();
+        }
+        System.out.println("short " + n + " " + new String(buf, 0, n) + " then " + then);
+        in.close();
         c.close();
     }
 

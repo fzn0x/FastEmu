@@ -48,6 +48,7 @@ fn respond(request: &Request, stream: &mut TcpStream) {
         }
         "/missing" => b"HTTP/1.1 404 Not Found\r\nContent-Length: 4\r\n\r\nnope".to_vec(),
         "/close" => b"HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\nuntil the end".to_vec(),
+        "/short" => b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nhello".to_vec(),
         "/raw" => b"just bytes".to_vec(),
         "/hang" => {
             std::thread::sleep(Duration::from_secs(20));
@@ -95,6 +96,7 @@ post 200 POST none score=100&name=ab
 head 200 5 -1
 missing 404 Not Found nope
 close 200 -1 until the end
+short 5 hello then the response ended 5 bytes early
 raw -1 null just bytes
 put unsupported request method PUT
 method the request was already sent

@@ -412,16 +412,20 @@ impl Input for BodyInput {
         let mut filled = 0;
         while filled < buf.len() {
             let dst = &mut buf[filled..];
-            let n = net::block_on(ctx, net::deadline(self.timeout), || {
+            let read = net::block_on(ctx, net::deadline(self.timeout), || {
                 if self.closed.load(Ordering::Acquire) {
                     return Err(std::io::Error::other("stream closed"));
                 }
                 lock(exchange).read_body(dst)
-            })?;
-            if n == 0 {
-                break;
+            });
+            match read {
+                Ok(0) => break,
+                Ok(n) => filled += n,
+                // Bytes already taken are returned; the error comes again
+                // on the next read.
+                Err(Throw::Exception(_)) if filled > 0 => break,
+                Err(thrown) => return Err(thrown),
             }
-            filled += n;
         }
         Ok(filled)
     }
