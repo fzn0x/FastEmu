@@ -11,6 +11,7 @@ use std::sync::Arc;
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Payload, Throw, Tracer, Value};
 
 use super::api::LISTENER_DESC;
+use super::enumeration;
 use super::format::StoreData;
 use super::name::StoreName;
 use super::state::{self, Owner, StoreKey, lock_files, now_millis, rms};
@@ -25,6 +26,10 @@ const SECURITY_EXCEPTION: &str = "java/lang/SecurityException";
 const ILLEGAL_ARGUMENT: &str = "java/lang/IllegalArgumentException";
 const OUT_OF_BOUNDS: &str = "java/lang/ArrayIndexOutOfBoundsException";
 const OPEN_DESC: &str = "Ljavax/microedition/rms/RecordStore;";
+const ENUMERATE_DESC: &str = concat!(
+    "(Ljavax/microedition/rms/RecordFilter;Ljavax/microedition/rms/RecordComparator;Z)",
+    "Ljavax/microedition/rms/RecordEnumeration;"
+);
 
 /// What a `RecordStore` object knows beside its (absent) Java fields.
 #[derive(Default)]
@@ -184,6 +189,12 @@ pub(crate) fn class() -> NativeClass {
             byte_array(ctx, &bytes)
         })
         .method("getRecord", "(I[BI)I", get_record_into)
+        .method("enumerateRecords", ENUMERATE_DESC, |ctx, a| {
+            let this = ctx.non_null(a[0])?;
+            open_key(ctx, this)?;
+            let e = enumeration::create(ctx, this, a[1].obj(), a[2].obj(), a[3].boolean())?;
+            Ok(e.into())
+        })
 }
 
 /// A store name argument, or `IllegalArgumentException`.
@@ -600,6 +611,25 @@ pub(crate) fn record(ctx: &mut Ctx<'_>, store: ObjRef, id: i32) -> JResult<Arc<[
         Lookup::Missing => ctx.throw(INVALID_RECORD_ID_EXCEPTION, &format!("no record {id}")),
         Lookup::Closed => Err(not_open(ctx)),
     }
+}
+
+/// The ids of `store`'s records in ascending order; none when it is
+/// closed.
+pub(crate) fn record_ids(ctx: &mut Ctx<'_>, store: ObjRef) -> JResult<Vec<i32>> {
+    let handle = ctx.payload::<StoreHandle>(store)?;
+    let key = match &handle.key {
+        Some(key) if handle.open => Arc::clone(key),
+        _ => return Ok(Vec::new()),
+    };
+    Ok(rms(ctx)
+        .data(&key)
+        .map(|data| data.records.keys().copied().collect())
+        .unwrap_or_default())
+}
+
+/// Whether `store` is open.
+pub(crate) fn is_open(ctx: &Ctx<'_>, store: ObjRef) -> JResult<bool> {
+    Ok(ctx.payload::<StoreHandle>(store)?.open)
 }
 
 /// A new `byte[]` with a record's data, or `null` for a record with no

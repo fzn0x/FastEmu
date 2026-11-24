@@ -304,6 +304,57 @@ fn ids_records_and_exceptions() {
 }
 
 #[test]
+fn enumerations_filter_sort_and_follow_changes() {
+    let Some(classes) = programs() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let output = run(
+        classes,
+        "RmsEnum",
+        &[],
+        InstanceEnv::for_tests(dir.path()),
+        |_| {},
+    );
+    check(
+        &output,
+        "
+        all 6: 1,2,3,4,5,6
+        sorted 6,2,4,5,3,1
+        filtered 5,3,1
+        filter only 1,3,5
+        descending 1,3,5
+        previous first 1
+        next 5 has previous false
+        next 3 previous 5
+        data 40
+        last 1 has next false
+        end InvalidRecordIDException
+        still end InvalidRecordIDException
+        back 4
+        after reset 5
+        stale count 6
+        stale record InvalidRecordIDException
+        stale next 2
+        rebuilt 5: 2,3,4,5,6
+        live true 5,3
+        added 7 8
+        live after add 5,7,3
+        live after set 7,3,5,2
+        live after delete 7,5,2
+        frozen 7,5,2 false
+        walk 2 4
+        walk on 5 of 6
+        walk after delete 6 back 4
+        destroyed IllegalStateException
+        destroyed twice
+        store goes on 6
+        closed has next false count 6
+        closed RecordStoreNotOpenException
+        enumerate closed RecordStoreNotOpenException
+        ",
+    );
+}
+
+#[test]
 fn listeners_run_on_the_changing_thread() {
     let Some(classes) = programs() else { return };
     let dir = tempfile::tempdir().unwrap();

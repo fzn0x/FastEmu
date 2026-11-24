@@ -3,6 +3,7 @@
 
 mod api;
 pub mod disk;
+mod enumeration;
 pub mod format;
 pub mod name;
 mod state;
@@ -28,5 +29,6 @@ const RECORD_STORE_NOT_OPEN_EXCEPTION: &str = "javax/microedition/rms/RecordStor
 pub fn classes() -> Vec<NativeClass> {
     let mut classes = api::classes();
     classes.push(store::class());
+    classes.push(enumeration::class());
     classes
 }
