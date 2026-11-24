@@ -156,7 +156,21 @@ cargo ndk -t arm64-v8a -P 31 clippy -p fastemu-android -p gpui_android --all-tar
 
 ## Signing
 
-Both build types are signed with the Android SDK's debug key, which Gradle
-creates in `~/.android/debug.keystore`. Publishing needs a release key and a
-`signingConfigs` entry that reads it from a file git ignores
-(`android/app/signing.properties` and `*.keystore` are already ignored).
+Debug builds use the Android SDK's debug key, which Gradle creates in
+`~/.android/debug.keystore`. Release builds read the release key from two
+environment variables:
+
+| Variable | What it holds |
+| --- | --- |
+| `FASTEMU_ANDROID_KEYSTORE_FILE` | The path to a PKCS12 keystore whose key has the alias `fastemu`. |
+| `FASTEMU_ANDROID_KEYSTORE_PASSWORD` | The keystore's password, which is also the key's. |
+
+Without them a release build falls back to the debug key, which is fine
+for trying the APK but not for publishing: Android installs an update only
+over an app signed with the same key. The release workflow
+(`.github/workflows/release.yml`) decodes the keystore from the repository
+secret `FASTEMU_ANDROID_KEYSTORE` (the keystore in base64) with the
+password from `FASTEMU_ANDROID_KEYSTORE_PASSWORD`, and refuses to publish a
+release without them. Keep the keystore and its password out of the
+repository (`*.p12`, `*.jks` and `*.keystore` are ignored) and backed up off
+the machine: losing them strands every installed copy.
