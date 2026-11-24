@@ -192,8 +192,8 @@ the repeats (`docs/compat/notes/03-input.md`).
   stop up to three seconds. Input sent after a pause is dropped, even
   while the pause is still under way; input sent after a resume reaches
   the game after `showNotify`; input sent after a stop is dropped. Input
-  sent just before a pause may still be dropped by it, when the event
-  thread had not delivered it yet.
+  sent before a pause reaches the game before `hideNotify`, so the keys
+  the apps let go of just before they pause are released in the game.
 - **Codes.** `InputEvent::Key` maps through the profile's `KeyCodes`;
   `RawKey` passes its code through.
 - **Game actions** (`lcdui::keys::game_action`): the profile's arrows and
@@ -216,8 +216,9 @@ the repeats (`docs/compat/notes/03-input.md`).
   editable `TextBox` is shown or a `TextField` or `DateField` has the
   focus; the app should then send typed characters as text.
 - **Background.** While the app has the instance paused, input is
-  dropped: the control thread drops what comes after the pause, and the
-  event thread what it still holds.
+  dropped: the control thread drops what comes after the pause. Input
+  the event thread still holds when the pause comes was sent before it,
+  so it delivers that first, then sends `hideNotify`.
 
 ## Soft keys and commands
 
