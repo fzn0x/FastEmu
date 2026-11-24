@@ -77,8 +77,13 @@ impl Ctx<'_> {
                 result
             }
             MethodBody::Native(f) => {
+                // A native that calls another native recurses on the host
+                // stack just as one that calls bytecode does.
                 let f = Arc::clone(f);
-                self.call_native(method, &f, top, args)
+                self.thread.native_depth += 1;
+                let result = self.call_native(method, &f, top, args);
+                self.thread.native_depth -= 1;
+                result
             }
             MethodBody::Abstract => {
                 let name = method.describe().replace('/', ".");
