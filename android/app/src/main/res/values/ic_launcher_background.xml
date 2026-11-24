@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Written by `cargo xtask icons` from assets/icon.svg. -->
 <resources>
-    <color name="ic_launcher_background">#5EEAD4</color>
+    <color name="ic_launcher_background">#2DD4BF</color>
 </resources>

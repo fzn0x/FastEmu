@@ -1,7 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <title>FastEmu</title>
-  <rect width="32" height="32" rx="8" fill="#5eead4"/>
-  <rect x="12" y="5" width="14" height="21" rx="3.5" fill="none" stroke="#0a0a0a" stroke-width="2.4"/>
-  <rect x="5" y="9" width="14" height="19" rx="3.5" fill="#0a0a0a"/>
-  <rect x="8" y="12.5" width="8" height="7" rx="1.2" fill="#5eead4"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 2048" role="img" aria-label="FastEmu">
+<title>FastEmu</title>
+  <rect width="2048" height="2048" rx="480" fill="#2DD4BF"/>
+  <rect x="536" y="240" width="976" height="1648" rx="288" fill="#0B0F10"/>
+  <g fill="#2DD4BF">
+    <rect x="896" y="324" width="256" height="70" rx="35"/>
+    <rect x="624" y="452" width="800" height="688" rx="132"/>
+  </g>
+  <rect x="674" y="520" width="700" height="556" rx="66" fill="#0B0F10"/>
+  <path fill="#FFFFFF" d="M768 606h128v64h-128zM832 670h128v64h-128zM896 734h128v64h-128zM896 798h128v64h-128zM832 862h128v64h-128zM768 926h128v64h-128zM1024 606h128v64h-128zM1088 670h128v64h-128zM1152 734h128v64h-128zM1152 798h128v64h-128zM1088 862h128v64h-128zM1024 926h128v64h-128z"/>
+  <g fill="#2DD4BF">
+    <rect x="910" y="1188" width="228" height="208" rx="64"/>
+    <rect x="646" y="1240" width="216" height="100" rx="50"/>
+    <rect x="1186" y="1240" width="216" height="100" rx="50"/>
+    <rect x="652" y="1436" width="212" height="92" rx="46"/><rect x="918" y="1436" width="212" height="92" rx="46"/><rect x="1184" y="1436" width="212" height="92" rx="46"/><rect x="652" y="1560" width="212" height="92" rx="46"/><rect x="918" y="1560" width="212" height="92" rx="46"/><rect x="1184" y="1560" width="212" height="92" rx="46"/><rect x="652" y="1684" width="212" height="92" rx="46"/><rect x="918" y="1684" width="212" height="92" rx="46"/><rect x="1184" y="1684" width="212" height="92" rx="46"/>
+  </g>
 </svg>
