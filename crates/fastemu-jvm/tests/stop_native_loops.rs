@@ -1,6 +1,7 @@
 //! Natives that call back into Java: a loop of them ends when the VM
-//! stops, and a recursion of them ends in a `StackOverflowError` that Java
-//! can catch.
+//! stops, a recursion of them ends in a `StackOverflowError` that Java can
+//! catch, and the host handle never waits for ever on a VM lock that a
+//! wedged thread holds.
 //!
 //! The classes are assembled by hand, because each needs exact bytecode:
 //! a method with no backward branch and no call, which is never a
@@ -8,10 +9,12 @@
 
 mod support;
 
+use std::io::ErrorKind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
+use fastemu_core::LogLevel;
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Value, Vm, VmConfig};
 use support::{ClassBuilder, PUBLIC, STATIC, idx};
 
@@ -213,6 +216,21 @@ fn probe(entered: Arc<AtomicBool>) -> NativeClass {
     })
 }
 
+/// `demo/Hold.hold()`: a native that never calls into Java and so runs
+/// with the VM lock held until `release` is set. It gives up after ten
+/// seconds, so a lock wait that does not give up fails a test instead of
+/// hanging it.
+fn hold(entered: Arc<AtomicBool>, release: Arc<AtomicBool>) -> NativeClass {
+    NativeClass::new("demo/Hold").static_method("hold", "()V", move |_, _| {
+        entered.store(true, Ordering::SeqCst);
+        let start = Instant::now();
+        while !release.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        Ok(Value::Void)
+    })
+}
+
 fn vm_with(natives: Vec<NativeClass>, config: VmConfig) -> Vm {
     let source = support::source(&[
         ("Endless", endless()),
@@ -393,4 +411,109 @@ fn skip_over_an_endless_reader_ends_when_the_vm_stops() {
 fn skip_bytes_over_an_endless_skip_ends_when_the_vm_stops() {
     let took = stopped_loop("bytes");
     assert!(took < LONG, "{took:?}");
+}
+
+/// A VM whose only thread holds the VM lock in a native that never calls
+/// into Java, and so never reaches a safepoint, until [`Wedged::free`].
+struct Wedged {
+    vm: Vm,
+    release: Arc<AtomicBool>,
+    log: Arc<std::sync::Mutex<Vec<fastemu_core::LogLine>>>,
+}
+
+impl Wedged {
+    fn new() -> Self {
+        let entered = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let (sink, log) = support::capture();
+        let config = VmConfig {
+            log: sink,
+            ..VmConfig::default()
+        };
+        let vm = vm_with(
+            vec![hold(Arc::clone(&entered), Arc::clone(&release))],
+            config,
+        );
+        vm.spawn("hold", |ctx| {
+            ctx.call_static("demo/Hold", "hold", "()V", &[]).map(|_| ())
+        })
+        .expect("the thread starts");
+        let start = Instant::now();
+        while !entered.load(Ordering::SeqCst) {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "the hold started"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        Self { vm, release, log }
+    }
+
+    /// Lets the native go, and checks that the VM then ends.
+    fn free(self) {
+        self.release.store(true, Ordering::SeqCst);
+        self.vm.stop();
+        assert!(self.vm.wait_finished(Some(LONG)), "the VM ends once freed");
+    }
+}
+
+/// Runs `f` and returns how long it took.
+fn timed<R>(f: impl FnOnce() -> R) -> (R, Duration) {
+    let start = Instant::now();
+    let result = f();
+    (result, start.elapsed())
+}
+
+#[test]
+fn a_task_posted_to_a_wedged_vm_is_dropped_after_a_while() {
+    struct Dropped(Arc<AtomicBool>);
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    let wedged = Wedged::new();
+    let dropped = Arc::new(AtomicBool::new(false));
+    let guard = Dropped(Arc::clone(&dropped));
+    let ((), took) = timed(|| {
+        wedged.vm.post(move |_| {
+            let _guard = &guard;
+            Ok(())
+        });
+    });
+    assert!(took < LONG, "post took {took:?}");
+    assert!(dropped.load(Ordering::SeqCst), "the task was dropped");
+    let warnings = support::lines_at(&wedged.log, LogLevel::Warn);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    wedged.free();
+}
+
+#[test]
+fn a_thread_started_on_a_wedged_vm_times_out() {
+    let wedged = Wedged::new();
+    let (result, took) = timed(|| wedged.vm.spawn("late", |_| Ok(())));
+    assert!(took < LONG, "spawn took {took:?}");
+    let error = result.expect_err("no thread starts under a held lock");
+    assert_eq!(error.kind(), ErrorKind::TimedOut);
+    wedged.free();
+}
+
+#[test]
+fn a_wedged_vm_can_be_flushed_paused_stopped_and_waited_for() {
+    let wedged = Wedged::new();
+    let vm = wedged.vm.clone();
+    let ((), flush) = timed(|| vm.flush_output());
+    assert!(flush < LONG, "flush_output took {flush:?}");
+    let (finished, wait) = timed(|| vm.wait_finished(Some(Duration::from_millis(300))));
+    assert!(!finished, "the held thread has not ended");
+    assert!(wait < LONG, "wait_finished took {wait:?}");
+    let ((), pause) = timed(|| {
+        vm.pause();
+        vm.resume();
+    });
+    assert!(pause < LONG, "pause and resume took {pause:?}");
+    let ((), stop) = timed(|| vm.stop());
+    assert!(stop < LONG, "stop took {stop:?}");
+    assert!(vm.is_stopping());
+    wedged.free();
 }
