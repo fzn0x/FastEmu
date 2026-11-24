@@ -139,53 +139,70 @@ fn service_repaints(ctx: &mut Ctx<'_>, canvas: ObjRef) -> JResult<()> {
 /// rate bound holds for games that only flush. Does nothing for a canvas
 /// that is not shown, or that was hidden while the call waited.
 ///
-/// The source is locked only for the copy, after the wait: the wait
-/// releases the VM lock, and the collector locks every image's pixels to
-/// count them, so holding them across it could block both threads.
-pub fn flush(
+/// The wait releases the VM lock, so `source` must not be borrowed from
+/// a locked image surface: the collector locks every image's pixels to
+/// count them. Pass a copy, or use [`flush_shared`].
+pub fn flush(ctx: &mut Ctx<'_>, canvas: ObjRef, source: &Surface, region: Rect) -> JResult<()> {
+    let Some((target, bounds)) = wait_to_flush(ctx, canvas)? else {
+        return Ok(());
+    };
+    copy_region(source, &target, bounds, region);
+    frame::present(ctx)
+}
+
+/// [`flush`] from an image's shared pixels, which are locked only for the
+/// copy, after the wait.
+pub fn flush_shared(
     ctx: &mut Ctx<'_>,
     canvas: ObjRef,
     source: &SharedSurface,
     region: Rect,
 ) -> JResult<()> {
-    if !is_shown(ctx, canvas) {
+    let Some((target, bounds)) = wait_to_flush(ctx, canvas)? else {
         return Ok(());
+    };
+    copy_region(&source.lock(), &target, bounds, region);
+    frame::present(ctx)
+}
+
+/// Waits for the frame slot off the event thread, then gives the back
+/// buffer and the bounds of `canvas`, or `None` when it is not shown.
+fn wait_to_flush(ctx: &mut Ctx<'_>, canvas: ObjRef) -> JResult<Option<(SharedSurface, Rect)>> {
+    if !is_shown(ctx, canvas) {
+        return Ok(None);
     }
     if !on_event_thread(ctx) {
         frame::wait_for_slot(ctx)?;
         if !is_shown(ctx, canvas) {
-            return Ok(());
+            return Ok(None);
         }
     }
-    copy_region(ctx, canvas, &source.lock(), region)?;
-    frame::present(ctx)
+    let (w, h) = displayable::size(ctx, canvas)?;
+    Ok(Some((buffer(ctx, canvas)?, Rect::new(0, 0, w, h))))
 }
 
-/// Copies `region` of `source` onto the same place of `canvas`'s back
-/// buffer, cut to both.
-fn copy_region(ctx: &mut Ctx<'_>, canvas: ObjRef, source: &Surface, region: Rect) -> JResult<()> {
-    let (w, h) = displayable::size(ctx, canvas)?;
-    let region = region.intersect(Rect::new(0, 0, w, h)).intersect(Rect::new(
-        0,
-        0,
-        source.width() as i32,
-        source.height() as i32,
-    ));
-    if !region.is_empty() {
-        let target = buffer(ctx, canvas)?;
-        let mut target = target.lock();
-        let (sw, tw) = (source.width() as usize, target.width() as usize);
-        let rows = region.y as usize..(region.y + region.height) as usize;
-        let columns = region.x as usize..(region.x + region.width) as usize;
-        let from = source.pixels();
-        target.edit_pixels(|to| {
-            for row in rows {
-                let src = &from[row * sw + columns.start..row * sw + columns.end];
-                to[row * tw + columns.start..row * tw + columns.end].copy_from_slice(src);
-            }
-        });
+/// Copies `region` of `source` onto the same place of `target`, cut to
+/// `bounds` and to both surfaces.
+fn copy_region(source: &Surface, target: &SharedSurface, bounds: Rect, region: Rect) {
+    let mut target = target.lock();
+    let size = |s: &Surface| Rect::new(0, 0, s.width() as i32, s.height() as i32);
+    let region = region
+        .intersect(bounds)
+        .intersect(size(source))
+        .intersect(size(&target));
+    if region.is_empty() {
+        return;
     }
-    Ok(())
+    let (sw, tw) = (source.width() as usize, target.width() as usize);
+    let rows = region.y as usize..(region.y + region.height) as usize;
+    let columns = region.x as usize..(region.x + region.width) as usize;
+    let from = source.pixels();
+    target.edit_pixels(|to| {
+        for row in rows {
+            let src = &from[row * sw + columns.start..row * sw + columns.end];
+            to[row * tw + columns.start..row * tw + columns.end].copy_from_slice(src);
+        }
+    });
 }
 
 #[allow(

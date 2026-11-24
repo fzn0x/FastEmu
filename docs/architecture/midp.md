@@ -297,11 +297,14 @@ NativeClass::new("javax/microedition/lcdui/Form")
   white at first, made by the constructor and kept in a private field
   (`buffer`), so the collector counts its pixels and keeps it alive.
   `getGraphics` hands `graphics::new_graphics(ctx, surface)` out at every
-  call. `flushGraphics` calls `canvas::flush(ctx, this, &surface,
-  region)`, which waits for the frame slot off the event thread, checks
-  the canvas is still shown, and only then locks the buffer to copy the
-  region onto the canvas's back buffer and present a frame; a region of
-  no width or height does nothing. `paint(g)` draws the buffer through
+  call. `flushGraphics` calls `canvas::flush_shared(ctx, this,
+  &surface, region)`, which waits for the frame slot off the event
+  thread, checks the canvas is still shown, and only then locks the
+  buffer to copy the region onto the canvas's back buffer and present a
+  frame; a region of no width or height does nothing.
+  `canvas::flush(ctx, canvas, &Surface, region)` does the same from a
+  surface the caller owns, such as a copy, and must never get one
+  borrowed from a locked image. `paint(g)` draws the buffer through
   `g`'s translation and clip, so a repaint shows what was drawn last.
 - `Canvas` already owns the payload type, so `GameCanvas` declares no
   payload of its own.

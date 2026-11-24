@@ -16,7 +16,7 @@ use fastemu_gfx::anchor::{LEFT, TOP};
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Value, classfile::access};
 
 use super::layer::graphics_arg;
-use crate::lcdui::canvas::flush;
+use crate::lcdui::canvas::flush_shared;
 use crate::lcdui::display::is_shown;
 use crate::lcdui::displayable::data_mut;
 use crate::lcdui::graphics::{GraphicsData, new_graphics};
@@ -85,7 +85,7 @@ fn flush_region(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         return Ok(Value::Void);
     }
     let source = buffer(ctx, this)?;
-    flush(ctx, this, &source, region)?;
+    flush_shared(ctx, this, &source, region)?;
     Ok(Value::Void)
 }
 
@@ -128,7 +128,7 @@ pub fn class() -> NativeClass {
         .method("flushGraphics", "()V", |ctx, a| {
             let this = ctx.non_null(a[0])?;
             let source = buffer(ctx, this)?;
-            flush(ctx, this, &source, Rect::new(0, 0, i32::MAX, i32::MAX))?;
+            flush_shared(ctx, this, &source, Rect::new(0, 0, i32::MAX, i32::MAX))?;
             Ok(Value::Void)
         })
 }
