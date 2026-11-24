@@ -10,6 +10,7 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
+crc32fast = "1.5.0"
 fastemu-audio.workspace = true
 fastemu-core.workspace = true
 fastemu-gfx.workspace = true

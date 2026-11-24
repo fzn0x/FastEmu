@@ -1,6 +1,7 @@
 //! `javax.microedition.rms`: record stores, saved in the instance's
 //! folder.
 
+pub mod format;
 pub mod name;
 
 use fastemu_jvm::NativeClass;
