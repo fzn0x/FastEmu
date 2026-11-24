@@ -8,6 +8,7 @@
 
 pub(crate) mod charset;
 pub(crate) mod class;
+mod dtoa;
 pub(crate) mod float_fmt;
 pub(crate) mod io;
 pub(crate) mod math;

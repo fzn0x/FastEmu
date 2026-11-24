@@ -1,4 +1,7 @@
 // Float and double arithmetic, conversions, comparisons and printing.
+// Values that Java 19 and later print differently from older Java (such
+// as 1e23) are left out so the test passes on any JDK; the unit tests of
+// src/lang/dtoa.rs pin those to what older Java and phones print.
 public class FloatMath {
     static void show(String label, double d) {
         System.out.println(label + " " + d + " " + (float) d);
@@ -7,7 +10,7 @@ public class FloatMath {
     public static void main(String[] args) {
         double[] ds = {
             0.0, -0.0, 1.0, -1.5, 0.1, 0.2, 0.1 + 0.2, 1.0 / 3, 2.0 / 3, 100.0, 1e7, 9999999.0,
-            12345678.9, 1e-3, 9.99e-4, 1e-4, 123.456, 1e21, 1e22, 1e23, 3.14159, Math.PI, Math.E,
+            12345678.9, 1e-3, 9.99e-4, 1e-4, 123.456, 1e21, 1e22, 3.14159, Math.PI, Math.E,
             Double.MAX_VALUE, Double.MIN_VALUE, 4.35, 0.5, 1234567.0, 0.001234, 5e-5, 2.5e-10,
             1.7976931348623157E308, 4.9E-324 * 3, 1e300 * 1e10, -1e300 * 1e10, 0.0 / 0.0
         };

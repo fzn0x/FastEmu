@@ -1,98 +1,8 @@
-//! `Float.toString`, `Double.toString` and their parsers, as Java prints
-//! and reads numbers.
-//!
-//! Printing uses the shortest digits that read back as the same value
-//! (Rust's formatter finds them) laid out by Java's rules: plain notation
-//! from 10^-3 up to 10^7, computerized scientific notation (`1.0E10`)
-//! outside it, and always a digit after the point.
+//! `Float.toString` and `Double.toString` (in [`super::dtoa`]) and the
+//! parsers `Double.parseDouble` and `Float.parseFloat`, which read numbers
+//! as Java does.
 
-/// The shortest round-trip digits of a finite, positive value and the
-/// decimal exponent of the first digit: 123.4 gives ("1234", 2).
-fn shortest_digits(scientific: &str) -> (String, i32) {
-    let (mantissa, exp) = scientific
-        .split_once('e')
-        .expect("LowerExp output has an exponent");
-    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
-    let exp = exp.parse().expect("LowerExp prints a decimal exponent");
-    (digits, exp)
-}
-
-fn layout(negative: bool, digits: &str, exp: i32, plain: bool) -> String {
-    let mut out = String::with_capacity(digits.len() + 8);
-    if negative {
-        out.push('-');
-    }
-    if plain {
-        if exp >= 0 {
-            let int_len = exp as usize + 1;
-            if digits.len() <= int_len {
-                out.push_str(digits);
-                out.extend(std::iter::repeat_n('0', int_len - digits.len()));
-                out.push_str(".0");
-            } else {
-                out.push_str(&digits[..int_len]);
-                out.push('.');
-                out.push_str(&digits[int_len..]);
-            }
-        } else {
-            out.push_str("0.");
-            out.extend(std::iter::repeat_n('0', (-exp - 1) as usize));
-            out.push_str(digits);
-        }
-    } else {
-        out.push_str(&digits[..1]);
-        out.push('.');
-        if digits.len() > 1 {
-            out.push_str(&digits[1..]);
-        } else {
-            out.push('0');
-        }
-        out.push('E');
-        out.push_str(&exp.to_string());
-    }
-    out
-}
-
-/// `Double.toString(double)`.
-pub(crate) fn double_to_string(v: f64) -> String {
-    if v.is_nan() {
-        return "NaN".to_owned();
-    }
-    if v.is_infinite() {
-        return if v > 0.0 { "Infinity" } else { "-Infinity" }.to_owned();
-    }
-    if v == 0.0 {
-        return if v.is_sign_negative() { "-0.0" } else { "0.0" }.to_owned();
-    }
-    let abs = v.abs();
-    // Java prints the smallest subnormal with two digits.
-    let (digits, exp) = if abs.to_bits() == 1 {
-        ("49".to_owned(), -324)
-    } else {
-        shortest_digits(&format!("{abs:e}"))
-    };
-    layout(v < 0.0, &digits, exp, (1e-3..1e7).contains(&abs))
-}
-
-/// `Float.toString(float)`.
-pub(crate) fn float_to_string(v: f32) -> String {
-    if v.is_nan() {
-        return "NaN".to_owned();
-    }
-    if v.is_infinite() {
-        return if v > 0.0 { "Infinity" } else { "-Infinity" }.to_owned();
-    }
-    if v == 0.0 {
-        return if v.is_sign_negative() { "-0.0" } else { "0.0" }.to_owned();
-    }
-    let abs = v.abs();
-    let (digits, exp) = if abs.to_bits() == 1 {
-        ("14".to_owned(), -45)
-    } else {
-        shortest_digits(&format!("{abs:e}"))
-    };
-    layout(v < 0.0, &digits, exp, (1e-3..1e7).contains(&abs))
-}
+pub(crate) use super::dtoa::{double_to_string, float_to_string};
 
 /// Checks `s` against Java's decimal floating-point grammar and returns
 /// it without its type suffix, ready for Rust's parser.
@@ -218,50 +128,6 @@ pub(crate) fn parse_float(s: &str) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn doubles_print_like_java() {
-        let cases = [
-            (0.1, "0.1"),
-            (1.0, "1.0"),
-            (-2.5, "-2.5"),
-            (100.0, "100.0"),
-            (1.0e7, "1.0E7"),
-            (9_999_999.0, "9999999.0"),
-            (0.001, "0.001"),
-            (0.0001, "1.0E-4"),
-            (1.0 / 3.0, "0.3333333333333333"),
-            (0.1 + 0.2, "0.30000000000000004"),
-            (123_456_789.0, "1.23456789E8"),
-            (1e21, "1.0E21"),
-            (f64::MAX, "1.7976931348623157E308"),
-            (f64::from_bits(1), "4.9E-324"),
-            (f64::MIN_POSITIVE, "2.2250738585072014E-308"),
-            (-0.0, "-0.0"),
-            (f64::NAN, "NaN"),
-            (f64::NEG_INFINITY, "-Infinity"),
-        ];
-        for (v, want) in cases {
-            assert_eq!(double_to_string(v), want, "{v:e}");
-        }
-    }
-
-    #[test]
-    fn floats_print_like_java() {
-        let cases = [
-            (0.1f32, "0.1"),
-            (1.0 / 3.0, "0.33333334"),
-            (3.0e10, "3.0E10"),
-            (1.0e-5, "1.0E-5"),
-            (f32::MAX, "3.4028235E38"),
-            (f32::from_bits(1), "1.4E-45"),
-            (16_777_216.0, "1.6777216E7"),
-            (123.456, "123.456"),
-        ];
-        for (v, want) in cases {
-            assert_eq!(float_to_string(v), want, "{v:e}");
-        }
-    }
 
     #[test]
     fn parsing_follows_java_grammar() {
