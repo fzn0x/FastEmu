@@ -15,6 +15,7 @@ pub mod media;
 pub mod midlet;
 pub mod nokia;
 pub mod rms;
+pub mod suite;
 pub mod vendor;
 pub mod wma;
 

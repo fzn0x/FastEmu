@@ -14,6 +14,11 @@ fastemu-audio.workspace = true
 fastemu-core.workspace = true
 fastemu-gfx.workspace = true
 fastemu-jvm.workspace = true
+miniz_oxide = "0.9.1"
+parking_lot = "0.12"
+
+[dev-dependencies]
+crc32fast = "1.5.0"
 
 [lints]
 workspace = true

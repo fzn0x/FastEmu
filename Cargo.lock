@@ -1810,10 +1810,13 @@ dependencies = [
 name = "fastemu-midp"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
  "fastemu-audio",
  "fastemu-core",
  "fastemu-gfx",
  "fastemu-jvm",
+ "miniz_oxide 0.9.1",
+ "parking_lot",
 ]
 
 [[package]]
