@@ -11,19 +11,26 @@ Limited Device Configuration: threads, `java.lang`, `java.util`,
 `java.io`, floating point, and the Generic Connection Framework.
 
 **MIDP 2.0.** The Mobile Information Device Profile: the `MIDlet`
-life cycle, `javax.microedition.lcdui` (forms, lists, alerts and
-custom canvases), `GameCanvas`, record stores for saves, and the
-Push-free parts of `javax.microedition.io`.
+life cycle, `javax.microedition.lcdui` (forms and their items, lists,
+text boxes, alerts, tickers and custom canvases), record stores for
+saves, and the connections of `javax.microedition.io` (HTTP, HTTPS,
+sockets, datagrams and the push registry), which stay off until you
+allow a game network access.
 
 **Game API.** `javax.microedition.lcdui.game`: `Sprite`, `TiledLayer`,
 `LayerManager` and `GameCanvas`.
 
 **MMAPI sound.** The Mobile Media API (JSR 135) for sound: tone
-sequences, MIDI and WAV playback, volume control.
+sequences, MIDI, WAV, MP3 and AMR playback, volume control.
 
-**Nokia UI API.** `com.nokia.mid.ui` for full-screen canvases and
-device control such as vibration and backlight calls, and
-`com.nokia.mid.sound` for the Nokia sound classes.
+**Nokia UI API.** `com.nokia.mid.ui` for full-screen canvases,
+`DirectGraphics` and device control such as vibration and backlight
+calls, and `com.nokia.mid.sound` for the Nokia sound classes. Games
+see them on the Nokia, Sony Ericsson and generic profiles.
+
+**Other makers' APIs.** Siemens' game, colour game and image classes,
+and the device and sound classes of Samsung, Motorola and LG, each on
+its maker's profiles.
 
 ## What does not work yet
 
@@ -32,9 +39,10 @@ device control such as vibration and backlight calls, and
 - **Bluetooth (JSR-82).** Calls fail as if the phone had no Bluetooth.
 - **File connections (JSR-75).** `file://` connections fail. Games keep
   their saves in record stores, which do work.
-- **Other vendor APIs.** Samsung, Siemens, Motorola and Sony Ericsson
-  extras are mostly missing. A game that needs one may fail when it
-  uses it.
+- **Rarer vendor APIs.** Siemens' phone, file and media classes,
+  Motorola's game and lights packages, Sony Ericsson's 3D (Capuchin)
+  and LG's MMPP classes are missing. A game that needs one may fail
+  when it uses it.
 - **Native libraries and games that need a particular phone's
   firmware.** These cannot run.
 
@@ -44,32 +52,26 @@ error in the game's log instead of a hang.
 ## Tested games
 
 These are free games that FastEmu was run with on 24 November 2026.
-Each ran for 20 seconds without a window, on the 240x320 profile,
-with 5 pressed after a pause and then the arrows and fire. "Plays"
-means the game kept drawing new frames to the end and its last frame
-showed the game being played; nobody played any game through, so a
-later level may still fail. The build of that day did not yet have the
-high-level screens (`Form`, `List`, `Alert`), `GameCanvas` with its
-layers, or Nokia's `FullCanvas`, which are being written for v0.1.0;
-most of the games that stop here stop on one of them.
+`cargo xtask compat` ran each for 20 seconds without a window, on the
+240x320 profile, pressing 5 after a pause and then the arrows and
+fire, and the touch games were played with `fastemu run --touch`.
+"Plays" means the game kept drawing new frames and its frames showed
+the game being played; nobody played any game through, so a later
+level may still fail.
 
-| Game | License | Result | What it stops on |
+| Game | License | Result | Notes |
 | --- | --- | --- | --- |
-| [Retro Snake, Block Fall, Brick Buster, Pixel Jumper, Traffic Dash, Tower Guard, Star Defender, Dungeon Quest, Rock Blaster, Ladder Loot](https://github.com/agneay/j2me-100-games) (J2ME 100 Games) | MIT | Plays | Nothing in this run |
-| [Tetris](https://github.com/MarkLagodych/j2me-tetris) by Mark Lagodych | WTFPL | Plays | Nothing in this run |
-| [3D Moto 2](https://github.com/mrlordkaj/j2me-3dmoto) by Thinh Pham | GPL-3.0-or-later | Stays on its "Fetching Data.." screen | `DateField`, in its loading thread; it also asks for `GameCanvas`, and it needs Mobile 3D Graphics (JSR-184) to play |
-| [JTube](https://github.com/shinovon/JTube) by Arman Jussupgaliyev | MIT | Shows its splash screen, then stops drawing | `GameCanvas`, in its interface thread; its menu and settings also use `Form` and `List` |
-| [Stick Fight](https://github.com/Dahmalahi/STICK-FIGHT-OFFICIEL-REPO) by Dash Animation V2 | MIT | Stops at start | `GameCanvas` |
-| [Lines](https://github.com/mrlordkaj/j2me-lines) by Thinh Pham | GPL-3.0-or-later | Stops at start | `GameCanvas`; its menu is a `Form`, and it is played with a touch screen |
-| [Pixelus](https://github.com/mrlordkaj/j2me-pixelus) by Thinh Pham | GPL-3.0-or-later | Stops at start | `GameCanvas`; it is played with a touch screen |
-| [mobapp-game](https://github.com/vipaoL/mobapp-game) by vipaoL | GPL-3.0-only | Stops at start | `GameCanvas` |
-| [Shooter](https://github.com/RehanSaeed/Shooter) by Muhammad Rehan Saeed | MIT | Stops at start | `List`; it also uses `GameCanvas` and the layers |
-| [Skocko](https://github.com/manojlovic/skocko-j2me) by Milos Manojlovic | MIT | Stops at start | `Form` |
-| [BombMan](https://github.com/yaricom/bombman-RL-AI-J2ME) by Iaroslav Omelianenko | MIT | Closes itself at start | Nokia's `FullCanvas` |
-
-Tetris draws a new frame only when its piece moves, about once a
-second, so `fastemu run Tetris.jar --frames 300` takes some four
-minutes; give it `--seconds` instead.
+| [Retro Snake, Block Fall, Brick Buster, Pixel Jumper, Traffic Dash, Tower Guard, Star Defender, Dungeon Quest, Rock Blaster, Ladder Loot](https://github.com/agneay/j2me-100-games) (J2ME 100 Games) | MIT | Plays | Press 5 on the title screen |
+| [Tetris](https://github.com/MarkLagodych/j2me-tetris) by Mark Lagodych | WTFPL | Plays | It draws a new frame only when its piece moves |
+| [Stick Fight](https://github.com/Dahmalahi/STICK-FIGHT-OFFICIEL-REPO) by Dash Animation V2 | MIT | Plays | `GameCanvas` and sound |
+| [Shooter](https://github.com/RehanSaeed/Shooter) by Muhammad Rehan Saeed | MIT | Plays | A `List` menu, then `GameCanvas` with sprites and tiled layers |
+| [BombMan](https://github.com/yaricom/bombman-RL-AI-J2ME) by Iaroslav Omelianenko | MIT | Plays | Nokia's `FullCanvas` and sound, so it needs a Nokia, Sony Ericsson or generic profile |
+| [Skocko](https://github.com/manojlovic/skocko-j2me) by Milos Manojlovic | MIT | Plays | `Form` and `List` screens |
+| [Lines](https://github.com/mrlordkaj/j2me-lines) by Thinh Pham | GPL-3.0-or-later | Plays | A touch game: use the `generic-360x640` profile, or turn on the touch screen in its settings |
+| [Pixelus](https://github.com/mrlordkaj/j2me-pixelus) by Thinh Pham | GPL-3.0-or-later | Plays | A 320x240 touch game: use `generic-320x240` and turn on the touch screen in its settings |
+| [mobapp-game](https://github.com/vipaoL/mobapp-game) by vipaoL | GPL-3.0-only | Plays | Played by touch |
+| [JTube](https://github.com/shinovon/JTube) by Arman Jussupgaliyev | MIT | Runs | An app, not a game: its screens work, and it needs network access, off by default, to load anything |
+| [3D Moto 2](https://github.com/mrlordkaj/j2me-3dmoto) by Thinh Pham | GPL-3.0-or-later | Shows its first screens | Needs Mobile 3D Graphics (JSR-184) to play |
 
 The list comes from `cargo xtask compat`, which runs every JAR in a
 folder this way and writes a report with each game's status, frames,
