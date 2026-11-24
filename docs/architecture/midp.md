@@ -277,6 +277,51 @@ system's browser only when the user chooses **Open**
 handed over, as MIDP has the phone handle a request after its suite
 exits.
 
+## Many instances in one process
+
+The apps run many games at once in one process, and two copies of one
+game are two instances like any others.
+
+Each instance has its own:
+
+- virtual machine: heap, classes and their static fields (each instance
+  parses the JAR's classes itself), threads, monitors, interned strings
+  and system properties. Natives keep per-instance state in the VM's
+  extensions, never in a Rust `static`;
+- event thread, lifecycle threads, media event thread and game threads,
+  and a control thread on the host side;
+- `HostLink`: the latest frame, the status and the log;
+- `InstanceEnv`: the profile, the settings and the data folder, where the
+  record stores live, so two instances of one game keep separate saves;
+- sound `Group`, with its own volume, pause and listener.
+
+No Java object, static field or VM lock is shared, so a game thread never
+waits on another game's lock, and a panic on a game's thread stops only
+that instance. The process shares:
+
+- the sound engine, one per app. Its mixer sits behind one mutex, which
+  the audio thread holds while it renders and every player call takes
+  briefly (`docs/architecture/audio.md`);
+- fonts: each bundled face is parsed once, and its glyphs are rasterized
+  once per pixel height into caches that every instance reads
+  (`fastemu-gfx`'s `font::face`);
+- read-only tables: the charsets, the time zone database and the TLS
+  roots;
+- the allocator and the OS: every Java thread is an OS thread.
+
+The app's threads wait on an instance's VM lock only to post input
+(`Instance::send`), which a Java thread gives up at its next safepoint
+or wait. `frame`, `status` and `drain_log` take only the `HostLink`'s
+own lock, and pause, resume and stop go through the control thread.
+Stopping or dropping an instance ends its threads; once the app lets go
+of the instance, its virtual machine is freed and its group closes,
+which takes its players out of the mixer.
+
+`tests/many_instances.rs` runs eight instances of one MIDlet at once and
+checks frames, input, a pause, record stores, sound and the stop of each.
+Its soak test runs real games side by side and alone and compares their
+frame rates; CONTRIBUTING.md says how to run it.
+
 ## The extension point for high-level screens
 
 `Form`, `List`, `TextBox` and `Alert` are classes implemented in Rust that
