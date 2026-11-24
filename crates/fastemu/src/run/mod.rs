@@ -29,6 +29,7 @@ Runs a .jar or .jad without a window and prints what the game logs.
 Options:
   --midlet N        Start MIDlet-<N> of the suite (default 1)
   --profile ID      Run on the phone profile ID (default generic-240x320)
+  --touch           Give the phone a touch screen whatever the profile
   --frames N        Stop after N frames (default 300)
   --seconds S       Stop after S seconds instead
   --screenshot PATH Save the last frame as a PNG
@@ -47,7 +48,7 @@ softleft, softright, clear, send, end.
 Pointer steps touch the screen at phone pixel X,Y: press@XxY puts a
 finger down, drag@XxY moves it, release@XxY lifts it, and tap@XxY does
 all three (tap@XxY:MS holds for MS milliseconds). Games get them only on
-a touch screen, such as the generic-360x640 profile.
+a touch screen: a touch profile such as generic-360x640, or --touch.
 
 Exits with 1 when the game crashes or presents no new frame for 30
 seconds, and with 2 for a bad command line.
@@ -102,6 +103,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, String
     let mut keys = Vec::new();
     let mut encoding = None;
     let mut data = None;
+    let mut touch = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--midlet") => {
@@ -122,6 +124,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, String
                         format!("unknown profile {id}; the profiles are {}", ids.join(", "))
                     })?;
             }
+            Some("--touch") => touch = true,
             Some("--frames") => {
                 let n = value(&mut args, "--frames")?;
                 frames = Some(
@@ -159,6 +162,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, String
             _ if suite.is_none() => suite = Some(PathBuf::from(arg)),
             _ => return Err("give one suite to run".to_owned()),
         }
+    }
+    if touch {
+        profile.touch = true;
     }
     let limit = match (frames, seconds) {
         (Some(_), Some(_)) => return Err("give --frames or --seconds, not both".to_owned()),
@@ -378,6 +384,7 @@ mod tests {
         assert_eq!(options.suite, PathBuf::from("snake.jar"));
         assert_eq!(options.midlet, 0);
         assert_eq!(options.profile.id, "generic-240x320");
+        assert!(!options.profile.touch);
         assert_eq!(options.limit, Limit::Frames(300));
         assert!(options.keys.is_empty() && options.screenshot.is_none());
     }
@@ -398,10 +405,12 @@ mod tests {
             "UTF-8",
             "--data",
             "saves",
+            "--touch",
         ])
         .unwrap();
         assert_eq!(options.midlet, 1);
         assert_eq!(options.profile.screen_width, 128);
+        assert!(options.profile.touch, "--touch counts after --profile too");
         assert_eq!(options.limit, Limit::Seconds(1.5));
         assert_eq!(options.screenshot, Some(PathBuf::from("out.png")));
         assert_eq!(options.encoding.as_deref(), Some("UTF-8"));

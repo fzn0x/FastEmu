@@ -196,3 +196,41 @@ fn record_stores_survive_between_runs_in_a_data_folder() {
     let fresh = run(jar, &["--frames", "5"]);
     assert!(fresh.out.contains("runs before 0"), "{}", fresh.out);
 }
+
+#[test]
+fn script_steps_press_keys_and_touch_the_screen() {
+    let Some(jar) = probe_jar() else {
+        return;
+    };
+    let script = "5 tap@10x20 press@30x40 drag@35x45 release@35x45 wait:200";
+    let touch = run(jar, &["--touch", "--frames", "60", "--keys", script]);
+    assert_eq!(touch.code, Some(0), "{}{}", touch.out, touch.err);
+    let events: Vec<&str> = touch
+        .out
+        .lines()
+        .filter(|l| {
+            l.starts_with("key ") || l.ends_with(" 20") || l.ends_with(" 40") || l.ends_with(" 45")
+        })
+        .collect();
+    assert_eq!(
+        events,
+        [
+            "key 53",
+            "pressed 10 20",
+            "released 10 20",
+            "pressed 30 40",
+            "dragged 35 45",
+            "released 35 45"
+        ],
+        "{}",
+        touch.out
+    );
+
+    let keys_only = run(jar, &["--frames", "60", "--keys", script]);
+    assert!(keys_only.out.contains("key 53"), "{}", keys_only.out);
+    assert!(
+        !keys_only.out.contains("pressed"),
+        "a phone without a touch screen gets no pointer events:\n{}",
+        keys_only.out
+    );
+}
