@@ -159,10 +159,17 @@ mod tests {
         let signal = Signal::new();
         // Generous for loaded machines, and measured again while late, as
         // other tests share the machine; the Windows tick is 15.6 ms, so
-        // waits on it are late every time.
+        // waits on it are late every time. macOS coalesces timers, and on
+        // CI's virtual machines its 5 ms waits take some 20 ms, so there
+        // the test only catches waits that are far off.
+        let late = if cfg!(target_os = "macos") {
+            Duration::from_millis(45)
+        } else {
+            Duration::from_millis(9)
+        };
         let medians: Vec<Duration> = (0..3)
             .map(|_| timed(&signal, Duration::from_millis(5))[5])
-            .take_while(|&median| median >= Duration::from_millis(9))
+            .take_while(|&median| median >= late)
             .collect();
         assert!(medians.len() < 3, "late every time: {medians:?}");
     }

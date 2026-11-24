@@ -16,8 +16,14 @@ const ASKED: Duration = Duration::from_millis(10);
 /// How many times each is measured.
 const ROUNDS: usize = 30;
 /// The median lateness allowed. A wait that rounds up to Windows'
-/// default tick is about 5.6 ms late.
-const MEDIAN_SLACK: Duration = Duration::from_micros(2500);
+/// default tick is about 5.6 ms late. macOS coalesces timers, and on
+/// CI's virtual machines its waits run 15 to 20 ms late, so there only a
+/// wait that is far off fails.
+const MEDIAN_SLACK: Duration = if cfg!(target_os = "macos") {
+    Duration::from_millis(40)
+} else {
+    Duration::from_micros(2500)
+};
 
 fn vm() -> Vm {
     Vm::new(
