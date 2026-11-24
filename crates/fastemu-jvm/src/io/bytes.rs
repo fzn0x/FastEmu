@@ -81,7 +81,7 @@ fn take(ctx: &mut Ctx<'_>, obj: ObjRef, max: usize, dst: &mut Vec<u8>) -> JResul
     if pos >= count {
         return Ok(None);
     }
-    let n = max.min((count - pos) as usize);
+    let n = max.min((i64::from(count) - i64::from(pos)) as usize);
     if n == 0 {
         return Ok(Some(0));
     }
@@ -261,8 +261,10 @@ fn input_stream() -> NativeClass {
             let obj = this(a);
             let pos = ctx.get_field(obj, f.pos).int();
             let count = ctx.get_field(obj, f.count).int();
-            let n = a[1].long().clamp(0, i64::from(count - pos).max(0));
-            ctx.set_field(obj, f.pos, Value::Int(pos + n as i32));
+            let n = a[1]
+                .long()
+                .clamp(0, i64::from(count.wrapping_sub(pos)).max(0));
+            ctx.set_field(obj, f.pos, Value::Int(pos.wrapping_add(n as i32)));
             Ok(Value::Long(n))
         })
         .method("available", "()I", |ctx, a| {
@@ -270,7 +272,7 @@ fn input_stream() -> NativeClass {
             let obj = this(a);
             let pos = ctx.get_field(obj, f.pos).int();
             let count = ctx.get_field(obj, f.count).int();
-            Ok(Value::Int((count - pos).max(0)))
+            Ok(Value::Int(count.wrapping_sub(pos).max(0)))
         })
         .method("markSupported", "()Z", |_, _| Ok(Value::from(true)))
         .method("mark", "(I)V", |ctx, a| {
@@ -391,6 +393,32 @@ mod tests {
             "{many}"
         );
         assert_eq!(reads(2), ("Int(0)".to_owned(), "Int(4)".to_owned()));
+    }
+
+    /// A subclass may move `pos` anywhere; the sums with it wrap as
+    /// Java's `int` sums do instead of overflowing.
+    #[test]
+    fn a_position_far_before_the_count_does_not_overflow() {
+        let (available, skipped, read) = vm().attach("test", |ctx| {
+            let buf = ctx.new_array(ArrayType::Byte, 10).unwrap();
+            let stream = ctx
+                .construct("java/io/ByteArrayInputStream", "([B)V", &[buf.into()])
+                .unwrap();
+            let f = super::fields(ctx).unwrap();
+            ctx.set_field(stream, f.pos, Value::Int(i32::MIN));
+            let available = ctx.call_virtual(stream, "available", "()I", &[]);
+            let available = outcome(ctx, available);
+            let skipped = ctx.call_virtual(stream, "skip", "(J)J", &[Value::Long(5)]);
+            let skipped = outcome(ctx, skipped);
+            let read = ctx.call_virtual(stream, "read", "()I", &[]);
+            (available, skipped, outcome(ctx, read))
+        });
+        assert_eq!(available, "Int(0)");
+        assert_eq!(skipped, "Long(0)");
+        assert!(
+            read.starts_with("java.lang.ArrayIndexOutOfBoundsException"),
+            "{read}"
+        );
     }
 
     #[test]

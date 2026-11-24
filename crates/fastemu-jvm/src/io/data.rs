@@ -343,12 +343,12 @@ fn data_input_stream() -> NativeClass {
             let n = a[1].int();
             let mut total = 0;
             while total < n {
-                let left = Value::Long(i64::from(n - total));
+                let left = Value::Long(i64::from(n.wrapping_sub(total)));
                 let skipped = ctx.call_virtual(stream, "skip", "(J)J", &[left])?.long();
                 if skipped <= 0 {
                     break;
                 }
-                total += skipped as i32;
+                total = total.wrapping_add(skipped as i32);
             }
             Ok(Value::Int(total))
         })

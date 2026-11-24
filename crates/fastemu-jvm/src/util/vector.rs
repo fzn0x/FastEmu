@@ -422,7 +422,7 @@ fn vector_class() -> NativeClass {
             ctx,
             this(a),
             a[1].obj(),
-            count - 1,
+            count.wrapping_sub(1),
         )?))
     });
     let class = sync(class, "lastIndexOf", "(Ljava/lang/Object;I)I", |ctx, a| {
@@ -450,7 +450,7 @@ fn vector_class() -> NativeClass {
         if v.count == 0 {
             return Err(ctx.new_exception("java/util/NoSuchElementException", None));
         }
-        Ok(value(get(ctx, &v, v.count - 1)?))
+        Ok(value(get(ctx, &v, v.count.wrapping_sub(1))?))
     });
     let class = sync(class, "setElementAt", "(Ljava/lang/Object;I)V", |ctx, a| {
         let f = fields(ctx)?;
@@ -572,8 +572,8 @@ fn stack_class() -> NativeClass {
         if len == 0 {
             return Err(ctx.new_exception("java/util/EmptyStackException", None));
         }
-        let top = element_at(ctx, this(a), len - 1)?;
-        remove_at(ctx, this(a), len - 1)?;
+        let top = element_at(ctx, this(a), len.wrapping_sub(1))?;
+        remove_at(ctx, this(a), len.wrapping_sub(1))?;
         Ok(value(top))
     });
     let class = sync(class, "peek", "()Ljava/lang/Object;", |ctx, a| {
@@ -582,16 +582,66 @@ fn stack_class() -> NativeClass {
         if len == 0 {
             return Err(ctx.new_exception("java/util/EmptyStackException", None));
         }
-        Ok(value(element_at(ctx, this(a), len - 1)?))
+        Ok(value(element_at(ctx, this(a), len.wrapping_sub(1))?))
     });
     sync(class, "search", "(Ljava/lang/Object;)I", |ctx, a| {
         let f = fields(ctx)?;
         let len = ctx.get_field(this(a), f.count).int();
-        let i = last_index_of(ctx, this(a), a[1].obj(), len - 1)?;
-        Ok(Value::Int(if i >= 0 { len - i } else { -1 }))
+        let i = last_index_of(ctx, this(a), a[1].obj(), len.wrapping_sub(1))?;
+        Ok(Value::Int(if i >= 0 { len.wrapping_sub(i) } else { -1 }))
     })
 }
 
 pub(crate) fn classes() -> Vec<NativeClass> {
     vec![vector_class(), stack_class(), elements_class()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{MemorySource, Vm, VmConfig};
+
+    /// A subclass may set `elementCount` to anything; the sums with it
+    /// wrap as Java's do, so the methods throw as Java's would instead of
+    /// overflowing.
+    #[test]
+    fn a_count_at_the_end_of_the_range_does_not_overflow() {
+        let source = std::sync::Arc::new(MemorySource::new());
+        let vm = Vm::new(VmConfig::default(), source, Vec::new());
+        let thrown = vm.attach("test", |ctx| {
+            let stack = ctx.construct(STACK, "()V", &[]).unwrap();
+            let f = fields(ctx).unwrap();
+            ctx.set_field(stack, f.count, Value::Int(i32::MIN));
+            let calls = [
+                ("lastIndexOf", "(Ljava/lang/Object;)I"),
+                ("lastElement", "()Ljava/lang/Object;"),
+                ("peek", "()Ljava/lang/Object;"),
+                ("pop", "()Ljava/lang/Object;"),
+                ("search", "(Ljava/lang/Object;)I"),
+            ];
+            calls.map(|(name, desc)| {
+                let args = if desc.starts_with("()") {
+                    vec![]
+                } else {
+                    vec![Value::NULL]
+                };
+                match ctx.call_virtual(stack, name, desc, &args) {
+                    Err(Throw::Exception(e)) => ctx.describe_exception(e),
+                    other => format!("{other:?}"),
+                }
+            })
+        });
+        let past = "2147483647 >= -2147483648";
+        assert_eq!(
+            thrown,
+            [
+                format!("java.lang.IndexOutOfBoundsException: {past}"),
+                "java.lang.ArrayIndexOutOfBoundsException: Index 2147483647 out of bounds for length 10"
+                    .to_owned(),
+                format!("java.lang.ArrayIndexOutOfBoundsException: {past}"),
+                format!("java.lang.ArrayIndexOutOfBoundsException: {past}"),
+                format!("java.lang.IndexOutOfBoundsException: {past}"),
+            ]
+        );
+    }
 }
