@@ -22,7 +22,7 @@ use std::time::Instant;
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef};
 
 use crate::env::env;
-use crate::lcdui::{displayable, frame, state};
+use crate::lcdui::{displayable, frame, image, state};
 
 /// The classes of this module.
 pub fn classes() -> Vec<NativeClass> {
@@ -37,6 +37,24 @@ pub fn classes() -> Vec<NativeClass> {
     ];
     classes.extend(item::classes());
     classes
+}
+
+/// The image a screen or item keeps for `image`: MIDP has it take a
+/// snapshot of a mutable image, so later drawing on the image does not
+/// show; an immutable image is kept itself.
+pub(crate) fn snapshot(ctx: &mut Ctx<'_>, image: Option<ObjRef>) -> JResult<Option<ObjRef>> {
+    let Some(image) = image else {
+        return Ok(None);
+    };
+    let copy = {
+        let surface = image::surface_of(ctx, image)?;
+        let pixels = surface.lock();
+        if !pixels.is_mutable() {
+            return Ok(Some(image));
+        }
+        pixels.to_immutable()
+    };
+    Ok(Some(image::new_image(ctx, copy)?))
 }
 
 /// Tells the app whether `screen` wants typed text rather than keypad

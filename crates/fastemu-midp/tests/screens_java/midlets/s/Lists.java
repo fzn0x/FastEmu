@@ -5,6 +5,7 @@ import javax.microedition.lcdui.Command;
 import javax.microedition.lcdui.CommandListener;
 import javax.microedition.lcdui.Display;
 import javax.microedition.lcdui.Displayable;
+import javax.microedition.lcdui.Image;
 import javax.microedition.lcdui.List;
 import javax.microedition.midlet.MIDlet;
 
@@ -58,6 +59,12 @@ public class Lists extends MIDlet implements CommandListener {
         } catch (IllegalArgumentException e) {
             System.out.println("short array refused");
         }
+        // A mutable image is kept as a snapshot; an immutable one itself.
+        Image canvas = Image.createImage(4, 4);
+        many.append("d", canvas);
+        Image still = Image.createImage(canvas);
+        many.append("e", still);
+        System.out.println("snapshot " + (many.getImage(3) != canvas) + " " + (many.getImage(4) == still));
     }
 
     public void commandAction(Command c, Displayable d) {

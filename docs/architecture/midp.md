@@ -356,7 +356,9 @@ changes one of these calls `highlevel::wake_timer`.
   form's.
 - **Alerts.** An `Alert` centres its image or its type's icon, its text
   and its indicator `Gauge`, and plays its type's tone on the instance's
-  sound group when shown. It holds `DISMISS_COMMAND` until the game adds
+  sound group when shown. Like a choice element's and an `ImageItem`'s,
+  its image is a snapshot when the game gives a mutable one
+  (`highlevel::snapshot`). It holds `DISMISS_COMMAND` until the game adds
   a command. Its timeout (2000 ms by default) is ignored with `FOREVER`,
   two or more commands, or text that needs scrolling. When the time is
   up `DISMISS_COMMAND` fires; without a `CommandListener` any command
@@ -485,11 +487,9 @@ on, and a `LayerManager` scene checked frame by frame.
 ## Not done yet
 
 - In the high-level screens: horizontal traversal inside a `CustomItem`
-  (only `TRAVERSE_VERTICAL` is offered); a copy of a mutable image given
-  to a `List`, `ChoiceGroup` or `ImageItem` (the image itself is drawn,
-  so later drawing on it shows); daylight saving time in `DateField`
-  (only the zone's raw offset); predictive text; the full-screen editor
-  some phones open for a `TextField`.
+  (only `TRAVERSE_VERTICAL` is offered); daylight saving time in
+  `DateField` (only the zone's raw offset); predictive text; the
+  full-screen editor some phones open for a `TextField`.
 - Telling the app about `vibrate` and `flashBacklight` (they log and
   return `true`): `fastemu-core` has no notification for them.
 - Sending `KEY_END` before `destroyApp`, a per-game choice in J2ME Loader.

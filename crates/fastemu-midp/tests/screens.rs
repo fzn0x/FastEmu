@@ -63,6 +63,7 @@ fn screens_list_selects_and_fires_its_commands() {
     run.wait_log("index refused");
     run.wait_log("type refused");
     run.wait_log("short array refused");
+    run.wait_log("snapshot true true");
     // The title bar, then the focused first row.
     let first = run.wait_frame(|f| !bands(f, 230, HIGHLIGHT).is_empty());
     assert_eq!(rgb(&first, 2, 2), BAR, "the title bar");

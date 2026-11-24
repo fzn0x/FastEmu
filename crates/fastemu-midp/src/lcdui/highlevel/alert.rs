@@ -16,7 +16,7 @@ use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Payload, Tracer, Value, cla
 
 use super::draw::{Fonts, Painter, wrap};
 use super::item::{self, Kind, gauge};
-use super::{ticker_tick, wake_timer};
+use super::{snapshot, ticker_tick, wake_timer};
 use crate::env::env;
 use crate::lcdui::Rect;
 use crate::lcdui::command;
@@ -342,14 +342,18 @@ fn changed(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<Value> {
 fn init(ctx: &mut Ctx<'_>, a: &[Value], rest: Option<(Value, Value, Value)>) -> JResult<Value> {
     let obj = this(ctx, a[0])?;
     let dismiss = dismiss_command(ctx)?;
+    let image = match rest {
+        Some((_, image, _)) => snapshot(ctx, image.obj())?,
+        None => None,
+    };
     let d = displayable::data_mut(ctx, obj)?;
     d.title = a[1].obj();
     d.add_command(dismiss);
     let s = alert_mut(ctx, obj)?;
     s.timeout = DEFAULT_TIMEOUT;
-    if let Some((text, image, kind)) = rest {
+    if let Some((text, _, kind)) = rest {
         s.text = text.obj();
-        s.image = image.obj();
+        s.image = image;
         s.alert_type = kind.obj();
     }
     Ok(Value::Void)
@@ -479,7 +483,8 @@ pub fn class() -> NativeClass {
             "(Ljavax/microedition/lcdui/Image;)V",
             |ctx, a| {
                 let obj = this(ctx, a[0])?;
-                alert_mut(ctx, obj)?.image = a[1].obj();
+                let image = snapshot(ctx, a[1].obj())?;
+                alert_mut(ctx, obj)?.image = image;
                 changed(ctx, obj)
             },
         )

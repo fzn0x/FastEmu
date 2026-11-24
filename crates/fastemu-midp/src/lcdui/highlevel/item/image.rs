@@ -6,6 +6,7 @@ use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Tracer, Value};
 use super::{BUTTON, ItemData, Kind, Needs, PLAIN, changed, data, data_mut, units, valid_layout};
 use crate::lcdui::Rect;
 use crate::lcdui::highlevel::draw::{Fonts, Painter, width, wrap};
+use crate::lcdui::highlevel::snapshot;
 use crate::lcdui::image::surface_of;
 
 const CLASS: &str = "javax/microedition/lcdui/ImageItem";
@@ -128,11 +129,12 @@ fn init(ctx: &mut Ctx<'_>, a: &[Value], appearance: i32) -> JResult<Value> {
         );
     }
     let item = ctx.non_null(a[0])?;
+    let image = snapshot(ctx, a[2].obj())?;
     let d = data_mut(ctx, item)?;
     d.label = a[1].obj();
     d.layout = layout;
     d.kind = Kind::Image(ImageState {
-        image: a[2].obj(),
+        image,
         alt: a[4].obj(),
         appearance,
     });
@@ -176,7 +178,8 @@ pub fn class() -> NativeClass {
         })
         .method("setImage", &format!("({image})V"), |ctx, a| {
             let item = ctx.non_null(a[0])?;
-            state_mut(ctx, item)?.image = a[1].obj();
+            let image = snapshot(ctx, a[1].obj())?;
+            state_mut(ctx, item)?.image = image;
             changed(ctx, item)?;
             Ok(Value::Void)
         })

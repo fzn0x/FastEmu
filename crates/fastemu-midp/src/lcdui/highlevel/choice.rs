@@ -4,6 +4,7 @@
 
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Tracer, Value};
 
+use super::snapshot;
 use crate::lcdui::font::{default_font, font_object};
 
 /// The interface.
@@ -280,8 +281,9 @@ pub(crate) fn fill(
     if texts.iter().any(Option::is_none) {
         return ctx.throw("java/lang/NullPointerException", "a null string element");
     }
-    let model = (access.model)(ctx, this)?;
     for (text, image) in texts.into_iter().zip(pictures) {
+        let image = snapshot(ctx, image)?;
+        let model = (access.model)(ctx, this)?;
         let at = model.len();
         model.insert(at, text.expect("checked above"), image);
     }
@@ -315,9 +317,10 @@ pub(crate) fn methods(class: NativeClass, access: Access) -> NativeClass {
             move |ctx, a| {
                 let this = ctx.non_null(a[0])?;
                 let text = ctx.non_null(a[1])?;
+                let image = snapshot(ctx, a[2].obj())?;
                 let model = (access.model)(ctx, this)?;
                 let at = model.len();
-                model.insert(at, text, a[2].obj());
+                model.insert(at, text, image);
                 (access.changed)(ctx, this)?;
                 Ok(Value::Int(at as i32))
             },
@@ -329,7 +332,8 @@ pub(crate) fn methods(class: NativeClass, access: Access) -> NativeClass {
                 let this = ctx.non_null(a[0])?;
                 let at = index(ctx, this, access, a[1].int(), true)?;
                 let text = ctx.non_null(a[2])?;
-                (access.model)(ctx, this)?.insert(at, text, a[3].obj());
+                let image = snapshot(ctx, a[3].obj())?;
+                (access.model)(ctx, this)?.insert(at, text, image);
                 (access.changed)(ctx, this)?;
                 Ok(Value::Void)
             },
@@ -354,9 +358,10 @@ pub(crate) fn methods(class: NativeClass, access: Access) -> NativeClass {
                 let this = ctx.non_null(a[0])?;
                 let at = index(ctx, this, access, a[1].int(), false)?;
                 let text = ctx.non_null(a[2])?;
+                let image = snapshot(ctx, a[3].obj())?;
                 let e = &mut (access.model)(ctx, this)?.elements[at];
                 e.text = text;
-                e.image = a[3].obj();
+                e.image = image;
                 (access.changed)(ctx, this)?;
                 Ok(Value::Void)
             },

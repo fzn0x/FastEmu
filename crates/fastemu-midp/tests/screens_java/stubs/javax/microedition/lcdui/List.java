@@ -13,6 +13,10 @@ public class List extends Screen implements Choice {
         return null;
     }
 
+    public Image getImage(int elementNum) {
+        return null;
+    }
+
     public int append(String stringPart, Image imagePart) {
         return 0;
     }
