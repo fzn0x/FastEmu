@@ -86,8 +86,8 @@ apps pass one with output, the headless runner and tests pass none.
 ```text
   app thread                control thread              Java threads of the VM
   (MidpInstance)            (host thread, owns Vm)
-     | send(input) ------------------------------------>  "event": every UI callback
-     | pause/resume/stop -> runs each change in order ->  "MIDlet": constructor, startApp,
+     | send(input) ------> runs each message ---------->  "event": every UI callback
+     | pause/resume/stop -> in the order it came ------>  "MIDlet": constructor, startApp,
      |                      waits up to 1 s per call        pauseApp, destroyApp (one thread
      | frame/status/log <-- HostLink <------------------    per call)
                                                           game threads, Timer threads
@@ -105,17 +105,20 @@ apps pass one with output, the headless runner and tests pass none.
   the call before it has returned. Only `destroyApp` runs at once, beside
   a `startApp` that never returns; the calls still waiting then give up.
 - **The control thread** is a host thread that owns the `Vm` and applies
-  pause, resume, stop, `notifyDestroyed`, `resumeRequest` and crashes one
-  at a time. `Instance` methods only send it a message.
+  the app's input, pause, resume and stop, and `notifyDestroyed`,
+  `resumeRequest` and crashes, one at a time in the order they came.
+  `Instance` methods only send it a message over a channel, which never
+  blocks, so the app's thread never waits for the VM lock.
 
 ## The event loop
 
 Each pass of `lcdui::event::run`:
 
 1. runs the tasks posted to the VM (`Vm::post` from host threads,
-   `Ctx::post` from natives). The app's input arrives this way; other
-   modules may post work for the event thread the same way, for example
-   `PlayerListener` events read from `Group::subscribe` on a host thread;
+   `Ctx::post` from natives). The app's input arrives this way, from the
+   control thread; other modules may post work for the event thread the
+   same way, for example `PlayerListener` events read from
+   `Group::subscribe` on a host thread;
 2. delivers the queued input events;
 3. sends `keyRepeated` when the held key's time comes;
 4. relays out the shown displayable if its commands, title, ticker or
@@ -179,6 +182,18 @@ of games that re-post from `run`); `null` is ignored.
 The app sends one press and one release per stroke; the runtime makes
 the repeats (`docs/compat/notes/03-input.md`).
 
+- **Path.** `Instance::send` hands the event to the control thread and
+  returns at once. The control thread posts it to the VM, with the input
+  queued right behind it in one task, and the event thread delivers it.
+  Only the control thread waits for the VM lock, which a game thread
+  holds while it runs Java; the app never does. Input keeps its place
+  among pause, resume and stop, and waits behind one still under way: a
+  pause can take up to a second each for `hideNotify` and `pauseApp`, a
+  stop up to three seconds. Input sent after a pause is dropped, even
+  while the pause is still under way; input sent after a resume reaches
+  the game after `showNotify`; input sent after a stop is dropped. Input
+  sent just before a pause may still be dropped by it, when the event
+  thread had not delivered it yet.
 - **Codes.** `InputEvent::Key` maps through the profile's `KeyCodes`;
   `RawKey` passes its code through.
 - **Game actions** (`lcdui::keys::game_action`): the profile's arrows and
@@ -201,7 +216,8 @@ the repeats (`docs/compat/notes/03-input.md`).
   editable `TextBox` is shown or a `TextField` or `DateField` has the
   focus; the app should then send typed characters as text.
 - **Background.** While the app has the instance paused, input is
-  dropped.
+  dropped: the control thread drops what comes after the pause, and the
+  event thread what it still holds.
 
 ## Soft keys and commands
 
@@ -309,10 +325,15 @@ that instance. The process shares:
   roots;
 - the allocator and the OS: every Java thread is an OS thread.
 
-The app's threads wait on an instance's VM lock only to post input
-(`Instance::send`), which a Java thread gives up at its next safepoint
-or wait. `frame`, `status` and `drain_log` take only the `HostLink`'s
-own lock, and pause, resume and stop go through the control thread.
+The app's threads never wait on an instance's VM lock, which a Java
+thread gives up only at its next safepoint or wait. Input, pause, resume
+and stop go through the control thread's channel. `frame`, `status`,
+`wants_text`, `drain_log` and `take_link_request` take only the
+`HostLink`'s own lock or an atomic; the VM's threads hold that lock only
+to swap in a frame, add a log line, set the status or a link, never
+while they wait for anything. `set_volume` takes the mixer's lock, which
+the audio thread holds while it renders a buffer and game threads hold
+in player calls, but never while they wait for their VM lock.
 Stopping or dropping an instance ends its threads and closes its group,
 which takes its players out of the mixer; once the app lets go of the
 instance, its virtual machine is freed.

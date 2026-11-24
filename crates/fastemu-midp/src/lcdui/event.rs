@@ -2,15 +2,15 @@
 //! callback in turn.
 //!
 //! Each pass of [`run`] does, in order: the tasks posted to the VM (the
-//! app's input arrives this way, and other modules may post work for the
-//! event thread with `Ctx::post` or `Vm::post`), the queued input events,
-//! a due key repeat, the runtime's own work (relayouts, going to the
-//! background and back), a pending `setCurrent`, the pending paint (when
-//! the frame rate allows), and the `callSerially` runnables that were
-//! queued before the pass, stopping early when one of them asks for a
-//! repaint, so the paint comes first. Then it sleeps until something new
-//! arrives or a deadline (a key repeat, a deferred paint, a screen timer)
-//! passes.
+//! app's input arrives this way, from the instance's control thread, and
+//! other modules may post work for the event thread with `Ctx::post` or
+//! `Vm::post`), the queued input events, a due key repeat, the runtime's
+//! own work (relayouts, going to the background and back), a pending
+//! `setCurrent`, the pending paint (when the frame rate allows), and the
+//! `callSerially` runnables that were queued before the pass, stopping
+//! early when one of them asks for a repaint, so the paint comes first.
+//! Then it sleeps until something new arrives or a deadline (a key
+//! repeat, a deferred paint, a screen timer) passes.
 //!
 //! Every callback runs inside [`callback`], which holds the callback lock
 //! and logs an exception the game throws instead of ending the thread.

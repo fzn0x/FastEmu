@@ -1,11 +1,11 @@
 //! Input from the app: keys, pointer events and text, delivered to the
 //! shown displayable on the event thread.
 //!
-//! [`queue`] runs in a task the instance posts to the VM; it merges a drag
-//! into a drag already waiting, so a slow game does not fall behind.
-//! Presses and releases are never merged or dropped. Repeats are made
-//! here, not by the app: the first after 400 ms, then every 120 ms, to
-//! `keyRepeated` only, and never for a key the soft keys took.
+//! [`queue`] runs in a task the instance's control thread posts to the VM;
+//! it merges a drag into a drag already waiting, so a slow game does not
+//! fall behind. Presses and releases are never merged or dropped. Repeats
+//! are made here, not by the app: the first after 400 ms, then every
+//! 120 ms, to `keyRepeated` only, and never for a key the soft keys took.
 
 use std::time::Instant;
 
