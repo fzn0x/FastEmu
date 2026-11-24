@@ -249,6 +249,23 @@ fn pause_resume_and_stop_drive_the_lifecycle() {
 }
 
 #[test]
+fn stopping_a_paused_instance_still_destroys_the_midlet() {
+    let Some(jar) = suite("stop-paused") else {
+        return;
+    };
+    let mut run = Running::launch(&jar, midlet::LIFECYCLE);
+    run.wait_log("showNotify");
+    run.instance.pause();
+    run.wait_status(|s| *s == InstanceStatus::Paused);
+    // Input sent while paused is dropped, not delivered on resume.
+    run.tap(Key::Fire);
+    run.instance.stop();
+    run.wait_status(|s| *s == InstanceStatus::Exited);
+    assert!(run.has("destroyApp true"), "{}", run.dump());
+    assert_eq!(run.instance.error_count(), 0, "{}", run.dump());
+}
+
+#[test]
 fn a_crash_in_start_app_ends_the_instance() {
     let Some(jar) = suite("crash") else { return };
     let mut run = Running::launch(&jar, midlet::CRASH);
