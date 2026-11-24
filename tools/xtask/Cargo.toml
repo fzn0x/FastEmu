@@ -10,6 +10,10 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+# `cargo xtask icons` renders the app's SVG icon. Only the renderer: the
+# icon has no text or embedded images. The version GPUI already builds
+# with, so the lockfile gains no second copy.
+resvg = { version = "0.46", default-features = false }
 
 [lints]
 workspace = true

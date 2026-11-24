@@ -4,20 +4,29 @@
 //!
 //! * `changelog`: check, print and fold the changelog fragments of
 //!   `changelog.d`. See [`changelog`].
+//! * `icons`: render `assets/icon.svg` into the icons of the release builds
+//!   and the Android app. See [`icons`].
 
 mod changelog;
+mod icons;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "\
 Usage: cargo xtask changelog [--root DIR] <--check | --print | --release VERSION [--date YYYY-MM-DD]>
+       cargo xtask icons [--root DIR]
 
+changelog:
   --check              fail when a fragment of changelog.d is invalid
   --print              print the Unreleased section as the next release will have it
   --release VERSION    fold the fragments into a new section for VERSION, and
                        delete them
   --date YYYY-MM-DD    the release date (default: today, UTC)
+
+icons:
+  renders assets/icon.svg into packaging/icons and the Android launcher icons
+
   --root DIR           the repository's root (default: the workspace root)";
 
 fn main() -> ExitCode {
@@ -34,6 +43,7 @@ fn main() -> ExitCode {
 fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("changelog") => run_changelog(&args[1..]),
+        Some("icons") => run_icons(&args[1..]),
         _ => Err(USAGE.to_string()),
     }
 }
@@ -62,6 +72,23 @@ fn run_changelog(args: &[String]) -> Result<(), String> {
         return Err(USAGE.to_string());
     };
     changelog::run(&root, &mode, date.as_deref())
+}
+
+fn run_icons(args: &[String]) -> Result<(), String> {
+    let mut root = default_root();
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--root" => {
+                let dir = iter
+                    .next()
+                    .ok_or_else(|| format!("--root needs a value\n{USAGE}"))?;
+                root = PathBuf::from(dir);
+            }
+            other => return Err(format!("unknown argument {other}\n{USAGE}")),
+        }
+    }
+    icons::run(&root)
 }
 
 /// The workspace root: two levels above this crate's manifest.
