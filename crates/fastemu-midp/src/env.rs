@@ -6,6 +6,8 @@ use std::sync::Arc;
 use fastemu_core::{DeviceProfile, InstanceId, InstanceSettings, SuiteInfo, default_profile};
 use fastemu_jvm::{ClassSource, Ctx, MemorySource};
 
+use crate::host::HostLink;
+
 /// The instance a virtual machine runs for: its phone, its settings, its
 /// suite, its folder and its sound. The launcher stores one in the VM as an
 /// extension (`Ctx::set_extension`) before any MIDP class runs, and natives
@@ -29,6 +31,9 @@ pub struct InstanceEnv {
     /// `Manager.createPlayer` with a `resource:` locator). Read it inside
     /// `Ctx::without_lock`: it may inflate.
     pub source: Arc<dyn ClassSource>,
+    /// Where frames, the status and log lines go, and how natives reach
+    /// the instance's control thread.
+    pub host: HostLink,
 }
 
 impl InstanceEnv {
@@ -44,6 +49,7 @@ impl InstanceEnv {
             data_dir: data_dir.into(),
             audio: None,
             source: Arc::new(MemorySource::new()),
+            host: HostLink::new(id, None),
         }
     }
 }

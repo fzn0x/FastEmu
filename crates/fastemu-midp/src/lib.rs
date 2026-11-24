@@ -9,6 +9,7 @@
 //! through [`env::env`].
 
 pub mod env;
+pub mod host;
 pub mod io;
 pub mod lcdui;
 pub mod media;
