@@ -1,5 +1,8 @@
 # Playing
 
+How to add games, run several at once, arrange them in the window and
+control them with a keyboard or a touch screen.
+
 ## Adding games
 
 There are three ways to add a game:
