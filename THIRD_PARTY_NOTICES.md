@@ -4,10 +4,10 @@ FastEmu's own code is under the GNU General Public License v3.0 or later
 (see [LICENSE](LICENSE)). These files and libraries of other people are
 bundled in FastEmu's apps or its website, and keep their own licenses.
 
-Whoever adds a font, an image, a sound, a vendored source file or a
-Java class file taken from elsewhere adds its entry here in the same pull
-request, with the author, the license and the files that hold it. The
-sections below say what goes in each.
+Whoever adds a font, an image, a game frame, a sound, a vendored source
+file or a Java class file taken from elsewhere adds its entry here in the
+same pull request, with the author, the license and the files that hold
+it. The sections below say what goes in each.
 
 ## Fonts
 
@@ -40,6 +40,25 @@ copyright (c) Cole Bemis, MIT License. Both in full in
 The wordmark in the logo is set in [Inter](https://github.com/rsms/inter)
 (SIL Open Font License 1.1) and outlined to paths; no font file is
 bundled for it.
+
+## Game frames
+
+Each entry names the game, its author, its license and the files that
+show it. These are pictures of free games, recorded in FastEmu with its
+headless runner (`fastemu run --record`). FastEmu bundles none of the
+games themselves.
+
+| Game | Author | License |
+| --- | --- | --- |
+| [Stick Fight](https://github.com/Dahmalahi/STICK-FIGHT-OFFICIEL-REPO) | Dash Animation V2 | MIT |
+| [Shooter](https://github.com/RehanSaeed/Shooter) | Muhammad Rehan Saeed | MIT |
+| [BombMan](https://github.com/yaricom/bombman-RL-AI-J2ME) | Iaroslav Omelianenko | MIT |
+| Traffic Dash, Tower Guard, Star Defender and Block Fall, from [J2ME 100 Games](https://github.com/agneay/j2me-100-games) | Agneay B Nair and the J2ME Game Archive contributors | MIT |
+
+`site/src/games/*.webp` hold the frames of the website's first two
+cards. The MIT License texts, with each game's copyright line, are in
+[site/src/games/LICENSES.txt](site/src/games/LICENSES.txt), which the
+website publishes beside the frames.
 
 ## Sounds and instruments
 
