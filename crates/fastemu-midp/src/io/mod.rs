@@ -1,12 +1,12 @@
 //! `javax.microedition.io`: the Generic Connection Framework.
 //!
 //! Every connection a game makes starts at `Connector.open(name)`, and
-//! the scheme of the name picks the protocol (`connector`). HTTP
-//! (`http`), TCP sockets (`socket`) and UDP datagrams (`datagram`)
-//! make real connections over `std::net` when the instance's
-//! [`fastemu_core::NetworkPolicy`] allows it, and fail with `IOException`
-//! the way a phone without signal does when it does not.
-//! `docs/architecture/connections.md` describes the design.
+//! the scheme of the name picks the protocol (`connector`). HTTP and
+//! HTTPS (`http`), TCP sockets with or without TLS (`socket`, [`tls`])
+//! and UDP datagrams (`datagram`) make real connections over `std::net`
+//! when the instance's [`fastemu_core::NetworkPolicy`] allows it, and
+//! fail with `IOException` the way a phone without signal does when it
+//! does not. `docs/architecture/connections.md` describes the design.
 //!
 //! Blocking work (resolving names, connecting, reading and writing) runs
 //! with the VM lock released, in slices short enough that a stopping VM
@@ -20,6 +20,7 @@ mod net;
 mod push;
 mod socket;
 mod streams;
+pub mod tls;
 mod url;
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -38,6 +39,7 @@ pub fn classes() -> Vec<NativeClass> {
     classes.extend(socket::classes());
     classes.extend(datagram::classes());
     classes.push(push::class());
+    classes.extend(tls::classes());
     classes
 }
 

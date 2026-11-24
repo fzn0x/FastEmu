@@ -182,10 +182,10 @@ fn every_network_open_fails_when_the_network_is_off() {
         "javax.microedition.io.ConnectionNotFoundException: the requested protocol does not exist";
     let expected = format!(
         "http://127.0.0.1:1/ -> {off}
-https://example.com/ -> {missing}: https://example.com/
+https://example.com/ -> {off}
 socket://127.0.0.1:1 -> {off}
 socket://:0 -> {off}
-ssl://example.com:443 -> {missing}: ssl://example.com:443
+ssl://example.com:443 -> {off}
 datagram://127.0.0.1:1 -> {off}
 datagram://:0 -> {off}
 comm:0;baudrate=9600 -> javax.microedition.io.ConnectionNotFoundException: this phone has no serial ports: comm:0;baudrate=9600

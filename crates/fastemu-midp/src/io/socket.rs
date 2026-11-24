@@ -1,5 +1,6 @@
 //! `socket://`: `SocketConnection` (a TCP client) and
-//! `ServerSocketConnection` (a TCP server), over `std::net`.
+//! `ServerSocketConnection` (a TCP server), over `std::net`, and
+//! `ssl://`: `SecureConnection`, a client socket with TLS.
 //!
 //! A connection hands out one input and one output stream, as the MIDP
 //! reference implementation did. Closing the connection while a stream
@@ -17,9 +18,10 @@ use socket2::SockRef;
 
 use super::net::{self, IO_TIMEOUT, Link};
 use super::streams::{self, Input, Output};
-use super::{Options, lock, this, throw_io, url};
+use super::{Options, lock, this, throw_io, tls, url};
 
 const SOCKET_IMPL: &str = "fastemu/io/SocketConnectionImpl";
+const SECURE_IMPL: &str = "fastemu/io/SecureConnectionImpl";
 const SERVER_IMPL: &str = "fastemu/io/ServerSocketConnectionImpl";
 
 /// How often a waiting `acceptAndOpen` looks for a new connection.
@@ -35,7 +37,7 @@ struct Holds {
 }
 
 /// One TCP connection, shared by the connection object and its streams.
-pub(crate) struct SocketShared {
+struct SocketShared {
     link: Link,
     options: Options,
     holds: Mutex<Holds>,
@@ -43,7 +45,7 @@ pub(crate) struct SocketShared {
 
 impl SocketShared {
     /// A connection over `link`, opened with `options`.
-    pub(crate) fn new(link: Link, options: Options) -> Self {
+    fn new(link: Link, options: Options) -> Self {
         Self {
             link,
             options,
@@ -71,7 +73,7 @@ struct SocketPayload(Option<Arc<SocketShared>>);
 impl Payload for SocketPayload {}
 
 /// The socket of connection `conn`, or `IOException` once it is closed.
-pub(crate) fn open_socket(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<Arc<SocketShared>> {
+fn open_socket(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<Arc<SocketShared>> {
     let shared = match &ctx.payload::<SocketPayload>(conn)?.0 {
         Some(s) => Arc::clone(s),
         None => return throw_io(ctx, "the connection was not opened with Connector.open"),
@@ -83,11 +85,7 @@ pub(crate) fn open_socket(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<Arc<Socket
 }
 
 /// A new connection object of class `class` over `shared`.
-pub(crate) fn new_connection(
-    ctx: &mut Ctx<'_>,
-    class: &str,
-    shared: SocketShared,
-) -> JResult<ObjRef> {
+fn new_connection(ctx: &mut Ctx<'_>, class: &str, shared: SocketShared) -> JResult<ObjRef> {
     let class = ctx.find_class(class)?;
     let conn = ctx.new_object(class)?;
     ctx.set_payload(conn, SocketPayload(Some(Arc::new(shared))));
@@ -115,6 +113,26 @@ pub(crate) fn open(ctx: &mut Ctx<'_>, rest: &str, name: &str, options: Options) 
         SOCKET_IMPL,
         SocketShared::new(Link::plain(socket), options),
     )
+}
+
+/// Opens `ssl://host:port`: a client socket with TLS on it.
+pub(crate) fn open_secure(
+    ctx: &mut Ctx<'_>,
+    rest: &str,
+    name: &str,
+    options: Options,
+) -> JResult<ObjRef> {
+    let target = match url::host_port(rest) {
+        Ok(t) => t,
+        Err(message) => return ctx.throw("java/lang/IllegalArgumentException", &message),
+    };
+    let (Some(host), Some(port)) = (target.host, target.port) else {
+        let message = format!("{name} needs a host and a port");
+        return ctx.throw("java/lang/IllegalArgumentException", &message);
+    };
+    net::check_network(ctx)?;
+    let link = tls::connect(ctx, &host, port)?;
+    new_connection(ctx, SECURE_IMPL, SocketShared::new(link, options))
 }
 
 /// What reads from a socket connection's input stream.
@@ -293,7 +311,7 @@ fn report_address(ip: IpAddr) -> String {
 
 /// The members of a client socket connection, for this class and for
 /// the secure one built on it.
-pub(crate) fn client_class(name: &str, interface: &str) -> NativeClass {
+fn client_class(name: &str, interface: &str) -> NativeClass {
     NativeClass::new(name)
         .implements(interface)
         .payload::<SocketPayload>()
@@ -487,10 +505,25 @@ fn server_class() -> NativeClass {
         })
 }
 
-/// The classes of `socket://`.
+/// `SecureConnection`: a socket connection with TLS, and its security
+/// information.
+fn secure_class() -> NativeClass {
+    client_class(SECURE_IMPL, "javax/microedition/io/SecureConnection").method(
+        "getSecurityInfo",
+        "()Ljavax/microedition/io/SecurityInfo;",
+        |ctx, a| {
+            let shared = open_socket(ctx, this(a))?;
+            let details = shared.link.security().unwrap_or_default();
+            Ok(tls::security_info(ctx, details)?.into())
+        },
+    )
+}
+
+/// The classes of `socket://` and `ssl://`.
 pub(crate) fn classes() -> Vec<NativeClass> {
     vec![
         client_class(SOCKET_IMPL, "javax/microedition/io/SocketConnection"),
+        secure_class(),
         server_class(),
     ]
 }

@@ -7,7 +7,8 @@
 //! response head is read when a getter first needs it. `close` and
 //! closing every stream end the connection (Closed). Methods that are
 //! not allowed in the current state throw `IOException`, the exception
-//! the javadoc names.
+//! the javadoc names. `https:` is the same over TLS (`super::tls`), with
+//! `HttpsConnection.getSecurityInfo` on top.
 
 mod date;
 mod wire;
@@ -21,10 +22,12 @@ use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Payload, Throw, Value, Wake
 use self::wire::{Decoder, Framing, Head, Parsed};
 use super::net::{self, IO_TIMEOUT, Link};
 use super::streams::{self, Input, Output};
+use super::tls::{self, SecurityDetails};
 use super::url::HttpUrl;
 use super::{Options, lock, opt_string_value, this, throw_io};
 
 const HTTP_IMPL: &str = "fastemu/io/HttpConnectionImpl";
+const HTTPS_IMPL: &str = "fastemu/io/HttpsConnectionImpl";
 
 /// How long the response head may take to arrive after the request was
 /// sent. A phone's network gave up on a silent server too.
@@ -73,6 +76,8 @@ struct State {
     /// and message, thrown again by every later call that needs the
     /// response.
     failure: Option<(String, Option<String>)>,
+    /// The TLS details of an `https:` connection, once connected.
+    security: Option<SecurityDetails>,
 }
 
 impl State {
@@ -195,8 +200,9 @@ fn shared(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<Shared> {
     }
 }
 
-/// Opens an `http:` connection: parses the name and checks the network
-/// policy. Nothing goes on the network until the game needs it.
+/// Opens an `http:` or `https:` connection: parses the name and checks
+/// the network policy. Nothing goes on the network until the game needs
+/// it.
 pub(crate) fn open(
     ctx: &mut Ctx<'_>,
     scheme: &str,
@@ -209,7 +215,11 @@ pub(crate) fn open(
         Err(message) => return ctx.throw("java/lang/IllegalArgumentException", &message),
     };
     net::check_network(ctx)?;
-    let class = ctx.find_class(HTTP_IMPL)?;
+    let class = ctx.find_class(if scheme == "https" {
+        HTTPS_IMPL
+    } else {
+        HTTP_IMPL
+    })?;
     let conn = ctx.new_object(class)?;
     let state = State {
         url,
@@ -228,6 +238,7 @@ pub(crate) fn open(
         head_pending: false,
         response: None,
         failure: None,
+        security: None,
     };
     ctx.set_payload(conn, HttpPayload(Some(Arc::new(Mutex::new(state)))));
     Ok(conn)
@@ -291,6 +302,7 @@ fn ensure_sent(ctx: &mut Ctx<'_>, shared: &Shared, allow_closed: bool) -> JResul
     let mut s = lock(shared);
     let exchange = Exchange::new(Arc::clone(&link), s.method == "HEAD");
     s.exchange = Some(Arc::new(Mutex::new(exchange)));
+    s.security = link.security();
     s.link = Some(link);
     s.release_if_done();
     drop(s);
@@ -298,10 +310,13 @@ fn ensure_sent(ctx: &mut Ctx<'_>, shared: &Shared, allow_closed: bool) -> JResul
     Ok(())
 }
 
-/// Connects to the server and writes `request`.
+/// Connects to the server (with TLS for `https:`) and writes `request`.
 fn send(ctx: &mut Ctx<'_>, url: &HttpUrl, request: &[u8]) -> JResult<Link> {
-    let socket = net::connect(ctx, &url.host, url.port)?;
-    let link = Link::plain(socket);
+    let link = if url.scheme == "https" {
+        tls::connect(ctx, &url.host, url.port)?
+    } else {
+        Link::plain(net::connect(ctx, &url.host, url.port)?)
+    };
     net::write_all(ctx, &link, request, net::deadline(Some(IO_TIMEOUT)))?;
     Ok(link)
 }
@@ -787,7 +802,25 @@ fn class() -> NativeClass {
         })
 }
 
-/// The classes of HTTP.
+/// `HttpsConnection`: `HttpConnection` over TLS, and its security
+/// information. Asking for it connects, as the javadoc says.
+fn https_class() -> NativeClass {
+    NativeClass::new(HTTPS_IMPL)
+        .extends(HTTP_IMPL)
+        .implements("javax/microedition/io/HttpsConnection")
+        .method(
+            "getSecurityInfo",
+            "()Ljavax/microedition/io/SecurityInfo;",
+            |ctx, a| {
+                let shared = shared(ctx, this(a))?;
+                ensure_sent(ctx, &shared, false)?;
+                let details = lock(&shared).security.clone().unwrap_or_default();
+                Ok(tls::security_info(ctx, details)?.into())
+            },
+        )
+}
+
+/// The classes of HTTP and HTTPS.
 pub(crate) fn classes() -> Vec<NativeClass> {
-    vec![class()]
+    vec![class(), https_class()]
 }

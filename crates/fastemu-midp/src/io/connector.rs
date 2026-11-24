@@ -55,8 +55,9 @@ pub(crate) fn open(ctx: &mut Ctx<'_>, name: Value, mode: i32, timeouts: bool) ->
     };
     let options = Options { mode, timeouts };
     match scheme.as_str() {
-        "http" => http::open(ctx, &scheme, rest, &name, options),
+        "http" | "https" => http::open(ctx, &scheme, rest, &name, options),
         "socket" => socket::open(ctx, rest, &name, options),
+        "ssl" => socket::open_secure(ctx, rest, &name, options),
         "datagram" => datagram::open(ctx, rest, &name, options),
         "comm" => ctx.throw(
             NOT_FOUND,

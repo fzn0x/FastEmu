@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use fastemu_core::NetworkPolicy;
 use fastemu_jvm::{Ctx, JResult, Throw};
 
+use super::tls;
 use crate::env;
 
 /// The longest one system call on a connection blocks with the VM lock
@@ -230,17 +231,37 @@ pub(crate) fn set_slices(stream: &TcpStream) -> io::Result<()> {
     stream.set_write_timeout(Some(SLICE))
 }
 
-/// A connected TCP socket: what HTTP and socket connections read and
-/// write. `&Link` reads and writes, so one thread may read while another
-/// writes.
+/// A connected TCP socket, with TLS on it or not: what HTTP and socket
+/// connections read and write. `&Link` reads and writes, so one thread
+/// may read while another writes.
 pub(crate) struct Link {
     socket: TcpStream,
+    tls: Option<tls::Session>,
 }
 
 impl Link {
     /// A link over the connected `socket`.
     pub(crate) fn plain(socket: TcpStream) -> Self {
-        Self { socket }
+        Self { socket, tls: None }
+    }
+
+    /// A link over `socket` that speaks TLS through `session`.
+    pub(crate) fn secure(socket: TcpStream, session: tls::Session) -> Self {
+        Self {
+            socket,
+            tls: Some(session),
+        }
+    }
+
+    /// One bounded step of the TLS handshake: `Ok(true)` once it is done,
+    /// at once for a plain link.
+    pub(crate) fn handshake(&self) -> io::Result<bool> {
+        self.tls.as_ref().map_or(Ok(true), tls::Session::handshake)
+    }
+
+    /// What `SecurityInfo` reports, for a TLS link.
+    pub(crate) fn security(&self) -> Option<tls::SecurityDetails> {
+        self.tls.as_ref().map(tls::Session::details)
     }
 
     /// The socket, for its addresses and options.
@@ -256,6 +277,9 @@ impl Link {
     /// write that another thread starts meanwhile sees `WouldBlock`,
     /// which every caller here treats as "try again".
     pub(crate) fn available(&self) -> usize {
+        if let Some(session) = &self.tls {
+            return session.available(&self.socket);
+        }
         let mut probe = [0; 16 * 1024];
         if self.socket.set_nonblocking(true).is_err() {
             return 0;
@@ -267,17 +291,26 @@ impl Link {
 
     /// One bounded read; `Ok(0)` at the end of the stream.
     pub(crate) fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-        (&self.socket).read(buf)
+        match &self.tls {
+            Some(session) => session.read(buf),
+            None => (&self.socket).read(buf),
+        }
     }
 
     /// One bounded write; returns how much it took.
     pub(crate) fn write(&self, buf: &[u8]) -> io::Result<usize> {
-        (&self.socket).write(buf)
+        match &self.tls {
+            Some(session) => session.write(buf),
+            None => (&self.socket).write(buf),
+        }
     }
 
     /// Pushes out what earlier writes left buffered.
     pub(crate) fn flush(&self) -> io::Result<()> {
-        (&self.socket).flush()
+        match &self.tls {
+            Some(session) => session.flush(),
+            None => (&self.socket).flush(),
+        }
     }
 
     /// Closes both directions, which also wakes a thread blocked in
