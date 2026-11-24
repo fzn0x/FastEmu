@@ -9,7 +9,9 @@
 //! gives the JAD's value, as MIDP says for untrusted suites.
 //!
 //! A JAD is hostile input: its `MIDlet-Jar-URL` never makes the host
-//! touch a file outside the JAD's folder or a network share.
+//! touch a file outside the JAD's folder or a network share, and a JAR
+//! over [`MAX_JAR_BYTES`] or a JAD over [`MAX_JAD_BYTES`] is refused
+//! before it is read.
 
 pub mod attributes;
 pub mod source;
@@ -25,6 +27,14 @@ pub use zip::ZipArchive;
 
 /// The binary name every MIDlet class extends.
 const MIDLET_CLASS: &str = "javax/microedition/midlet/MIDlet";
+
+/// The largest JAR [`Suite::open`] reads. The biggest JAR of the test
+/// games is 1.4 MB and phones held a few MB. It equals the largest entry
+/// the ZIP reader inflates.
+pub const MAX_JAR_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The largest JAD [`Suite::open`] reads. Real ones are under 1 KB.
+pub const MAX_JAD_BYTES: u64 = 1024 * 1024;
 
 /// The longest file or folder name a JAD may use in its JAR path, as most
 /// file systems allow.
@@ -54,8 +64,9 @@ fn is_jad(path: &Path) -> bool {
 impl Suite {
     /// Opens the suite at `path`, a `.jar` or a `.jad`.
     pub fn open(path: &Path) -> Result<Self, LaunchError> {
+        let mut notes = Vec::new();
         let (jar_path, jad) = if is_jad(path) {
-            let jad = std::fs::read(path)?;
+            let jad = read_capped(path, MAX_JAD_BYTES)?;
             let attributes = attributes::parse(&jad);
             let jar = find_jar_of_jad(path, &attributes).ok_or_else(|| {
                 LaunchError::InvalidSuite(format!(
@@ -66,13 +77,21 @@ impl Suite {
             (jar, Some((path.to_path_buf(), attributes)))
         } else {
             let beside = path.with_extension("jad");
-            let jad = (beside != path && beside.is_file())
-                .then(|| std::fs::read(&beside).ok())
-                .flatten()
-                .map(|bytes| (beside, attributes::parse(&bytes)));
+            let jad = if beside != path && beside.is_file() {
+                match read_capped(&beside, MAX_JAD_BYTES) {
+                    Ok(bytes) => Some((beside, attributes::parse(&bytes))),
+                    Err(LaunchError::InvalidSuite(why)) => {
+                        notes.push(format!("{why}; its attributes are not used"));
+                        None
+                    }
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
             (path.to_path_buf(), jad)
         };
-        let bytes = std::fs::read(&jar_path)?;
+        let bytes = read_capped(&jar_path, MAX_JAR_BYTES)?;
         let jar_bytes = bytes.len() as u64;
         let jar = ZipArchive::new(bytes)
             .map_err(|e| LaunchError::InvalidSuite(format!("{}: {e}", jar_path.display())))?;
@@ -84,7 +103,8 @@ impl Suite {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let (info, notes) = read_info(&jar, jad_attributes, jar_bytes, &fallback_name);
+        let (info, read_notes) = read_info(&jar, jad_attributes, jar_bytes, &fallback_name);
+        notes.extend(read_notes);
         Ok(Self {
             info,
             jar: Arc::new(jar),
@@ -93,6 +113,55 @@ impl Suite {
             notes,
         })
     }
+}
+
+/// Reads the whole of the regular file at `path`, which may hold at most
+/// `max` bytes. A file that is not a regular file (a folder, a pipe, a
+/// device) or is bigger gives [`LaunchError::InvalidSuite`] without being
+/// read. The size is checked before the read, and the read stops one byte
+/// past `max`, so a file that grows meanwhile cannot fill the memory.
+fn read_capped(path: &Path, max: u64) -> Result<Vec<u8>, LaunchError> {
+    use std::io::Read;
+
+    let name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let not_regular = || LaunchError::InvalidSuite(format!("{name} is not a regular file"));
+    let too_big = |bytes: u64| {
+        LaunchError::InvalidSuite(format!(
+            "{name} is {} MiB, more than the {} MiB FastEmu reads",
+            mib(bytes),
+            mib(max)
+        ))
+    };
+    // Looked at before the open, which waits for a writer on a pipe.
+    if !std::fs::metadata(path)?.is_file() {
+        return Err(not_regular());
+    }
+    let file = std::fs::File::open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() {
+        return Err(not_regular());
+    }
+    if meta.len() > max {
+        return Err(too_big(meta.len()));
+    }
+    let mut bytes = Vec::with_capacity(usize::try_from(meta.len()).unwrap_or(0));
+    file.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max {
+        return Err(too_big(bytes.len() as u64));
+    }
+    Ok(bytes)
+}
+
+/// `bytes` in MiB, rounded up to one decimal so that a file over its limit
+/// never reads as equal to it in a message.
+fn mib(bytes: u64) -> String {
+    format!(
+        "{:.1}",
+        (bytes as f64 / (1024.0 * 1024.0) * 10.0).ceil() / 10.0
+    )
 }
 
 /// The JAR a JAD names, by the rules in the module comment.
@@ -612,6 +681,114 @@ mod tests {
             let suite = Suite::open(&jad).unwrap_or_else(|e| panic!("{url:?}: {e}"));
             assert_eq!(suite.jar_path, under(&dir, found), "for {url:?}");
         }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn read_capped_takes_an_exact_fit_and_refuses_the_rest() {
+        let dir = temp_dir("capped");
+        let file = dir.join("two.bin");
+        std::fs::write(&file, vec![7u8; 2048]).unwrap();
+        let Err(LaunchError::InvalidSuite(why)) = read_capped(&file, 1024) else {
+            panic!("a file over the cap is refused");
+        };
+        assert!(why.contains("two.bin") && why.contains("MiB"), "{why}");
+        assert_eq!(read_capped(&file, 2048).unwrap(), vec![7u8; 2048]);
+        assert_eq!(read_capped(&file, 4096).unwrap().len(), 2048);
+        std::fs::write(&file, b"").unwrap();
+        assert!(read_capped(&file, 0).unwrap().is_empty());
+        // A folder is not a file, and a missing file is an I/O error.
+        let Err(LaunchError::InvalidSuite(why)) = read_capped(&dir, 1024) else {
+            panic!("a folder is refused");
+        };
+        assert!(why.contains("not a regular file"), "{why}");
+        assert!(matches!(
+            read_capped(&dir.join("none"), 1024),
+            Err(LaunchError::Io(_))
+        ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_size_in_a_message_never_equals_the_limit_it_broke() {
+        assert_eq!(mib(MAX_JAR_BYTES), "64.0");
+        assert_eq!(mib(MAX_JAR_BYTES + 1), "64.1");
+        assert_eq!(mib(MAX_JAD_BYTES), "1.0");
+        assert_eq!(mib(MAX_JAD_BYTES + 1), "1.1");
+    }
+
+    /// Makes a file of `len` zero bytes without writing them.
+    fn zeros(path: &Path, len: u64) {
+        std::fs::File::create(path).unwrap().set_len(len).unwrap();
+    }
+
+    #[test]
+    fn a_jar_over_64_mib_is_refused_without_reading_it() {
+        let dir = temp_dir("bigjar");
+        let big = dir.join("big.jar");
+        zeros(&big, MAX_JAR_BYTES + 1);
+        let Err(LaunchError::InvalidSuite(why)) = Suite::open(&big) else {
+            panic!("a JAR over the cap is refused");
+        };
+        assert!(
+            why.contains("big.jar") && why.contains("64.1 MiB") && why.contains("64.0 MiB"),
+            "{why}"
+        );
+        // The same through a JAD that names it.
+        let jad = dir.join("game.jad");
+        std::fs::write(&jad, "MIDlet-Jar-URL: big.jar\n").unwrap();
+        let Err(LaunchError::InvalidSuite(why)) = Suite::open(&jad) else {
+            panic!("a JAD naming it is refused too");
+        };
+        assert!(why.contains("big.jar") && why.contains("MiB"), "{why}");
+        // One byte under is read, and is not a ZIP.
+        zeros(&big, MAX_JAR_BYTES);
+        let Err(LaunchError::InvalidSuite(why)) = Suite::open(&big) else {
+            panic!("zeros are not a JAR");
+        };
+        assert!(why.contains("ZIP"), "{why}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_jad_over_1_mib_is_refused_and_one_beside_a_jar_is_skipped() {
+        let dir = temp_dir("bigjad");
+        let jad = dir.join("game.jad");
+        zeros(&jad, MAX_JAD_BYTES + 1);
+        let Err(LaunchError::InvalidSuite(why)) = Suite::open(&jad) else {
+            panic!("a JAD over the cap is refused");
+        };
+        assert!(
+            why.contains("game.jad") && why.contains("1.1 MiB") && why.contains("1.0 MiB"),
+            "{why}"
+        );
+        // Beside a JAR it is left out, with a note, and the JAR still opens.
+        std::fs::write(dir.join("game.jar"), jar("META-INF/MANIFEST.MF", MANIFEST)).unwrap();
+        let suite = Suite::open(&dir.join("game.jar")).unwrap();
+        assert!(suite.jad_path.is_none());
+        assert_eq!(suite.info.name, "Snake");
+        assert!(
+            suite.notes.iter().any(|n| n.contains("game.jad")),
+            "{:?}",
+            suite.notes
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_folder_named_like_a_jar_is_refused() {
+        let dir = temp_dir("folder");
+        std::fs::create_dir_all(dir.join("game.jar")).unwrap();
+        let Err(LaunchError::InvalidSuite(why)) = Suite::open(&dir.join("game.jar")) else {
+            panic!("a folder is not a JAR");
+        };
+        assert!(why.contains("not a regular file"), "{why}");
+        // A JAD that names it finds no JAR at all.
+        std::fs::write(dir.join("game.jad"), "MIDlet-Jar-URL: game.jar\n").unwrap();
+        assert!(matches!(
+            Suite::open(&dir.join("game.jad")),
+            Err(LaunchError::InvalidSuite(_))
+        ));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
