@@ -189,6 +189,7 @@ programs! {
     gc_stress: "GcStress", 4;
     hello: "Hello", 8;
     inheritance: "Inheritance", 8;
+    readers: "Readers", 8;
     recursion: "Recursion", 8;
     static_init: "StaticInit", 8;
     strings: "Strings", 8;
