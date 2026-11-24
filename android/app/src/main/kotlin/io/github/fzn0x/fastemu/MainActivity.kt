@@ -1,5 +1,6 @@
 package io.github.fzn0x.fastemu
 
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
@@ -12,6 +13,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.EditText
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -141,6 +143,36 @@ class MainActivity : GameActivity() {
             // The library keeps a descriptor over its JAR when both come.
             val paths = copies.joinToString("\n") { it.absolutePath }
             NativeBridge.nativeSuitePicked(request, paths.ifEmpty { null })
+        }
+    }
+
+    /**
+     * Asks for a line of text with the system keyboard, for a game's text
+     * box: a dialog with a text field titled with the game's name. Called
+     * from Rust; the text, or null when the dialog is cancelled, goes back
+     * through [NativeBridge.nativeTextEntered].
+     */
+    @Suppress("unused")
+    fun enterText(request: Long, title: String) {
+        runOnUiThread {
+            var answered = false
+            val answer = { text: String? ->
+                if (!answered) {
+                    answered = true
+                    NativeBridge.nativeTextEntered(request, text)
+                }
+            }
+            val field = EditText(this)
+            val dialog = AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(field)
+                .setPositiveButton(android.R.string.ok) { _, _ -> answer(field.text.toString()) }
+                .setNegativeButton(android.R.string.cancel) { _, _ -> answer(null) }
+                .setOnDismissListener { answer(null) }
+                .create()
+            dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+            dialog.show()
+            field.requestFocus()
         }
     }
 

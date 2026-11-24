@@ -1,8 +1,10 @@
 //! The app on Android: the entry point GameActivity starts, the sound
-//! output, and the Kotlin side's file picker around fastemu-ui's views.
+//! output, and the Kotlin side's file picker and text entry around
+//! fastemu-ui's views.
 
 mod app;
 mod picker;
+mod text_entry;
 
 use fastemu_audio::{AudioOutput, Engine, NullOutput};
 use futures::channel::mpsc;

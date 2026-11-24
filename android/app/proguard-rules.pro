@@ -2,7 +2,7 @@
 # Removing or renaming any of them fails at run time, not at build time.
 
 # MainActivity's methods for Rust: gestureConfiguration, keyCharacter,
-# openUrl, setKeepScreenOn and pickSuite.
+# openUrl, setKeepScreenOn, pickSuite and enterText.
 -keep class io.github.fzn0x.fastemu.MainActivity {
     public <methods>;
 }

@@ -24,4 +24,11 @@ object NativeBridge {
      */
     @JvmStatic
     external fun nativeSuitePicked(request: Long, paths: String?)
+
+    /**
+     * The answer to [MainActivity.enterText]: the text typed for a game's
+     * text box, or null when the dialog was cancelled.
+     */
+    @JvmStatic
+    external fun nativeTextEntered(request: Long, text: String?)
 }

@@ -12,7 +12,7 @@ use futures::StreamExt as _;
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{App, AppContext as _, AppLifecyclePhase, WindowHandle, WindowOptions};
 
-use super::picker;
+use super::{picker, text_entry};
 use crate::files;
 
 /// The app's folders.
@@ -45,7 +45,7 @@ pub(super) fn start(
     let config = AppConfig {
         launcher: Arc::new(MidpLauncher::new(Some(engine))),
         paths: folders.app_paths(),
-        text_entry: None,
+        text_entry: Some(text_entry::entry()),
     };
     let window = cx.open_window(WindowOptions::default(), |window, cx| {
         cx.new(|cx| FastEmuView::new(config, window, cx))
