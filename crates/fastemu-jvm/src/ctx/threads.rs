@@ -134,6 +134,24 @@ impl Ctx<'_> {
         Ok(ran)
     }
 
+    /// Queues `task` for [`Ctx::run_posted`], as [`crate::Vm::post`] does.
+    /// Natives use this one: `Vm::post` takes the VM lock, which the
+    /// calling thread already holds.
+    pub fn post(&mut self, task: impl FnOnce(&mut Ctx<'_>) -> JResult<()> + Send + 'static) {
+        self.state.posted.push_back(Box::new(task));
+        self.shared.cond.notify_all();
+    }
+
+    /// Asks every thread to stop, as [`crate::Vm::stop`] does, from native
+    /// code (which holds the VM lock `Vm::stop` would wait for). The
+    /// calling native should then return `Err(Throw::Stop)`.
+    pub fn stop_vm(&mut self) {
+        self.shared
+            .stopping
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.shared.cond.notify_all();
+    }
+
     /// Waits until a task is posted or `deadline` passes, and returns
     /// whether tasks are waiting.
     pub fn wait_posted(&mut self, deadline: Option<Instant>) -> JResult<bool> {

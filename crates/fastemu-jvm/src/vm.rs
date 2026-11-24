@@ -211,9 +211,12 @@ impl VmShared {
 
 /// A virtual machine: one game's heap, classes and threads.
 ///
-/// `Vm` is a cheap handle; clones share the machine. Every method returns
-/// quickly and may be called from any thread. Each FastEmu instance runs
-/// its own `Vm`, so instances run in parallel on different cores.
+/// `Vm` is a cheap handle; clones share the machine. Its methods are for
+/// host threads (the UI, the launcher): they may take the VM lock, so
+/// native code, which runs with that lock held, uses the [`Ctx`]
+/// equivalents ([`Ctx::post`], [`Ctx::stop_vm`]) instead. Each FastEmu
+/// instance runs its own `Vm`, so instances run in parallel on different
+/// cores.
 #[derive(Clone)]
 pub struct Vm {
     pub(crate) shared: Arc<VmShared>,
