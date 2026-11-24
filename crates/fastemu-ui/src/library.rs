@@ -141,9 +141,21 @@ impl Library {
     }
 }
 
+/// Whether two paths name one file. Asking the file system is slow (tens
+/// of microseconds a path on Windows) and the library compares every
+/// pair of entries when it loads, so only paths ending in the same file
+/// name, ignoring ASCII case, get that far. Links under another name
+/// count as different files.
 fn same_file(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
+    }
+    if let (Some(x), Some(y)) = (a.file_name(), b.file_name())
+        && !x
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&y.to_string_lossy())
+    {
+        return false;
     }
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
@@ -229,6 +241,19 @@ mod tests {
             "b",
             "falls back to the file name"
         );
+    }
+
+    #[test]
+    fn one_file_spelled_two_ways_is_one_entry() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::create_dir(dir.path().join("sub")).expect("mkdir");
+        for name in ["g.jar", "h.jar"] {
+            std::fs::write(dir.path().join(name), b"PK").expect("writes");
+        }
+        let mut lib = Library::default();
+        let g = lib.add(dir.path().join("g.jar"), &info("G"));
+        assert_eq!(lib.find_path(&dir.path().join("sub/../g.jar")), Some(g));
+        assert_eq!(lib.find_path(&dir.path().join("h.jar")), None);
     }
 
     #[test]
