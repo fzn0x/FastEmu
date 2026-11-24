@@ -86,7 +86,7 @@ pub(crate) fn classes() -> Vec<NativeClass> {
                 let zone = timezone::default_zone(ctx)?;
                 let offset = timezone::offset_at(ctx, zone, t)?;
                 let id = timezone::id_of(ctx, zone)?.unwrap_or_else(|| "GMT".to_owned());
-                string_value(ctx, &format(t + offset, &id))
+                string_value(ctx, &format(t.saturating_add(offset), &id))
             }),
     ]
 }

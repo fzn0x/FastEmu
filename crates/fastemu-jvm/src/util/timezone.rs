@@ -92,7 +92,7 @@ pub(super) fn offset_at(ctx: &mut Ctx<'_>, zone: ObjRef, utc: i64) -> JResult<i6
         Some(Rule::Host) => Ok(host_offset_at(utc)),
         None => {
             let raw = i64::from(ctx.call_virtual(zone, "getRawOffset", "()I", &[])?.int());
-            let standard = utc + raw;
+            let standard = utc.saturating_add(raw);
             let days = standard.div_euclid(time::DAY_MS);
             let (year, month, day) = civil_from_days(days);
             let (era, year) = if year > 0 { (1, year) } else { (0, 1 - year) };
@@ -118,7 +118,7 @@ pub(super) fn offset_for_local(ctx: &mut Ctx<'_>, zone: ObjRef, local: i64) -> J
         Some(Rule::Host) => Ok(host_offset_for_local(local)),
         None => {
             let raw = i64::from(ctx.call_virtual(zone, "getRawOffset", "()I", &[])?.int());
-            offset_at(ctx, zone, local - raw)
+            offset_at(ctx, zone, local.saturating_sub(raw))
         }
     }
 }
@@ -164,8 +164,10 @@ fn get_offset(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         Rule::Host => {
             let year = if era == 0 { 1 - year } else { year };
             let days = time::days_from_civil(year, i64::from(month) + 1, day);
-            let standard = days * time::DAY_MS + i64::from(millis);
-            host_offset_at(standard - host_raw_offset())
+            let standard = days
+                .saturating_mul(time::DAY_MS)
+                .saturating_add(i64::from(millis));
+            host_offset_at(standard.saturating_sub(host_raw_offset()))
         }
     };
     Ok(Value::Int(offset as i32))

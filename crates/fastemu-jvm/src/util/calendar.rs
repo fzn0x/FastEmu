@@ -263,7 +263,7 @@ fn gregorian_local(fields: &[i32; FIELD_COUNT], stamps: &[u32; FIELD_COUNT]) -> 
     };
     let time_of_day =
         ((hour * 60 + field(MINUTE)) * 60 + field(SECOND)) * 1000 + field(MILLISECOND);
-    days * DAY_MS + time_of_day
+    days.saturating_mul(DAY_MS).saturating_add(time_of_day)
 }
 
 /// `computeFields()` of this library's calendar.
@@ -294,7 +294,7 @@ fn gregorian_time(ctx: &mut Ctx<'_>, cal: ObjRef) -> JResult<()> {
     let local = gregorian_local(&fields, &stamps);
     let zone = zone(ctx, cal)?;
     let offset = timezone::offset_for_local(ctx, zone, local)?;
-    ctx.set_field(cal, ids.time, Value::Long(local - offset));
+    ctx.set_field(cal, ids.time, Value::Long(local.saturating_sub(offset)));
     Ok(())
 }
 
@@ -515,6 +515,34 @@ mod tests {
         f[DATE] = 1;
         f[HOUR_OF_DAY] = 25;
         assert_eq!(gregorian_local(&f, &stamps), at(2025, 1, 2, 3_600_000));
+    }
+
+    /// Years and instants at the ends of their ranges compute something
+    /// instead of overflowing, which would stop the virtual machine.
+    #[test]
+    fn extreme_years_and_times_do_not_overflow() {
+        let source = std::sync::Arc::new(crate::MemorySource::new());
+        let vm = crate::Vm::new(crate::VmConfig::default(), source, Vec::new());
+        vm.attach("test", |ctx| {
+            let get = "()Ljava/util/Calendar;";
+            for year in [i32::MAX, i32::MIN] {
+                let cal = ctx.call_static(CALENDAR, "getInstance", get, &[]).unwrap();
+                let cal = cal.obj().unwrap();
+                let set = [Value::Int(YEAR as i32), Value::Int(year)];
+                ctx.call_virtual(cal, "set", "(II)V", &set).unwrap();
+                let get = [Value::Int(YEAR as i32)];
+                ctx.call_virtual(cal, "get", "(I)I", &get).unwrap();
+            }
+            for millis in [i64::MAX, i64::MIN] {
+                let date = new_date(ctx, millis).unwrap();
+                let text = "()Ljava/lang/String;";
+                ctx.call_virtual(date, "toString", text, &[]).unwrap();
+            }
+            let zone = timezone::default_zone(ctx).unwrap();
+            let args = [1, i32::MAX, 0, 1, 1, 0].map(Value::Int);
+            ctx.call_virtual(zone, "getOffset", "(IIIIII)I", &args)
+                .unwrap();
+        });
     }
 
     #[test]
