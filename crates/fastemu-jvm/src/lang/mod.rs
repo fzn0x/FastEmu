@@ -6,7 +6,6 @@
 //! on a desktop JVM: `StringBuilder` exists, `Integer` extends `Number`,
 //! `String` implements `CharSequence`.
 
-pub(crate) mod charset;
 pub(crate) mod class;
 mod dtoa;
 pub(crate) mod float_fmt;

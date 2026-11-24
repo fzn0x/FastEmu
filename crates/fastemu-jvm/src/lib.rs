@@ -10,6 +10,7 @@
 //! `docs/architecture/jvm.md` describes the design and the rules native
 //! code must follow.
 
+mod charset;
 mod class;
 pub mod classfile;
 mod ctx;

@@ -1,10 +1,10 @@
 //! `java.lang.String`: immutable UTF-16 text in a Rust payload, with a
 //! cached hash. Literals and `intern()` share one table.
 
-use super::charset::Charset;
 use super::number::{to_lower, to_upper};
 use super::strbuf::StrBuf;
 use super::{check_range, this, throw};
+use crate::charset::Charset;
 use crate::class::ArrayType;
 use crate::ctx::{Ctx, JResult};
 use crate::heap::Payload;
@@ -82,14 +82,16 @@ fn string_result(ctx: &mut Ctx<'_>, chars: Vec<u16>) -> JResult<Value> {
     Ok(ctx.new_string_utf16(chars)?.into())
 }
 
-/// The default charset, from `microedition.encoding`.
+/// The charset of conversions that name none (`new String(bytes)`,
+/// `getBytes()`, readers, writers and print streams), from
+/// `microedition.encoding`, the game's encoding setting.
 pub(crate) fn default_charset(ctx: &Ctx<'_>) -> Charset {
-    ctx.property("microedition.encoding")
-        .and_then(Charset::lookup)
-        .unwrap_or(Charset::Utf8)
+    Charset::default_for(ctx.property("microedition.encoding"))
 }
 
-fn named_charset(ctx: &mut Ctx<'_>, v: Value) -> JResult<Charset> {
+/// The charset the string argument `v` names; throws
+/// `UnsupportedEncodingException` for one this virtual machine lacks.
+pub(crate) fn named_charset(ctx: &mut Ctx<'_>, v: Value) -> JResult<Charset> {
     let name_obj = ctx.non_null(v)?;
     let name = ctx.string(name_obj)?;
     match Charset::lookup(&name) {

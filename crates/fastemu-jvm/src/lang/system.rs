@@ -51,11 +51,8 @@ fn line_buffer(state: &mut VmState, level: LogLevel) -> &mut Vec<u8> {
 
 fn emit(shared: &VmShared, state: &VmState, level: LogLevel, line: &[u8]) {
     let line = line.strip_suffix(b"\r").unwrap_or(line);
-    let charset = state
-        .properties
-        .get("microedition.encoding")
-        .and_then(|name| super::charset::Charset::lookup(name))
-        .unwrap_or(super::charset::Charset::Utf8);
+    let encoding = state.properties.get("microedition.encoding");
+    let charset = crate::charset::Charset::default_for(encoding.map(String::as_str));
     shared.log(level, String::from_utf16_lossy(&charset.decode(line)));
 }
 
