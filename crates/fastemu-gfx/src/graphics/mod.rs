@@ -10,10 +10,12 @@
 mod curves;
 mod images;
 mod shapes;
+mod text;
 
 use crate::anchor::AnchorPolicy;
 use crate::color::{OPAQUE, display_color, gray_of};
 use crate::error::{GfxError, Result};
+use crate::font::Font;
 use crate::raster::{Canvas, Clip};
 use crate::surface::{Surface, SurfaceKind};
 
@@ -48,16 +50,20 @@ pub struct Graphics {
     /// colour `setColor` set.
     gray: u8,
     stroke: StrokeStyle,
+    font: Font,
+    /// The font `reset` and `set_font(None)` return to.
+    default_font: Font,
     anchors: AnchorPolicy,
     display_colors: u32,
 }
 
 impl Graphics {
     /// A `Graphics` for drawing on `target`, in MIDP's initial state: no
-    /// translation, the whole surface as clip, black, solid strokes.
+    /// translation, the whole surface as clip, black, solid strokes and
+    /// `default_font` (the instance's `Font.getDefaultFont()`).
     /// Immutable images refuse with `IllegalStateException`, as
     /// `Image.getGraphics()` does.
-    pub fn new(target: &Surface) -> Result<Self> {
+    pub fn new(target: &Surface, default_font: Font) -> Result<Self> {
         if target.kind() == SurfaceKind::Immutable {
             return Err(GfxError::IllegalState("an immutable image has no Graphics"));
         }
@@ -72,6 +78,8 @@ impl Graphics {
             color: OPAQUE,
             gray: 0,
             stroke: StrokeStyle::Solid,
+            font: default_font.clone(),
+            default_font,
             anchors: AnchorPolicy::Strict,
             display_colors: 1 << 24,
         })
@@ -86,6 +94,7 @@ impl Graphics {
         self.color = OPAQUE;
         self.gray = 0;
         self.stroke = StrokeStyle::Solid;
+        self.font = self.default_font.clone();
     }
 
     /// Whether the target is the screen rather than an image.
@@ -258,6 +267,16 @@ impl Graphics {
         }
     }
 
+    /// `setFont(font)`; `None` (a null font) selects the default font.
+    pub fn set_font(&mut self, font: Option<Font>) {
+        self.font = font.unwrap_or_else(|| self.default_font.clone());
+    }
+
+    /// `getFont()`.
+    pub fn font(&self) -> &Font {
+        &self.font
+    }
+
     /// The absolute position of a translated point.
     pub(crate) fn at(&self, x: i32, y: i32) -> (i64, i64) {
         (
@@ -294,18 +313,19 @@ mod tests {
     use super::*;
 
     fn graphics(w: i32, h: i32) -> Graphics {
-        Graphics::new(&Surface::new_mutable(w, h).unwrap()).unwrap()
+        crate::testing::graphics(&Surface::new_mutable(w, h).unwrap())
     }
 
     #[test]
     fn immutable_images_have_no_graphics() {
         let image = Surface::from_rgb(&[0], 1, 1, false).unwrap();
+        let font = crate::testing::font();
         assert!(matches!(
-            Graphics::new(&image),
+            Graphics::new(&image, font),
             Err(GfxError::IllegalState(_))
         ));
         let screen = Surface::screen(4, 4).unwrap();
-        assert!(Graphics::new(&screen).unwrap().is_screen());
+        assert!(crate::testing::graphics(&screen).is_screen());
     }
 
     #[test]

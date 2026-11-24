@@ -142,7 +142,7 @@ mod tests {
 
     fn canvas(w: i32, h: i32) -> (Surface, Graphics) {
         let surface = Surface::new_mutable(w, h).unwrap();
-        let g = Graphics::new(&surface).unwrap();
+        let g = crate::testing::graphics(&surface);
         (surface, g)
     }
 

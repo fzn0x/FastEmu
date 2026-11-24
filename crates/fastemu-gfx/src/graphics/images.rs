@@ -228,7 +228,7 @@ mod tests {
 
     fn canvas(w: i32, h: i32) -> (Surface, Graphics) {
         let surface = Surface::new_mutable(w, h).unwrap();
-        let g = Graphics::new(&surface).unwrap();
+        let g = crate::testing::graphics(&surface);
         (surface, g)
     }
 
@@ -418,7 +418,7 @@ mod tests {
             Err(GfxError::IllegalArgument(_))
         ));
         let mut screen = Surface::screen(4, 4).unwrap();
-        let sg = Graphics::new(&screen).unwrap();
+        let sg = crate::testing::graphics(&screen);
         assert!(matches!(
             sg.copy_area(&mut screen, 0, 0, 1, 1, 0, 0, 0),
             Err(GfxError::IllegalState(_))

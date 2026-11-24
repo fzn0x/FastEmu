@@ -64,6 +64,14 @@ fn blend_onto_translucent(dst: u32, src: u32, sa: u32, da: u32) -> u32 {
     (div255(total) << 24) | channel(16) | channel(8) | channel(0)
 }
 
+/// `color` with its alpha scaled by `coverage` (0 to 255), for the
+/// anti-aliased edges of glyphs.
+#[inline]
+pub(crate) fn with_coverage(color: u32, coverage: u8) -> u32 {
+    let alpha = div255((color >> 24) * u32::from(coverage));
+    (alpha << 24) | (color & 0x00FF_FFFF)
+}
+
 /// The grey level (0 to 255) of an RGB colour: Rec. 601 luma, rounded, so
 /// white is 255 and black is 0.
 pub fn gray_of(rgb: u32) -> u8 {
@@ -193,6 +201,13 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn coverage_scales_alpha_only() {
+        assert_eq!(with_coverage(0xFF11_2233, 255), 0xFF11_2233);
+        assert_eq!(with_coverage(0xFF11_2233, 0), 0x0011_2233);
+        assert_eq!(with_coverage(0x8011_2233, 128) >> 24, 0x40);
     }
 
     #[test]
