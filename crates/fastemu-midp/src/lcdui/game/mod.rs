@@ -6,6 +6,7 @@
 //! draw through `fastemu-gfx`'s `drawRegion`. `docs/architecture/midp.md`
 //! describes how they fit the runtime.
 
+mod canvas;
 mod layer;
 mod manager;
 pub mod model;
@@ -17,6 +18,7 @@ use fastemu_jvm::NativeClass;
 /// The classes of this module.
 pub fn classes() -> Vec<NativeClass> {
     vec![
+        canvas::class(),
         layer::class(),
         sprite::class(),
         tiled::class(),
