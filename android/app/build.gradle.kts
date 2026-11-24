@@ -46,6 +46,24 @@ val workspaceVersionCode: Int = run {
     parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2]
 }
 
+// The release key. The release workflow decodes it from the repository's
+// secrets into a PKCS12 file and names it here, with its password; the key's
+// alias is "fastemu". Without it the release build is signed with the debug
+// key, which is fine on your own device: no release can update such an APK,
+// so the workflow refuses to publish one.
+val releaseKeystore: File? = System.getenv("FASTEMU_ANDROID_KEYSTORE_FILE")
+    ?.takeIf(String::isNotBlank)
+    ?.let(::file)
+val releaseKeystorePassword: String? = System.getenv("FASTEMU_ANDROID_KEYSTORE_PASSWORD")
+if (releaseKeystore != null) {
+    require(releaseKeystore.isFile) {
+        "FASTEMU_ANDROID_KEYSTORE_FILE names $releaseKeystore, which is not a file"
+    }
+    require(!releaseKeystorePassword.isNullOrEmpty()) {
+        "FASTEMU_ANDROID_KEYSTORE_PASSWORD is not set"
+    }
+}
+
 android {
     namespace = "io.github.fzn0x.fastemu"
     compileSdk = 35
@@ -64,6 +82,18 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storeType = "PKCS12"
+                storePassword = releaseKeystorePassword
+                keyAlias = "fastemu"
+                keyPassword = releaseKeystorePassword
+            }
+        }
+    }
+
     buildTypes {
         getByName("release") {
             // R8 drops the parts of AppCompat the app never uses, most of
@@ -75,9 +105,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Debug-signed until FastEmu has a release key; see
-            // docs/building-android.md.
-            signingConfig = signingConfigs.getByName("debug")
+            // The release key when it is given, the debug key otherwise.
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
     }
 
