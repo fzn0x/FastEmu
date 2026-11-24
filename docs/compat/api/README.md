@@ -55,7 +55,7 @@ when it resolves a reference.
 | T | The tier, see below. |
 | Field | The field name. |
 | Type | The field's JVM descriptor, such as `I` or `Ljava/lang/String;`. |
-| Value | The value of a compile-time constant. Integers in decimal, with the hex form for bit flags and masks; `float` and `double` with their exact bits; `char` as the character and its code; `String` in Java syntax. "(not a constant)" for fields that are not compile-time constants, such as `System.out`. |
+| Value | The value of a compile-time constant. Integers in decimal, with the hex form for bit flags and masks; `float` and `double` with their exact bits; `char` as the character and its code; `String` in Java syntax. "(not a constant)" for fields that are not compile-time constants, such as `System.out`. A value that only emulator source gives (no javadoc or stub jar states it) says so, as in "(from freej2me-plus only)": treat it as a guess to check. "(value not in the sources)" marks a constant no source gives. |
 | Constructor, Method | The Java form, with the javadoc's parameter names and simple type names. |
 | Descriptor | The member's name and JVM descriptor exactly as a `CONSTANT_NameAndType` in a class file names it: `drawString(Ljava/lang/String;III)V`, `<init>(Ljava/lang/String;)V`. A game's `invokevirtual` or `getstatic` must resolve to this. |
 | Flags | `protected` (every member not marked so is `public`), `static`, `abstract` (not repeated on interface methods, which are all abstract), `final`, and `deprecated` when the javadoc deprecates the member. Fields are `final` unless the column says "not final". |
