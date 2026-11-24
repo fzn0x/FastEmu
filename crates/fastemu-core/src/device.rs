@@ -36,7 +36,10 @@ impl KeyCodes {
         end: -11,
     };
 
-    /// Siemens phones.
+    /// Siemens phones. The soft keys, arrows and fire key follow the
+    /// emulators that studied Siemens phones; no source gives Siemens codes
+    /// for clear, send and end, so those keep Nokia's, which is what other
+    /// emulators' Siemens layouts send as well.
     pub const SIEMENS: KeyCodes = KeyCodes {
         soft_left: -1,
         soft_right: -4,
@@ -45,12 +48,13 @@ impl KeyCodes {
         left: -61,
         right: -62,
         fire: -26,
-        clear: -12,
-        send: -11,
-        end: -12,
+        clear: -8,
+        send: -10,
+        end: -11,
     };
 
-    /// Motorola phones.
+    /// Motorola's most common layout (the RAZR V3 and its kin). Clear, send
+    /// and end are Nokia's: no source gives Motorola codes for them.
     pub const MOTOROLA: KeyCodes = KeyCodes {
         soft_left: -21,
         soft_right: -22,
@@ -84,8 +88,8 @@ impl KeyCodes {
         }
     }
 
-    /// The key that sends `code` on this phone, if any. When two keys share
-    /// a code (as Siemens' clear and end do), the first in [`Key::ALL`] wins.
+    /// The key that sends `code` on this phone, if any. If two keys ever
+    /// share a code, the first in [`Key::ALL`] wins.
     pub fn key(&self, code: i32) -> Option<Key> {
         Key::ALL.into_iter().find(|&k| self.code(k) == code)
     }
@@ -270,7 +274,7 @@ mod tests {
 
     #[test]
     fn codes_round_trip_through_keys() {
-        for codes in [KeyCodes::NOKIA, KeyCodes::MOTOROLA] {
+        for codes in [KeyCodes::NOKIA, KeyCodes::SIEMENS, KeyCodes::MOTOROLA] {
             for key in Key::ALL {
                 assert_eq!(codes.key(codes.code(key)), Some(key), "{key:?}");
             }
