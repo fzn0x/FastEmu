@@ -60,6 +60,7 @@ code must follow, and how to define a Java class in Rust.
 | `ctx` | The `Ctx` API for natives. |
 | `native` | `NativeClass`, the builder for classes defined in Rust. |
 | `vm` | `Vm`, `VmConfig`, the shared state. |
+| `limits` | `VmLimits`, the limits on what a game can make the VM use. |
 | `lang` | `java.lang` in Rust, and the helpers the other library modules share. |
 | `io` | `java.io` in Rust. |
 | `util` | `java.util` in Rust, with MIDP's `Timer` and `TimerTask`. |
@@ -117,6 +118,8 @@ vm.spawn("main", |ctx| {
 - `diagnostics`: receives each `Diagnostic` once per VM (see below).
 - `allow_exit`: whether `System.exit` stops the VM (`Vm::exit_code` then
   holds the status) or throws `SecurityException`, as MIDP requires.
+- `limits`: a `VmLimits`, the limits on what a game can make the VM use
+  besides the heap (see [Limits](#limits)).
 
 `Vm` methods:
 
@@ -252,15 +255,92 @@ and asks for a collection when the heap fills up; the collection runs at
 the next safepoint, where every reference the thread holds is in a root.
 The interpreter's allocation instructions are safepoints: they collect
 first when the heap is full and throw `OutOfMemoryError` if it still has
-no room. Natives allocate without that check (an allocation that alone
-exceeds the heap throws `OutOfMemoryError`), and the collection follows
-when they return. A string counts its characters, however it is made
-(`Ctx::new_string`, a constructor, `StringBuffer.toString`).
-`Ctx::set_payload` counts the change in the object's size the same way,
-so a native that fills in an object after making it (an image's pixels)
-brings the next collection closer; a payload that grows in place is
-measured again at the next collection. `System.gc()` and `Ctx::gc()`
-collect at once.
+no room. `System.gc()` and `Ctx::gc()` collect at once.
+
+**Natives follow a deferred rule**, because a native may hold references
+the collector cannot see, so it cannot collect in the middle:
+
+1. *Counted at once.* What a native makes counts as it is made: a string
+   counts its characters however it is made, `Ctx::set_payload` counts
+   the change in the object's size, and `Ctx::recount(obj)` counts a
+   payload that changed size afterwards (a buffer that grew, a stack trace
+   that was stored, a thread's name). Every heap object remembers the
+   size it was counted at, so `recount` adds only the difference. Call it
+   where the size changes, not on every call: `StringBuffer` calls it once
+   per doubling. A payload that changes size and skips it is counted only
+   at the next collection, and a loop that allocates nothing else never
+   reaches one.
+2. *Big requests are refused first.* `Ctx::check_alloc(bytes)` throws
+   `OutOfMemoryError` when `bytes` is more than the whole heap, or when
+   it and what the heap counts now come to more than twice the heap.
+   `new_array`, `new_object_array`, `new_byte_array`, `new_string` and
+   `new_string_utf16` call it. A native that builds a big host buffer
+   (`String.concat`, a growing `StringBuffer`) calls it before it builds
+   the buffer. The bound is twice the heap, not the heap, because the
+   count includes garbage that waits for a collection and a native cannot
+   collect.
+3. *Judged after the native returns.* The invoke instruction collects
+   when the heap asked for it, and if the live data still does not fit in
+   the limit it throws `OutOfMemoryError` (message `Java heap space`)
+   into the thread that ran the native, as on a phone. A thread whose
+   native allocated nothing asks for no collection and gets no error, so
+   one game thread cannot blame another. Natives called from other natives
+   are judged when the outermost one returns.
+
+A game that fills memory through natives alone (`s = s.concat(s)`,
+appending to a `StringBuffer`, keeping exceptions, resource streams or
+`toCharArray` results) therefore gets `OutOfMemoryError` after at most a
+few times the heap limit, and the host never holds much more than that.
+`Throwable` keeps at most 256 stack frames (16 bytes each) and a
+`Thread` name is cut to 255 characters, so neither is a way around the
+count. The `OutOfMemoryError` itself is made without a check, so it can
+always be thrown.
+
+### Limits
+
+`VmConfig::limits` is a `VmLimits`: one struct for every limit on what a
+game can make the VM use besides the heap. It is a plain public struct
+with a `Default`, so a test lowers one with `VmLimits { max_threads: 8,
+..VmLimits::default() }`. Each limit has its own change that enforces it;
+the fields are only read while the VM runs.
+
+| Field | Default | What it limits | Enforced by |
+| --- | --- | --- | --- |
+| `max_threads` | 64 | Java threads alive at once | #36 |
+| `max_stack_slots` | 131072 | slots in one thread's stack | #28 |
+| `max_class_bytes` | 128 MiB | class data of one machine | #35 |
+| `max_log_line_bytes` | 4096 | bytes of one log line | #30 |
+| `max_reported` | 256 | different diagnostics reported | #30 |
+| `max_posted` | 10000 | posted tasks not yet run | #30 |
+
+### Payloads and the heap
+
+Every payload that owns data a game can make large either counts it
+(`Payload::heap_bytes` and `Ctx::recount`, or `Ctx::check_alloc` before
+building it) or is bounded by a named limit in another change. Payloads
+that hold only references, flags and numbers are fixed in size and need
+neither. A change that adds a payload adds a row.
+
+| Payload | Owns | Counted or bounded by |
+| --- | --- | --- |
+| `JString` | the characters | `heap_bytes`, counted when the string is made; `new_string*` and `String.concat` check first |
+| `StrBuf` (`StringBuffer`, `StringBuilder`) | the text | `heap_bytes` at the capacity; `edit` checks and recounts when the capacity changes |
+| `ThrowableData` | the stack trace | `heap_bytes` (16 bytes a frame, at most 256); recounted when stored |
+| `ThreadData` | the name | `heap_bytes`; name cut to 255 characters; recounted when set |
+| `Table`, `Entry`, `Cursor`, `Elements` | references into heap arrays | fixed; the arrays are heap objects |
+| `Queue`, `TimerData`, `Task` (`Timer`) | one slot per scheduled `TimerTask` | bounded by the task objects, which can be scheduled only once |
+| `ReaderState`, `WriterState`, `PrintState` | decoder state, a pending character | fixed |
+| `Mirror`, `Instant`, `Seed`, `Zone`, calendar `State` | numbers and short ids | fixed |
+| `ImageData`, the buffer of `DisplayableData`, `LayerData` (tiled layers, sprites) | pixels and tile grids | #32: `check_alloc` before building, `recount` on change |
+| screen state of `DisplayableData`, `ItemData` | list items and text | #33 |
+| `PlayerData`, `SoundData`, `Clip` | sound source bytes and decoded audio | #34 |
+| `HttpPayload`, `SocketPayload`, `ServerPayload`, `UdpPayload`, `InputPayload`, `OutputPayload` | socket and body buffers | #38, with its own caps |
+| `StoreHandle`, `EnumState` | listeners and the ids of an enumeration | `heap_bytes`; the size of a record store by #40 |
+| `GraphicData`, `UiImage`, `ExtendedData`, `LayerData` (Siemens) | pictures and tile grids | #32 and #33 |
+| `Composer`, `MelodyData` (Siemens) | notes and MIDI bytes | `heap_bytes`; a note added to a `Composer` is not recounted yet |
+| `ManagerData` (`LayerManager`), `Manager` (Siemens layers) | a list of layer references | bounded: a layer is in the list once |
+| `Manager` (Siemens graphic objects) | a list of object references | #33: `addObject` adds the same object again and again |
+| `CommandData`, `FontData`, `GraphicsData`, `AlertTypeData`, `TickerData`, `ControlData`, `Message`, `InfoPayload`, `ConnectionPayload` | references, flags, numbers; `GraphicsData` shares the surface of its target | fixed |
 
 ## Rules for native code
 
@@ -309,6 +389,11 @@ enforces some of them; the rest are on the native's author.
 10. **A panic is a bug.** It ends the thread, logs an internal error and
     stops the VM. Report Java-visible failures as exceptions instead:
     `return ctx.throw("java/lang/IllegalArgumentException", "why")`.
+11. **Count what a game can make large.** A payload that holds data a
+    game sizes reports it in `heap_bytes`, calls `ctx.recount(obj)` when
+    it changes size, and calls `ctx.check_alloc(bytes)` before it builds a
+    big host buffer. A native that makes the host hold memory the heap
+    does not count lets a loop of such calls use up the machine.
 
 ## Defining a class in Rust
 
@@ -446,6 +531,11 @@ if ctx.call_if_overridden(ht, "java/util/Hashtable", "rehash", "()V", &[])?.is_n
   borrows its UTF-16, `opt_string(value)` handles `null`.
 - `ctx.payload::<T>(obj)`, `payload_mut`, `try_payload` and `set_payload`
   reach a payload.
+- `ctx.check_alloc(bytes)` throws `OutOfMemoryError` for a request the
+  heap could not hold, and `ctx.recount(obj)` counts a payload that
+  changed size. The arrays and strings above call the first themselves;
+  see [The heap and the collector](#the-heap-and-the-collector) for when
+  a native calls either.
 
 ### Exceptions
 
