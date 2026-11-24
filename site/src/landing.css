@@ -431,4 +431,6 @@ footer { max-width: 1200px; margin: 56px auto 0; padding: 32px 16px 48px; border
 /* Reduced motion: no loops, every card shows its final state */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+  /* The keypad card hides its lit keys for the loop; show them again. */
+  .lit::after { opacity: 1 !important; }
 }
