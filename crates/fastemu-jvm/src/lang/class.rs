@@ -115,13 +115,18 @@ fn for_name(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let name = ctx.string(name_obj)?;
     let internal = internal_name(&name);
     // Class.forName takes binary names; an internal name with slashes is
-    // not one.
-    let loaded = if name.contains('/') {
+    // not one. A class that exists but fails to link throws its linkage
+    // error; only a missing one is ClassNotFoundException.
+    let class = if name.contains('/') {
         None
     } else {
-        ctx.state.classes.load(&internal).ok()
+        match ctx.state.classes.load(&internal) {
+            Ok(class) => Some(class),
+            Err(e) if e.missing.as_deref() == Some(internal.as_str()) => None,
+            Err(e) => return Err(ctx.load_error(e)),
+        }
     };
-    let Some(class) = loaded else {
+    let Some(class) = class else {
         ctx.report(Diagnostic::MissingClass(internal));
         return throw(ctx, "java/lang/ClassNotFoundException", &name);
     };
