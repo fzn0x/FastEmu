@@ -7,7 +7,7 @@ use super::strbuf::StrBuf;
 use super::{check_range, this, throw};
 use crate::class::ArrayType;
 use crate::ctx::{Ctx, JResult};
-use crate::heap::{Body, Payload};
+use crate::heap::Payload;
 use crate::native::NativeClass;
 use crate::value::{ObjRef, Value};
 use crate::vm::VmState;
@@ -651,8 +651,7 @@ impl Ctx<'_> {
 
     /// Whether `obj` is a `java.lang.String`.
     pub fn is_string(&self, obj: ObjRef) -> bool {
-        matches!(&self.state.heap.get(obj).body, Body::Fields(_))
-            && self.state.heap.get(obj).payload::<JString>().is_some()
+        self.state.heap.get(obj).payload::<JString>().is_some()
     }
 }
 
