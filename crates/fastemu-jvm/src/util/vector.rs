@@ -273,13 +273,21 @@ fn elements_class() -> NativeClass {
         .payload::<Elements>()
         .method("hasMoreElements", "()Z", |ctx, a| {
             let state = ctx.payload::<Elements>(this(a))?;
-            let (vector, next) = (state.vector.expect("made by elements()"), state.next);
+            let (Some(vector), next) = (state.vector, state.next) else {
+                return Ok(Value::from(false));
+            };
             let f = fields(ctx)?;
             Ok(Value::from(next < ctx.get_field(vector, f.count).int()))
         })
         .method("nextElement", "()Ljava/lang/Object;", |ctx, a| {
             let state = ctx.payload::<Elements>(this(a))?;
-            let (vector, next) = (state.vector.expect("made by elements()"), state.next);
+            let (Some(vector), next) = (state.vector, state.next) else {
+                return throw(
+                    ctx,
+                    "java/util/NoSuchElementException",
+                    "Vector Enumeration",
+                );
+            };
             // Java reads the element with the vector locked.
             ctx.monitor_enter(vector)?;
             let f = fields(ctx)?;

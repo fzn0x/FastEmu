@@ -97,11 +97,16 @@ fn entry<'a>(ctx: &'a Ctx<'_>, e: ObjRef) -> JResult<&'a Entry> {
     ctx.payload::<Entry>(e)
 }
 
-/// The bucket array and its length.
+/// The bucket array and its length; Java's 11 buckets for an object no
+/// constructor ran on.
 fn buckets(ctx: &mut Ctx<'_>, ht: ObjRef) -> JResult<(ObjRef, usize)> {
-    let arr = table(ctx, ht)?
-        .buckets
-        .expect("a Hashtable constructor made the buckets");
+    let arr = match table(ctx, ht)?.buckets {
+        Some(arr) => arr,
+        None => {
+            init(ctx, ht, 11)?;
+            table(ctx, ht)?.buckets.expect("init made the buckets")
+        }
+    };
     Ok((arr, ctx.array_len(arr)?))
 }
 
@@ -146,9 +151,10 @@ fn find(ctx: &mut Ctx<'_>, ht: ObjRef, key: ObjRef, hash: i32) -> JResult<Option
     let mut cur = head(ctx, arr, index)?;
     while let Some(e) = cur {
         let d = entry(ctx, e)?;
-        if d.hash == hash {
+        if d.hash == hash
+            && let Some(stored) = d.key
+        {
             // As in Java: the stored key's equals, given the argument.
-            let stored = d.key.expect("an entry in a bucket has a key");
             let stored = ctx.root(stored);
             if keys::equals(ctx, stored, Some(key))? {
                 return Ok(Some((prev, e, index)));
@@ -288,7 +294,9 @@ fn enumerate(ctx: &mut Ctx<'_>, ht: ObjRef, keys: bool) -> JResult<Value> {
 fn advance(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<Option<ObjRef>> {
     let c = ctx.payload::<Cursor>(obj)?;
     let (arr, mut index, mut e) = (c.buckets, c.index, c.entry);
-    let arr = arr.expect("made by keys() or elements()");
+    let Some(arr) = arr else {
+        return Ok(None);
+    };
     while e.is_none() && index > 0 {
         index -= 1;
         e = ctx.array::<Option<ObjRef>>(arr)?[index];
@@ -429,4 +437,40 @@ pub(crate) fn classes() -> Vec<NativeClass> {
         NativeClass::new(ENTRY).final_class().payload::<Entry>(),
         enumerator_class(),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ctx::Throw;
+    use crate::{MemorySource, Value, Vm, VmConfig};
+
+    /// Bytecode can make an object without running its constructor (no
+    /// verifier stops it); the library then acts on defaults instead of
+    /// stopping the virtual machine.
+    #[test]
+    fn objects_no_constructor_ran_on_still_work() {
+        let source = std::sync::Arc::new(MemorySource::new());
+        let vm = Vm::new(VmConfig::default(), source, Vec::new());
+        let (got, more, next) = vm.attach("test", |ctx| {
+            let class = ctx.find_class(super::HASHTABLE).unwrap();
+            let ht = ctx.new_object(class).unwrap();
+            let k = ctx.new_string("k").unwrap();
+            let desc = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;";
+            ctx.call_virtual(ht, "put", desc, &[k.into(), k.into()])
+                .unwrap();
+            let get = "(Ljava/lang/Object;)Ljava/lang/Object;";
+            let got = ctx.call_virtual(ht, "get", get, &[k.into()]).unwrap();
+            let class = ctx.find_class("java/util/Vector$Elements").unwrap();
+            let e = ctx.new_object(class).unwrap();
+            let more = ctx.call_virtual(e, "hasMoreElements", "()Z", &[]).unwrap();
+            let next = match ctx.call_virtual(e, "nextElement", "()Ljava/lang/Object;", &[]) {
+                Err(Throw::Exception(x)) => ctx.describe_exception(x),
+                other => format!("{other:?}"),
+            };
+            (got == Value::from(k), more, next)
+        });
+        assert!(got);
+        assert_eq!(more, Value::from(false));
+        assert_eq!(next, "java.util.NoSuchElementException: Vector Enumeration");
+    }
 }

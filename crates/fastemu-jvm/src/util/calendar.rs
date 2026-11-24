@@ -101,11 +101,15 @@ fn state<'a>(ctx: &'a mut Ctx<'_>, cal: ObjRef) -> JResult<&'a mut State> {
     ctx.payload_mut::<State>(cal)
 }
 
+/// The calendar's zone: the default one for an object no constructor
+/// ran on.
 fn zone(ctx: &mut Ctx<'_>, cal: ObjRef) -> JResult<ObjRef> {
-    let zone = state(ctx, cal)?
-        .zone
-        .expect("a Calendar constructor sets the zone");
-    Ok(ctx.root(zone))
+    if let Some(zone) = state(ctx, cal)?.zone {
+        return Ok(ctx.root(zone));
+    }
+    let zone = timezone::default_zone(ctx)?;
+    state(ctx, cal)?.zone = Some(zone);
+    Ok(zone)
 }
 
 /// The `field` argument of `get` and `set`, checked as Java's array
@@ -423,10 +427,9 @@ pub(crate) fn classes() -> Vec<NativeClass> {
             })
             .method("equals", "(Ljava/lang/Object;)Z", |ctx, a| {
                 let cal = this(a);
-                let Some(theirs) = other_millis(ctx, a[1])? else {
+                let (Some(theirs), Some(other)) = (other_millis(ctx, a[1])?, a[1].obj()) else {
                     return Ok(Value::from(false));
                 };
-                let other = a[1].obj().expect("a Calendar");
                 let mine = time_in_millis(ctx, cal)?;
                 let (zone, other_zone) = (zone(ctx, cal)?, zone(ctx, other)?);
                 let same_zone = timezone::id_of(ctx, zone)? == timezone::id_of(ctx, other_zone)?;

@@ -189,13 +189,17 @@ fn turn(ctx: &mut Ctx<'_>, queue_ref: &GlobalRef) -> JResult<bool> {
     Ok(true)
 }
 
-/// The queue of the timer `timer`.
+/// The queue of the timer `timer`; a timer no constructor ran on has
+/// no thread, and counts as cancelled.
 fn timer_queue(ctx: &mut Ctx<'_>, timer: ObjRef) -> JResult<ObjRef> {
-    let q = ctx
-        .payload::<TimerData>(timer)?
-        .queue
-        .expect("a Timer constructor made the queue");
-    Ok(ctx.root(q))
+    match ctx.payload::<TimerData>(timer)?.queue {
+        Some(q) => Ok(ctx.root(q)),
+        None => throw(
+            ctx,
+            "java/lang/IllegalStateException",
+            "Timer already cancelled.",
+        ),
+    }
 }
 
 /// Java's `Timer.sched`: puts `task_obj` on the queue to run at `time`,

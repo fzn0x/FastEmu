@@ -159,8 +159,7 @@ fn get_offset(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     if let Some(message) = bad {
         return throw(ctx, "java/lang/IllegalArgumentException", &message);
     }
-    let rule = rule(ctx, this(a))?.expect("TimeZone$Impl has a rule");
-    let offset = match rule {
+    let offset = match rule(ctx, this(a))?.unwrap_or(Rule::Fixed(0)) {
         Rule::Fixed(offset) => offset,
         Rule::Host => {
             let year = if era == 0 { 1 - year } else { year };
