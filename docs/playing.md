@@ -105,8 +105,10 @@ Some games have a menu item that opens a web page, such as more games
 from their maker. When a game asks to open one, its screen shows the
 game's name and the whole address, with **Open** and **Dismiss**. Nothing
 opens until you choose **Open**; the page then opens in your browser and
-the game keeps running. **Dismiss** drops the request. Each game has its
-own question, and restarting or closing the game drops it. In the focus
+the game keeps running. **Dismiss** drops the request. On a small
+screen, scroll the question to reach its buttons, below the address.
+Each game has its own question, and restarting or closing the game
+drops it. In the focus
 layout, a globe next to a game's name in the strip means it is waiting
 for an answer.
 

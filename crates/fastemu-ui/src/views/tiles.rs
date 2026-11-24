@@ -1015,6 +1015,11 @@ impl FastEmuView {
     /// page: the game's name, the whole link, **Open** and **Dismiss**.
     /// Nothing opens until the user chooses **Open**, and the buttons act
     /// on the link they showed, even if the game asked for another since.
+    ///
+    /// On a small screen the question scrolls as one, so the link is never
+    /// squeezed out and the buttons, below it, are always in reach. A new
+    /// link gets a new scroll position, at the top, so **Open** is not left
+    /// under the pointer for a link the user has not read.
     fn render_link_prompt(tile: &Tile, cx: &mut Context<'_, Self>) -> Option<Div> {
         if !tile.shows_link() {
             return None;
@@ -1025,14 +1030,15 @@ impl FastEmuView {
         let (to_open, to_dismiss) = (link.clone(), link.clone());
         let question = format!("{} wants to open a web page", tile.session.title);
         let card = div()
-            .id("link-prompt")
+            .id(("link-prompt", link_key(&link)))
             .debug_selector(|| format!("link-prompt-{}", id.0))
             .flex()
             .flex_col()
             .gap(px(8.0))
             .max_w_full()
             .max_h_full()
-            .p(px(12.0))
+            .overflow_y_scroll()
+            .p(px(8.0))
             .rounded(px(8.0))
             .bg(theme.raised)
             .border_1()
@@ -1049,10 +1055,8 @@ impl FastEmuView {
             )
             .child(
                 div()
-                    .id("link-url")
-                    .min_h_0()
-                    .max_h(px(96.0))
-                    .overflow_y_scroll()
+                    .debug_selector(|| format!("link-url-{}", id.0))
+                    .flex_none()
                     .text_xs()
                     .child(link),
             )
@@ -1060,10 +1064,14 @@ impl FastEmuView {
                 div()
                     .flex()
                     .flex_none()
+                    .flex_wrap()
                     .justify_end()
                     .gap(px(8.0))
                     .child(
                         text_button("link-dismiss", "Dismiss", &theme)
+                            .flex_shrink(1.0)
+                            .min_w_0()
+                            .overflow_hidden()
                             .debug_selector(|| format!("link-dismiss-{}", id.0))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.dismiss_link(id, &to_dismiss, cx);
@@ -1071,6 +1079,9 @@ impl FastEmuView {
                     )
                     .child(
                         primary_button("link-open", "Open", &theme)
+                            .flex_shrink(1.0)
+                            .min_w_0()
+                            .overflow_hidden()
                             .debug_selector(|| format!("link-open-{}", id.0))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_link(id, &to_open, cx);
@@ -1084,7 +1095,7 @@ impl FastEmuView {
                 .flex()
                 .items_center()
                 .justify_center()
-                .p(px(8.0))
+                .p(px(4.0))
                 .bg(theme.scrim)
                 .child(card),
         )
@@ -1158,4 +1169,14 @@ fn map_pointer(tile: &Tile, position: Point<Pixels>) -> Option<((i32, i32), bool
         (f32::from(bounds.size.width), f32::from(bounds.size.height)),
         tile.session.screen_size(),
     ))
+}
+
+/// A number for `link`, so each link's prompt keeps a scroll position of
+/// its own.
+fn link_key(link: &str) -> u64 {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    link.hash(&mut hasher);
+    hasher.finish()
 }

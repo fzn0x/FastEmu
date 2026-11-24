@@ -1247,3 +1247,69 @@ fn each_game_has_its_own_link_prompt(cx: &mut TestAppContext) {
     assert_eq!(h.link(0), None);
     assert_eq!(h.cx.opened_url(), None);
 }
+
+#[gpui::test]
+fn the_link_prompt_fits_a_small_screen(cx: &mut TestAppContext) {
+    use gpui::{ScrollDelta, ScrollEvent, point, px};
+
+    let mut h = open(cx);
+    // A phone held sideways: the screen gets one device pixel per phone
+    // pixel, 120 by 160.
+    h.cx.simulate_resize(gpui::size(px(640.0), px(360.0)));
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    let game = h.launcher.instance(0);
+    game.show(1);
+    game.ask_to_open("https://example.com/more-games/from/the/maker?ref=menu");
+    h.redraw();
+    let screen = h.bounds("screen", 0).expect("the screen is drawn");
+    assert!(
+        screen.size.height <= px(160.0),
+        "a small screen: {screen:?}"
+    );
+    let card = h.bounds("link-prompt", 0).expect("the prompt is drawn");
+    let url = h.bounds("link-url", 0).expect("the link is drawn");
+    assert!(
+        url.size.height >= px(16.0) && url.top() < screen.bottom(),
+        "the link is not squeezed out: {url:?} on {screen:?}"
+    );
+    for button in ["link-dismiss", "link-open"] {
+        let b = h.bounds(button, 0).expect("the button is drawn");
+        assert!(
+            b.left() >= card.left() && b.right() <= card.right(),
+            "{button} stays inside the card: {b:?} in {card:?}"
+        );
+        assert!(b.top() >= url.bottom(), "{button} comes after the link");
+    }
+
+    // The question scrolls to its buttons, which then answer it.
+    let scroll = |h: &mut Harness<'_>| {
+        h.cx.simulate_event(ScrollEvent {
+            position: card.center(),
+            delta: ScrollDelta::Pixels(point(px(0.0), px(-1000.0))),
+            ..ScrollEvent::default()
+        });
+        h.redraw();
+    };
+    scroll(&mut h);
+    let open = h.bounds("link-open", 0).expect("the Open button is drawn");
+    assert!(screen.contains(&open.center()), "{open:?} in {screen:?}");
+
+    // A newer link starts at the top again, so Open is not left under the
+    // pointer for a link the user has not read.
+    game.ask_to_open("https://example.com/other");
+    h.redraw();
+    let moved = h.bounds("link-open", 0).expect("the Open button is drawn");
+    assert!(moved.top() >= screen.bottom(), "{moved:?} below {screen:?}");
+    h.cx.simulate_click(open.center(), gpui::Modifiers::none());
+    h.cx.run_until_parked();
+    assert_eq!(h.cx.opened_url(), None, "the old spot opens nothing");
+    assert_eq!(h.link(0).as_deref(), Some("https://example.com/other"));
+    scroll(&mut h);
+    h.click("link-open", 0);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://example.com/other")
+    );
+    assert!(game.events().is_empty(), "{:?}", game.events());
+}
