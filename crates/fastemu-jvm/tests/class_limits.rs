@@ -472,3 +472,36 @@ fn a_field_lookup_over_a_diamond_of_40_interface_layers_ends_at_once() {
     );
     assert!(found, "a field of the bottom interface resolves");
 }
+
+/// Interfaces `I0` to `I299`, each extending the one before.
+fn interface_chain() -> Vec<NativeClass> {
+    (0..300)
+        .map(|i| match i {
+            0 => NativeClass::interface("I0"),
+            _ => NativeClass::interface(&format!("I{i}")).implements(&format!("I{}", i - 1)),
+        })
+        .collect()
+}
+
+#[test]
+fn an_interface_chain_is_refused_past_the_limit_in_either_order() {
+    // The leaf first: the loads nest and stop at 256.
+    let leaf_first = run(Vec::new(), interface_chain, |ctx| {
+        let leaf = ctx.find_class("I299");
+        outcome(ctx, leaf)
+    });
+    assert!(
+        leaf_first.starts_with("java.lang.ClassFormatError: I")
+            && leaf_first.ends_with(": the class hierarchy is over 256 classes deep"),
+        "{leaf_first}"
+    );
+
+    // The root first: no load nests, so each interface is checked by its
+    // height. `I254` is the last with 256 classes on its path.
+    let failed = run(Vec::new(), interface_chain, |ctx| {
+        (0..300)
+            .filter(|i| ctx.find_class(&format!("I{i}")).is_err())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(failed, (255..300).collect::<Vec<_>>());
+}
