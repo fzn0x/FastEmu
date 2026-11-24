@@ -148,7 +148,7 @@ Tier 3. Since CLDC 1.0. Spec: [cldc11](https://docs.oracle.com/javame/config/cld
 
 | T | Field | Type | Value | Flags | Since | Notes |
 |---|---|---|---|---|---|---|
-| 3 | `MIN_VALUE` | `B` | `-128` | static | 1.0 |  |
+| 3 | `MIN_VALUE` | `B` | `-128` (`0xffffff80`) | static | 1.0 |  |
 | 3 | `MAX_VALUE` | `B` | `127` | static | 1.0 |  |
 
 | T | Constructor | Descriptor | Flags | Since | Throws | Notes |
