@@ -596,21 +596,46 @@ What natives and games can rely on:
   through their own `hashCode` and `equals`; strings, boxed numbers and
   objects that keep `Object`'s methods are hashed and compared in Rust
   (`src/util/keys.rs`).
-- **Encodings** (`src/charset`): UTF-8, ISO-8859-1, US-ASCII,
-  windows-1250, windows-1251, windows-1252, ISO-8859-2 and KOI8-R, each
-  converting as the JDK's charset does: unassigned bytes decode to
-  U+FFFD, what a charset cannot encode becomes `?`, and malformed UTF-8
-  becomes as many U+FFFD as in Java (a surrogate in three bytes, or a
-  sequence cut off at the end, is one). Every conversion that names no
-  charset uses `microedition.encoding`: `new String(byte[])`,
-  `getBytes()`, `InputStreamReader`, `OutputStreamWriter`, `PrintStream`,
-  `ByteArrayOutputStream.toString()` and `System.out` itself. A name that
-  is not one of these throws `UnsupportedEncodingException` where the API
-  declares it.
+- **Encodings** (`src/charset`), under the names, aliases and historical
+  names Java accepts (`SJIS`, `EUC_JP`, `UnicodeBig`, `ISO8859_2`,
+  `Cp1251`, ...), ignoring case, `-`, `_` and `:`:
+  - UTF-8, ISO-8859-1, US-ASCII, windows-1250, windows-1251,
+    windows-1252, KOI8-R, the ISO-8859 parts Java has (2 to 9, 13, 15
+    and 16; the JDK has no 10, 11 or 14 under those names) and UTF-16
+    (`UTF-16` with a byte order mark, `UTF-16BE`, `UTF-16LE`,
+    `x-UTF-16LE-BOM`) convert exactly as the JDK's charset does:
+    unassigned bytes decode to U+FFFD, what a charset cannot encode
+    becomes `?` (U+FFFD in UTF-16), and malformed UTF-8 and UTF-16 become
+    as many U+FFFD as in Java (a surrogate in three bytes, or a sequence
+    cut off at the end, is one). The ISO-8859 tables after part 2 come
+    from encoding_rs, except part 9, which the WHATWG standard reads as
+    windows-1254.
+  - The multi-byte charsets of East Asia go through encoding_rs, whose
+    WHATWG tables are the Microsoft code pages: `Shift_JIS` and
+    `windows-31j` (code page 932), `EUC-JP`, `ISO-2022-JP`, `GBK` and
+    `GB2312` (code page 936), `GB18030`, `Big5` (with the Hong Kong
+    additions) and `EUC-KR` (code page 949). Text of the national
+    standards converts as in Java, which the `Charsets` differential
+    program checks; the vendor rows a strict Java charset rejects (NEC's
+    circled numbers in `Shift_JIS`, the extra hangul of code page 949 in
+    `EUC-KR`) decode instead of becoming U+FFFD, malformed bytes give the
+    standard's count of U+FFFD, `GBK` encodes the euro sign as 0x80, and
+    `ISO-2022-JP` writes halfwidth katakana as fullwidth ones, where Java
+    switches to JIS X 0201. What a charset cannot encode becomes `?`.
+
+  Every conversion that names no charset uses `microedition.encoding`:
+  `new String(byte[])`, `getBytes()`, `InputStreamReader`,
+  `OutputStreamWriter`, `PrintStream`, `ByteArrayOutputStream.toString()`
+  and `System.out` itself. A name that is not one of these throws
+  `UnsupportedEncodingException` where the API declares it.
 - **Readers and writers** behave as on CLDC phones rather than as Java
   SE's buffered ones: `InputStreamReader` takes bytes from its stream
   only as it needs them for the characters asked for (and passes `mark`
   and `reset` to it), and `OutputStreamWriter` writes through at once.
+  Each keeps its charset's state from one call to the next, as Java's
+  do: a character split between reads waits for its last byte, `UTF-16`
+  reads and writes its byte order mark once, and `ISO-2022-JP` keeps its
+  shift state until the writer closes.
 - **`PrintStream`** never throws `IOException`: a failure of the stream
   under it sets the flag `checkError` returns.
 - **Time.** `System.currentTimeMillis`, `Date`, `Random()` and `Calendar`
@@ -644,8 +669,9 @@ What natives and games can rely on:
   compares their output. Without a JDK the tests pass with a note,
   unless `FASTEMU_REQUIRE_JAVA=1` is set. The class library has one
   program per area (`Vectors`, `Hashtables`, `RandomSequences`,
-  `CalendarFields`, `Timers`, `DataStreams`, `Readers`, `PrintStreams`),
-  each with game subclasses of the library classes.
+  `CalendarFields`, `Timers`, `DataStreams`, `Readers`, `PrintStreams`,
+  `Charsets`), each with game subclasses of the library classes. Java
+  source files are UTF-8.
 - `src/inventory.rs` checks the class library against the API inventory
   in `docs/compat/api`, and `tests/encoding.rs` that the encoding setting
   reaches every implicit conversion.

@@ -11,7 +11,7 @@
 use std::collections::VecDeque;
 
 use super::access::{read_byte, write_all};
-use crate::charset::Charset;
+use crate::charset::{Charset, Decoder, Encoder};
 use crate::class::ArrayType;
 use crate::classfile::access::PROTECTED;
 use crate::ctx::{Ctx, JResult};
@@ -28,9 +28,8 @@ const SKIP_BUFFER: i64 = 8192;
 struct ReaderState {
     /// The stream it reads; `None` once closed.
     input: Option<ObjRef>,
-    charset: Charset,
-    /// Bytes read but not yet decoded: the start of a character.
-    pending: Vec<u8>,
+    /// Holds the start of a character until its other bytes come.
+    decoder: Decoder,
     /// Characters decoded but not yet returned: the second half of a
     /// surrogate pair, or what one bad sequence turned into.
     decoded: VecDeque<u16>,
@@ -43,8 +42,7 @@ impl Default for ReaderState {
     fn default() -> Self {
         Self {
             input: None,
-            charset: Charset::Utf8,
-            pending: Vec::new(),
+            decoder: Charset::Utf8.decoder(),
             decoded: VecDeque::new(),
             ended: false,
         }
@@ -61,7 +59,8 @@ impl Payload for ReaderState {
 struct WriterState {
     /// The stream it writes; `None` once closed.
     output: Option<ObjRef>,
-    charset: Charset,
+    /// Keeps UTF-16's mark and ISO-2022-JP's shift state between writes.
+    encoder: Encoder,
     /// A high surrogate that ended the last write, waiting for its pair.
     high: Option<u16>,
 }
@@ -70,7 +69,7 @@ impl Default for WriterState {
     fn default() -> Self {
         Self {
             output: None,
-            charset: Charset::Utf8,
+            encoder: Charset::Utf8.encoder(),
             high: None,
         }
     }
@@ -108,7 +107,7 @@ fn reader_init(ctx: &mut Ctx<'_>, a: &[Value], name: Option<Value>) -> JResult<V
     set_lock(ctx, "java/io/Reader", this(a), input)?;
     let state = ctx.payload_mut::<ReaderState>(this(a))?;
     state.input = Some(input);
-    state.charset = charset;
+    state.decoder = charset.decoder();
     Ok(Value::Void)
 }
 
@@ -120,20 +119,16 @@ fn next_unit(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<Option<u16>> {
         if let Some(c) = state.decoded.pop_front() {
             return Ok(Some(c));
         }
-        if !state.pending.is_empty() || state.ended {
-            let mut out = Vec::new();
-            let used = state
-                .charset
-                .decode_into(&state.pending, state.ended, &mut out);
-            state.pending.drain(..used);
-            if !out.is_empty() {
-                state.decoded.extend(out);
-                continue;
-            }
-            if state.ended {
+        let mut out = Vec::new();
+        if state.ended {
+            // A character the end cut off becomes U+FFFD first.
+            state.decoder.decode(&[], true, &mut out);
+            if out.is_empty() {
                 state.ended = false;
                 return Ok(None);
             }
+            state.decoded.extend(out);
+            continue;
         }
         let Some(input) = state.input else {
             return closed(ctx);
@@ -141,7 +136,10 @@ fn next_unit(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<Option<u16>> {
         let b = read_byte(ctx, input)?;
         let state = ctx.payload_mut::<ReaderState>(obj)?;
         match u8::try_from(b) {
-            Ok(byte) => state.pending.push(byte),
+            Ok(byte) => {
+                state.decoder.decode(&[byte], false, &mut out);
+                state.decoded.extend(out);
+            }
             Err(_) => state.ended = true,
         }
     }
@@ -161,7 +159,7 @@ fn writer_init(ctx: &mut Ctx<'_>, a: &[Value], name: Option<Value>) -> JResult<V
     set_lock(ctx, "java/io/Writer", this(a), output)?;
     let state = ctx.payload_mut::<WriterState>(this(a))?;
     state.output = Some(output);
-    state.charset = charset;
+    state.encoder = charset.encoder();
     Ok(Value::Void)
 }
 
@@ -185,7 +183,8 @@ fn write_units(ctx: &mut Ctx<'_>, obj: ObjRef, units: &[u16]) -> JResult<()> {
     if chars.last().is_some_and(|&c| (0xD800..0xDC00).contains(&c)) {
         state.high = chars.pop();
     }
-    let bytes = state.charset.encode(&chars);
+    let mut bytes = Vec::with_capacity(chars.len());
+    state.encoder.encode(&chars, &mut bytes);
     if !bytes.is_empty() {
         write_all(ctx, output, &bytes)?;
     }
@@ -363,7 +362,7 @@ fn input_stream_reader() -> NativeClass {
         .method("ready", "()Z", |ctx, a| {
             let input = reader_input(ctx, this(a))?;
             let state = ctx.payload::<ReaderState>(this(a))?;
-            if !state.decoded.is_empty() || !state.pending.is_empty() {
+            if !state.decoded.is_empty() || state.decoder.has_pending() {
                 return Ok(Value::from(true));
             }
             let available = ctx.call_virtual(input, "available", "()I", &[])?.int();
@@ -388,7 +387,7 @@ fn input_stream_reader() -> NativeClass {
             let input = reader_input(ctx, this(a))?;
             ctx.call_virtual(input, "reset", "()V", &[])?;
             let state = ctx.payload_mut::<ReaderState>(this(a))?;
-            state.pending.clear();
+            state.decoder.reset();
             state.decoded.clear();
             state.ended = false;
             Ok(Value::Void)
@@ -446,12 +445,17 @@ fn output_stream_writer() -> NativeClass {
                 return Ok(Value::Void);
             };
             // A high surrogate still waiting for its pair is written as
-            // the charset's replacement, as Java's encoder ends.
-            let lone = state.high.take();
-            let charset = state.charset;
-            let ended = match lone {
-                Some(high) => write_all(ctx, output, &charset.encode(&[high])),
-                None => Ok(()),
+            // the charset's replacement, and a charset with shift states
+            // returns to its first one, as Java's encoder ends.
+            let mut bytes = Vec::new();
+            if let Some(high) = state.high.take() {
+                state.encoder.encode(&[high], &mut bytes);
+            }
+            state.encoder.finish(&mut bytes);
+            let ended = if bytes.is_empty() {
+                Ok(())
+            } else {
+                write_all(ctx, output, &bytes)
             };
             let flushed = ended.and_then(|()| ctx.call_virtual(output, "flush", "()V", &[]));
             ctx.payload_mut::<WriterState>(obj)?.output = None;

@@ -184,6 +184,7 @@ programs! {
     arith: "Arith", 8;
     arrays: "Arrays", 8;
     calendar_fields: "CalendarFields", 8;
+    charsets: "Charsets", 8;
     data_streams: "DataStreams", 8;
     exceptions: "Exceptions", 8;
     float_math: "FloatMath", 8;

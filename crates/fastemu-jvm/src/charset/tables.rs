@@ -1,7 +1,8 @@
 //! The upper halves of the single-byte code pages: the character each
 //! byte from 0x80 to 0xFF decodes to, as the JDK's own charsets decode
 //! it. Bytes a code page leaves unassigned decode to U+FFFD, as in Java.
-//! The lower halves are ASCII.
+//! The lower halves are ASCII. The other ISO-8859 parts come from
+//! encoding_rs (see `CodePage::high`).
 
 /// windows-1250 (Central European).
 pub(super) const CP1250: [u16; 128] = [
@@ -77,3 +78,24 @@ pub(super) const KOI8R: [u16; 128] = [
     0x041B, 0x041C, 0x041D, 0x041E, 0x041F, 0x042F, 0x0420, 0x0421, 0x0422, 0x0423, 0x0416, 0x0412,
     0x042C, 0x042B, 0x0417, 0x0428, 0x042D, 0x0429, 0x0427, 0x042A,
 ];
+
+/// ISO-8859-9 (Latin-5, Turkish): ISO-8859-1 with six Turkish letters in
+/// place of Icelandic ones. The WHATWG standard, and so encoding_rs, read
+/// this name as windows-1254, which differs from 0x80 to 0x9F.
+pub(super) const LATIN5: [u16; 128] = latin5();
+
+const fn latin5() -> [u16; 128] {
+    let mut high = [0; 128];
+    let mut i = 0;
+    while i < high.len() {
+        high[i] = 0x80 + i as u16;
+        i += 1;
+    }
+    high[0xD0 - 0x80] = 0x011E;
+    high[0xDD - 0x80] = 0x0130;
+    high[0xDE - 0x80] = 0x015E;
+    high[0xF0 - 0x80] = 0x011F;
+    high[0xFD - 0x80] = 0x0131;
+    high[0xFE - 0x80] = 0x015F;
+    high
+}
