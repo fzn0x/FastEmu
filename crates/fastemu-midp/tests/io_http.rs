@@ -186,8 +186,8 @@ https://example.com/ -> {missing}: https://example.com/
 socket://127.0.0.1:1 -> {off}
 socket://:0 -> {off}
 ssl://example.com:443 -> {missing}: ssl://example.com:443
-datagram://127.0.0.1:1 -> {missing}: datagram://127.0.0.1:1
-datagram://:0 -> {missing}: datagram://:0
+datagram://127.0.0.1:1 -> {off}
+datagram://:0 -> {off}
 comm:0;baudrate=9600 -> javax.microedition.io.ConnectionNotFoundException: this phone has no serial ports: comm:0;baudrate=9600
 file:///root/x.txt -> {missing}: file:///root/x.txt
 gopher://example.com/ -> {missing}: gopher://example.com/

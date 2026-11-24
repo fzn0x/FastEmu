@@ -136,14 +136,55 @@ pub fn has_class(name: &str) -> bool {
     vm.attach("probe", |ctx| ctx.find_class(name).is_ok())
 }
 
-/// The MIDP classes, plus empty `java.io.DataInput` and `DataOutput`
-/// interfaces when the library does not have them yet, so `Datagram`
-/// (which extends both) still loads in these tests.
+/// The methods of `java.io.DataInput` and `DataOutput` in CLDC 1.1
+/// (docs/compat/api/cldc-java-io.md).
+const DATA_INPUT: &[(&str, &str)] = &[
+    ("readFully", "([B)V"),
+    ("readFully", "([BII)V"),
+    ("skipBytes", "(I)I"),
+    ("readBoolean", "()Z"),
+    ("readByte", "()B"),
+    ("readUnsignedByte", "()I"),
+    ("readShort", "()S"),
+    ("readUnsignedShort", "()I"),
+    ("readChar", "()C"),
+    ("readInt", "()I"),
+    ("readLong", "()J"),
+    ("readFloat", "()F"),
+    ("readDouble", "()D"),
+    ("readUTF", "()Ljava/lang/String;"),
+];
+const DATA_OUTPUT: &[(&str, &str)] = &[
+    ("write", "(I)V"),
+    ("write", "([B)V"),
+    ("write", "([BII)V"),
+    ("writeBoolean", "(Z)V"),
+    ("writeByte", "(I)V"),
+    ("writeShort", "(I)V"),
+    ("writeChar", "(I)V"),
+    ("writeInt", "(I)V"),
+    ("writeLong", "(J)V"),
+    ("writeFloat", "(F)V"),
+    ("writeDouble", "(D)V"),
+    ("writeChars", "(Ljava/lang/String;)V"),
+    ("writeUTF", "(Ljava/lang/String;)V"),
+];
+
+/// The MIDP classes, plus stand-ins for the `java.io.DataInput` and
+/// `DataOutput` interfaces when the library does not have them yet, so
+/// `Datagram` (which extends both) loads and its methods resolve.
 fn natives() -> Vec<NativeClass> {
     let mut natives = fastemu_midp::classes();
-    for name in ["java/io/DataInput", "java/io/DataOutput"] {
+    for (name, methods) in [
+        ("java/io/DataInput", DATA_INPUT),
+        ("java/io/DataOutput", DATA_OUTPUT),
+    ] {
         if !has_class(name) {
-            natives.push(NativeClass::interface(name));
+            let mut stand_in = NativeClass::interface(name);
+            for (method, desc) in methods {
+                stand_in = stand_in.abstract_method(method, desc);
+            }
+            natives.push(stand_in);
         }
     }
     natives

@@ -160,6 +160,35 @@ enum ConnectError {
     Io(io::Error),
 }
 
+/// The first address of `host:port`. An address literal needs no lookup;
+/// a name is looked up on a helper thread. A name without addresses
+/// throws `ConnectionNotFoundException`, as the CLDC javadoc says
+/// `Connector.open` does when "the target of the name cannot be found".
+pub(crate) fn resolve(ctx: &mut Ctx<'_>, host: &str, port: u16) -> JResult<SocketAddr> {
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return Ok(SocketAddr::new(ip, port));
+    }
+    let name = host.to_owned();
+    let found = off_thread(
+        ctx,
+        Instant::now() + CONNECT_TIMEOUT,
+        "resolve",
+        move || {
+            (name.as_str(), port)
+                .to_socket_addrs()
+                .ok()
+                .and_then(|mut addrs| addrs.next())
+        },
+    )?;
+    match found {
+        Some(addr) => Ok(addr),
+        None => {
+            let message = format!("cannot find host {host}");
+            Err(ctx.new_exception(super::NOT_FOUND, Some(&message)))
+        }
+    }
+}
+
 /// Connects to `host:port`, trying each of its addresses, and sets the
 /// slice timeouts on the new socket.
 pub(crate) fn connect(ctx: &mut Ctx<'_>, host: &str, port: u16) -> JResult<TcpStream> {

@@ -2,10 +2,10 @@
 //!
 //! Every connection a game makes starts at `Connector.open(name)`, and
 //! the scheme of the name picks the protocol (`connector`). HTTP
-//! (`http`) and TCP sockets (`socket`) make real connections over
-//! `std::net` when the instance's [`fastemu_core::NetworkPolicy`] allows
-//! it, and fail with `IOException` the way a phone without signal does
-//! when it does not.
+//! (`http`), TCP sockets (`socket`) and UDP datagrams (`datagram`)
+//! make real connections over `std::net` when the instance's
+//! [`fastemu_core::NetworkPolicy`] allows it, and fail with `IOException`
+//! the way a phone without signal does when it does not.
 //! `docs/architecture/connections.md` describes the design.
 //!
 //! Blocking work (resolving names, connecting, reading and writing) runs
@@ -13,6 +13,7 @@
 //! ends it at once (`net`).
 
 mod connector;
+mod datagram;
 mod http;
 mod interfaces;
 mod net;
@@ -34,6 +35,7 @@ pub fn classes() -> Vec<NativeClass> {
     classes.extend(streams::classes());
     classes.extend(http::classes());
     classes.extend(socket::classes());
+    classes.extend(datagram::classes());
     classes
 }
 

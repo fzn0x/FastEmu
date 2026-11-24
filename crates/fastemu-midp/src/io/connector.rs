@@ -6,7 +6,7 @@
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Throw, Value};
 
 use super::interfaces::{INPUT_CONNECTION, NOT_FOUND, OUTPUT_CONNECTION};
-use super::{http, socket, url};
+use super::{datagram, http, socket, url};
 
 const CONNECTOR: &str = "javax/microedition/io/Connector";
 
@@ -57,6 +57,7 @@ pub(crate) fn open(ctx: &mut Ctx<'_>, name: Value, mode: i32, timeouts: bool) ->
     match scheme.as_str() {
         "http" => http::open(ctx, &scheme, rest, &name, options),
         "socket" => socket::open(ctx, rest, &name, options),
+        "datagram" => datagram::open(ctx, rest, &name, options),
         "comm" => ctx.throw(
             NOT_FOUND,
             &format!("this phone has no serial ports: {name}"),
