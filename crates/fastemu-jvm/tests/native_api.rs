@@ -610,8 +610,19 @@ fn locks_release_while_a_native_does_slow_work() {
     let progressed = vm.attach("io", |ctx| {
         let field = ctx.static_field_id("Spin", "count", "I").unwrap();
         let before = ctx.get_static(field).unwrap().int();
-        ctx.without_lock(|| std::thread::sleep(Duration::from_millis(30)));
-        ctx.get_static(field).unwrap().int() > before
+        // This thread holds the lock but for these slow calls, so the
+        // spinner moves only during them. A busy machine may not run it
+        // within one, so make them until it has moved, for ten seconds.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            ctx.without_lock(|| std::thread::sleep(Duration::from_millis(30)));
+            if ctx.get_static(field).unwrap().int() > before {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+        }
     });
     assert!(progressed, "the spinner ran while the lock was released");
     vm.stop();
