@@ -44,7 +44,18 @@ public class Strings {
 
         StringBuffer sb = new StringBuffer("start");
         sb.append(1).append('c').append(2L).append(1.5f).append(2.5).append(true).append((Object) null).append(new char[] {'x', 'y'});
-        System.out.println(sb + " " + sb.length());
+        System.out.println(sb + " " + sb.length() + " " + sb.capacity());
+        StringBuffer grow = new StringBuffer();
+        StringBuffer sized = new StringBuffer(3);
+        System.out.print(grow.capacity() + " " + sized.capacity());
+        for (int i = 0; i < 40; i++) {
+            grow.append("ab");
+            sized.append((char) (65 + i));
+            System.out.print(" " + grow.capacity() + "/" + sized.capacity());
+        }
+        grow.ensureCapacity(500);
+        sized.setLength(300);
+        System.out.println(" " + grow.capacity() + " " + sized.capacity() + " " + new StringBuilder("12345").capacity());
         sb.insert(0, "<").insert(sb.length(), '>').insert(3, 99).insert(1, 1.25);
         System.out.println(sb);
         sb.reverse();

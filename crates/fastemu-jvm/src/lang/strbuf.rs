@@ -13,24 +13,65 @@ use crate::value::Value;
 /// The contents of a string buffer.
 pub(crate) struct StrBuf {
     pub(crate) chars: Vec<u16>,
+    /// The capacity Java would report: 16 to start, growing to twice
+    /// plus two (or the length needed, if more) when the text outgrows it.
+    capacity: usize,
+}
+
+impl StrBuf {
+    fn ensure(&mut self, needed: usize) {
+        if needed > self.capacity {
+            self.capacity = (self.capacity * 2 + 2).max(needed);
+        }
+    }
 }
 
 impl Default for StrBuf {
     fn default() -> Self {
         Self {
             chars: Vec::with_capacity(16),
+            capacity: 16,
         }
     }
 }
 
 impl Payload for StrBuf {
     fn heap_bytes(&self) -> usize {
-        24 + 2 * self.chars.capacity()
+        24 + 2 * self.capacity
     }
 }
 
-fn buf<'a>(ctx: &'a mut Ctx<'_>, a: &[Value]) -> JResult<&'a mut Vec<u16>> {
-    Ok(&mut ctx.payload_mut::<StrBuf>(this(a))?.chars)
+/// The text of a buffer, for reading and editing; the capacity follows
+/// the length when the guard is dropped.
+struct BufMut<'a>(&'a mut StrBuf);
+
+impl std::ops::Deref for BufMut<'_> {
+    type Target = Vec<u16>;
+
+    fn deref(&self) -> &Vec<u16> {
+        &self.0.chars
+    }
+}
+
+impl std::ops::DerefMut for BufMut<'_> {
+    fn deref_mut(&mut self) -> &mut Vec<u16> {
+        &mut self.0.chars
+    }
+}
+
+impl Drop for BufMut<'_> {
+    fn drop(&mut self) {
+        let len = self.0.chars.len();
+        self.0.ensure(len);
+    }
+}
+
+fn buf<'a>(ctx: &'a mut Ctx<'_>, a: &[Value]) -> JResult<BufMut<'a>> {
+    Ok(BufMut(ctx.payload_mut::<StrBuf>(this(a))?))
+}
+
+fn state<'a>(ctx: &'a mut Ctx<'_>, a: &[Value]) -> JResult<&'a mut StrBuf> {
+    ctx.payload_mut::<StrBuf>(this(a))
 }
 
 fn len(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<usize> {
@@ -124,31 +165,34 @@ fn class(name: &str) -> NativeClass {
                     &capacity.to_string(),
                 );
             }
-            buf(ctx, a)?.reserve(capacity as usize);
+            state(ctx, a)?.capacity = capacity as usize;
             Ok(Value::Void)
         })
         .method("<init>", "(Ljava/lang/String;)V", |ctx, a| {
             let s = ctx.non_null(a[1])?;
             let chars = ctx.string_utf16(s)?.to_vec();
-            buf(ctx, a)?.extend_from_slice(&chars);
+            let sb = state(ctx, a)?;
+            sb.capacity = chars.len() + 16;
+            sb.chars.extend_from_slice(&chars);
             Ok(Value::Void)
         })
         .method("<init>", "(Ljava/lang/CharSequence;)V", |ctx, a| {
             ctx.non_null(a[1])?;
             let chars = object_text(ctx, a[1])?;
-            buf(ctx, a)?.extend_from_slice(&chars);
+            let sb = state(ctx, a)?;
+            sb.capacity = chars.len() + 16;
+            sb.chars.extend_from_slice(&chars);
             Ok(Value::Void)
         })
         .method("length", "()I", |ctx, a| {
             Ok(Value::Int(len(ctx, a)? as i32))
         })
         .method("capacity", "()I", |ctx, a| {
-            Ok(Value::Int(buf(ctx, a)?.capacity() as i32))
+            Ok(Value::Int(state(ctx, a)?.capacity as i32))
         })
         .method("ensureCapacity", "(I)V", |ctx, a| {
             let want = a[1].int().max(0) as usize;
-            let b = buf(ctx, a)?;
-            b.reserve(want.saturating_sub(b.len()));
+            state(ctx, a)?.ensure(want);
             Ok(Value::Void)
         })
         .method("toString", "()Ljava/lang/String;", |ctx, a| {
@@ -157,8 +201,9 @@ fn class(name: &str) -> NativeClass {
         })
         .method("charAt", "(I)C", |ctx, a| {
             let i = a[1].int();
-            match buf(ctx, a)?.get(i as usize) {
-                Some(&c) => Ok(Value::Int(i32::from(c))),
+            let c = state(ctx, a)?.chars.get(i as usize).copied();
+            match c {
+                Some(c) => Ok(Value::Int(i32::from(c))),
                 None => {
                     let n = len(ctx, a)?;
                     Err(index_error(ctx, format!("index {i},length {n}")))
@@ -209,7 +254,7 @@ fn class(name: &str) -> NativeClass {
             let s = ctx.non_null(a[1])?;
             let target = ctx.string_utf16(s)?.to_vec();
             Ok(Value::Int(super::string::index_of(
-                buf(ctx, a)?,
+                &buf(ctx, a)?,
                 &target,
                 0,
             )))
@@ -218,7 +263,7 @@ fn class(name: &str) -> NativeClass {
             let s = ctx.non_null(a[1])?;
             let target = ctx.string_utf16(s)?.to_vec();
             Ok(Value::Int(super::string::index_of(
-                buf(ctx, a)?,
+                &buf(ctx, a)?,
                 &target,
                 a[2].int(),
             )))
@@ -228,7 +273,7 @@ fn class(name: &str) -> NativeClass {
             let target = ctx.string_utf16(s)?.to_vec();
             let b = buf(ctx, a)?;
             Ok(Value::Int(super::string::last_index_of(
-                b,
+                &b,
                 &target,
                 b.len() as i32,
             )))
@@ -244,7 +289,7 @@ fn class(name: &str) -> NativeClass {
             substring(ctx, a, a[1].int(), a[2].int())
         })
         .method("reverse", &format!("(){me}"), |ctx, a| {
-            reverse(buf(ctx, a)?);
+            reverse(&mut buf(ctx, a)?);
             Ok(a[0])
         })
         .method("delete", &format!("(II){me}"), |ctx, a| {
