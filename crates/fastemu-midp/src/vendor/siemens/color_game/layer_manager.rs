@@ -69,6 +69,9 @@ fn paint(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         let m = manager(ctx, a[0])?;
         (m.layers.clone(), m.view)
     };
+    // A layer's paint may take another layer out of the manager, and the
+    // collector may run during it, so every layer is rooted first.
+    let layers: Vec<ObjRef> = layers.into_iter().map(|l| ctx.root(l)).collect();
     let saved = {
         let s = &mut ctx.payload_mut::<GraphicsData>(g)?.state;
         let saved = (
@@ -82,8 +85,10 @@ fn paint(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     };
     let mut result = Ok(());
     for &layer in layers.iter().rev() {
-        let layer = ctx.root(layer);
-        if !ctx.payload::<LayerData>(layer)?.visible {
+        if !ctx
+            .try_payload::<LayerData>(layer)
+            .is_some_and(|l| l.visible)
+        {
             continue;
         }
         result = ctx
