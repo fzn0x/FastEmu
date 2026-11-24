@@ -144,7 +144,10 @@ fn screens_alerts_time_out_and_dismiss() {
     run.wait_log("behind 1");
     // The modal alert has a listener: it waits for the select key.
     run.wait_frame(|f| rgb(f, 2, 40) == BACKGROUND);
-    std::thread::sleep(Duration::from_millis(400));
+    // Its indicator, started after it came up, animates.
+    run.wait_log("running");
+    let started = run.wait_frame(|_| true).serial();
+    run.wait_frame(|f| f.serial() > started + 5);
     assert!(!run.has("dismissed"), "{}", run.dump());
     run.tap(Key::Fire);
     run.wait_log("dismissed true");

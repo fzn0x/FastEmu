@@ -225,11 +225,15 @@ pub(crate) fn effective_layout(ctx: &Ctx<'_>, item: ObjRef) -> JResult<i32> {
 }
 
 /// Tells the item's owner it changed: a form lays itself out again, an
-/// alert repaints.
+/// alert repaints and runs its timer, which animates a gauge just set
+/// running.
 pub(crate) fn changed(ctx: &mut Ctx<'_>, item: ObjRef) -> JResult<()> {
     let d = data(ctx, item)?;
     match (d.owner, d.in_alert) {
-        (Some(owner), true) => display::repaint(ctx, owner),
+        (Some(owner), true) => {
+            super::wake_timer(ctx, owner);
+            display::repaint(ctx, owner)
+        }
         (Some(owner), false) => form::item_changed(ctx, owner),
         (None, _) => Ok(()),
     }

@@ -45,7 +45,21 @@ public class Alerts extends MIDlet implements CommandListener {
         ask.setString("Sure?");
         ask.setTimeout(Alert.FOREVER);
         ask.setCommandListener(this);
+        final Gauge wait = new Gauge(null, false, Gauge.INDEFINITE, Gauge.CONTINUOUS_IDLE);
+        ask.setIndicator(wait);
         display.setCurrent(ask);
+        // The game starts the indicator once the alert is up.
+        new Thread() {
+            public void run() {
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                wait.setValue(Gauge.CONTINUOUS_RUNNING);
+                System.out.println("running");
+            }
+        }.start();
     }
 
     public void commandAction(Command c, Displayable d) {
