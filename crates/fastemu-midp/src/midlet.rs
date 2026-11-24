@@ -145,7 +145,7 @@ pub fn launch(ctx: &mut Ctx<'_>, class_name: &str) -> JResult<()> {
 fn construct_and_start(ctx: &mut Ctx<'_>, class_name: &str) -> JResult<()> {
     let internal = class_name.replace('.', "/");
     let loaded = ctx.find_class(&internal);
-    let what = format!("loading the MIDlet class {class_name}");
+    let what = format!("loading the MIDlet class {}", shown(class_name));
     let Some(class) = or_crash(ctx, &what, loaded)? else {
         return Ok(());
     };
@@ -163,6 +163,15 @@ fn construct_and_start(ctx: &mut Ctx<'_>, class_name: &str) -> JResult<()> {
     let global = Arc::new(ctx.new_global(midlet));
     midlet_state(ctx).midlet = Some(global);
     start_app(ctx, midlet)
+}
+
+/// The start of a class name a suite chose, short enough for a message.
+fn shown(class_name: &str) -> String {
+    const MAX_SHOWN: usize = 100;
+    match class_name.char_indices().nth(MAX_SHOWN) {
+        Some((end, _)) => format!("{}...", &class_name[..end]),
+        None => class_name.to_owned(),
+    }
 }
 
 /// Calls `startApp`. A `MIDletStateChangeException` leaves the MIDlet
