@@ -62,7 +62,7 @@ Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement. FastEmu does not
 publish an email address for this. Report through
 [GitHub's private vulnerability reporting](https://github.com/fzn0x/FastEmu/security/advisories/new),
-choosing the report as a conduct problem in its title, or through the contact
+with "Conduct" at the start of its title, or through the contact
 details on the maintainer's [GitHub profile](https://github.com/fzn0x).
 
 All complaints will be reviewed and investigated promptly and fairly.
