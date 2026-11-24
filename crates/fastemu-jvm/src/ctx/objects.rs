@@ -510,6 +510,7 @@ impl Ctx<'_> {
             .and_then(|b| b.downcast_ref())
     }
 
+    /// Host data of type `T`, mutably.
     pub fn extension_mut<T: std::any::Any + Send>(&mut self) -> Option<&mut T> {
         self.state
             .extensions

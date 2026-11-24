@@ -79,6 +79,7 @@ impl NativeClass {
         class
     }
 
+    /// The internal name of the class.
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -90,6 +91,7 @@ impl NativeClass {
         self
     }
 
+    /// Adds an interface the class implements.
     #[must_use]
     pub fn implements(mut self, interface: &str) -> Self {
         self.interfaces.push(interface.to_owned());

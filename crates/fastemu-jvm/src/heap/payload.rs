@@ -44,6 +44,7 @@ impl Tracer<'_> {
         }
     }
 
+    /// Marks `r` if it is not `None`.
     pub fn mark_opt(&mut self, r: Option<ObjRef>) {
         if let Some(r) = r {
             self.mark(r);

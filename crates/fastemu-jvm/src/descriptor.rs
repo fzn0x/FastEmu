@@ -88,6 +88,7 @@ pub struct MethodDescriptor {
 }
 
 impl MethodDescriptor {
+    /// Parses `desc`, or `None` when it is not a method descriptor.
     pub fn parse(desc: &str) -> Option<Self> {
         let bytes = desc.as_bytes();
         if bytes.first() != Some(&b'(') {
@@ -111,6 +112,7 @@ impl MethodDescriptor {
         })
     }
 
+    /// The kind of each parameter.
     pub fn param_kinds(&self) -> Vec<Kind> {
         self.params.iter().map(|p| kind_of(p)).collect()
     }

@@ -113,8 +113,11 @@ pub struct HeapStats {
     pub used_bytes: usize,
     /// The configured heap size.
     pub limit_bytes: usize,
+    /// Objects on the heap, live or not yet collected.
     pub live_objects: usize,
+    /// Collections run so far.
     pub collections: u64,
+    /// Objects freed by all collections so far.
     pub freed_objects: u64,
 }
 

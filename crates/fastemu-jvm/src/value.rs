@@ -51,9 +51,13 @@ pub enum Value {
     /// or the result of a `void` method.
     #[default]
     Void,
+    /// An `int`, or a `boolean`, `byte`, `char` or `short`.
     Int(i32),
+    /// A `long`.
     Long(i64),
+    /// A `float`.
     Float(f32),
+    /// A `double`.
     Double(f64),
     /// A reference, `None` for `null`.
     Ref(Option<ObjRef>),
@@ -75,6 +79,7 @@ impl Value {
         }
     }
 
+    /// The `long` this value holds, or 0.
     #[inline]
     pub fn long(self) -> i64 {
         match self {
@@ -83,6 +88,7 @@ impl Value {
         }
     }
 
+    /// The `float` this value holds, or 0.
     #[inline]
     pub fn float(self) -> f32 {
         match self {
@@ -91,6 +97,7 @@ impl Value {
         }
     }
 
+    /// The `double` this value holds, or 0.
     #[inline]
     pub fn double(self) -> f64 {
         match self {
@@ -121,6 +128,7 @@ impl Value {
         self.int() as u16
     }
 
+    /// Whether this value is the `null` reference.
     pub fn is_null(self) -> bool {
         matches!(self, Value::Ref(None))
     }

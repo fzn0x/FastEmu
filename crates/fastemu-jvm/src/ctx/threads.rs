@@ -15,6 +15,7 @@ pub enum Wake {
     /// Another thread changed something: released a monitor, notified,
     /// ended, posted a task, or called [`Ctx::notify_waiters`].
     Notified,
+    /// The deadline passed.
     TimedOut,
     /// The thread was interrupted. The flag stays set.
     Interrupted,

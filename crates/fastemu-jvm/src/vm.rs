@@ -39,14 +39,19 @@ pub enum Diagnostic {
     MissingClass(String),
     /// A method reference that did not resolve.
     MissingMethod {
+        /// The class the reference names, such as
+        /// `javax/microedition/lcdui/Graphics`.
         class: String,
         name: String,
+        /// The descriptor, such as `(II)V`.
         desc: String,
     },
     /// A field reference that did not resolve.
     MissingField {
+        /// The class the reference names.
         class: String,
         name: String,
+        /// The field's descriptor, such as `I`.
         desc: String,
     },
 }
@@ -82,7 +87,9 @@ pub struct VmConfig {
     /// defaults (`microedition.configuration`, `microedition.encoding`).
     /// `microedition.encoding` names the charset of `new String(bytes)`.
     pub properties: Vec<(String, String)>,
+    /// Where `System.out`, `System.err` and warnings go.
     pub log: LogSink,
+    /// Where diagnostics go, besides the log.
     pub diagnostics: Option<DiagnosticSink>,
     /// Whether `System.exit` stops the virtual machine. When false it
     /// throws `SecurityException`, as MIDP requires of MIDlets.
@@ -408,15 +415,18 @@ impl Vm {
         self.shared.wake_all();
     }
 
+    /// Lets paused threads run again.
     pub fn resume(&self) {
         self.shared.paused.store(false, Ordering::Release);
         self.shared.wake_all();
     }
 
+    /// Whether [`Vm::pause`] is in effect.
     pub fn is_paused(&self) -> bool {
         self.shared.is_paused()
     }
 
+    /// Whether [`Vm::stop`] (or `System.exit`) was called.
     pub fn is_stopping(&self) -> bool {
         self.shared.is_stopping()
     }
@@ -449,6 +459,7 @@ impl Vm {
         self.shared.state.lock().exit_code
     }
 
+    /// What the heap holds now.
     pub fn heap_stats(&self) -> HeapStats {
         self.shared.state.lock().heap.stats()
     }

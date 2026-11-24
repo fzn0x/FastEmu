@@ -144,6 +144,8 @@ impl<'vm> Ctx<'vm> {
         self.shared.is_stopping()
     }
 
+    /// Whether the virtual machine is paused; threads park at their next
+    /// safepoint.
     pub fn is_paused(&self) -> bool {
         self.shared.is_paused()
     }

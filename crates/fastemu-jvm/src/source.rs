@@ -25,6 +25,7 @@ pub struct DirSource {
 }
 
 impl DirSource {
+    /// A source reading from the directory `root`.
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
@@ -66,6 +67,7 @@ pub struct MemorySource {
 }
 
 impl MemorySource {
+    /// An empty source.
     pub fn new() -> Self {
         Self::default()
     }
