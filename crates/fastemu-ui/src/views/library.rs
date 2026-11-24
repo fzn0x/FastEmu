@@ -336,7 +336,6 @@ impl FastEmuView {
         };
         let running = self.tiles.iter().filter(|t| t.session.entry == id).count();
         let broken = self.broken.get(&id).cloned();
-        let group = format!("entry-{}", id.0);
 
         if self.confirm_remove == Some(id) {
             return div()
@@ -389,7 +388,6 @@ impl FastEmuView {
         div().child(
             div()
                 .id(("entry", id.0))
-                .group(group.clone())
                 .flex()
                 .items_center()
                 .gap(px(10.0))
@@ -460,8 +458,6 @@ impl FastEmuView {
                         .flex()
                         .flex_none()
                         .gap(px(2.0))
-                        .invisible()
-                        .group_hover(group, Styled::visible)
                         .child(
                             icon_button(
                                 ("entry-settings", id.0),
