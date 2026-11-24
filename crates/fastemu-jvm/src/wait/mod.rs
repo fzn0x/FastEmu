@@ -154,6 +154,24 @@ mod tests {
         }
     }
 
+    /// The medians of ten waits for `wait` and of ten host sleeps of the
+    /// same length, taken in turn.
+    fn medians_beside_sleeps(signal: &Signal, wait: Duration) -> (Duration, Duration) {
+        let mut waits = Vec::new();
+        let mut sleeps = Vec::new();
+        for _ in 0..10 {
+            let start = Instant::now();
+            assert!(signal.wait(Some(start + wait)), "nothing raised it");
+            waits.push(start.elapsed());
+            let start = Instant::now();
+            std::thread::sleep(wait);
+            sleeps.push(start.elapsed());
+        }
+        waits.sort();
+        sleeps.sort();
+        (waits[5], sleeps[5])
+    }
+
     #[test]
     fn deadlines_pass_close_to_on_time() {
         let signal = Signal::new();
@@ -167,11 +185,19 @@ mod tests {
         } else {
             Duration::from_millis(9)
         };
-        let medians: Vec<Duration> = (0..3)
-            .map(|_| timed(&signal, Duration::from_millis(5))[5])
-            .take_while(|&median| median >= late)
+        // A busy machine wakes every thread late, the host's own precise
+        // sleeps too: under load both take 10 to 15 ms. So a round is late
+        // only when its waits are also half again as long as the sleeps
+        // taken between them. Waits on the tick fail both ways (15.6 ms
+        // against about 5).
+        let rounds: Vec<(Duration, Duration)> = (0..3)
+            .map(|_| medians_beside_sleeps(&signal, Duration::from_millis(5)))
+            .take_while(|&(wait, sleep)| wait >= late && wait >= sleep * 3 / 2)
             .collect();
-        assert!(medians.len() < 3, "late every time: {medians:?}");
+        assert!(
+            rounds.len() < 3,
+            "late every time (waits, host sleeps): {rounds:?}"
+        );
     }
 
     #[test]
