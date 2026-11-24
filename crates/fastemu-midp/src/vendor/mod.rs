@@ -11,6 +11,8 @@
 
 mod clip;
 pub(crate) mod device;
+#[cfg(test)]
+mod inventory;
 pub mod lg;
 pub mod motorola;
 pub mod samsung;
