@@ -1064,19 +1064,19 @@ A canvas with an off-screen buffer, key states and sound, like MIDP 2.0's `GameC
 
 | T | Field | Type | Value | Flags | Notes |
 |---|---|---|---|---|---|
-| 3 | `UP_KEY` | `I` | (not a constant) | static |  |
-| 3 | `DOWN_KEY` | `I` | (not a constant) | static |  |
-| 3 | `LEFT_KEY` | `I` | (not a constant) | static |  |
-| 3 | `RIGHT_KEY` | `I` | (not a constant) | static |  |
-| 3 | `FIRE_KEY` | `I` | (not a constant) | static |  |
-| 3 | `GAME_A_KEY` | `I` | (not a constant) | static |  |
-| 3 | `GAME_B_KEY` | `I` | (not a constant) | static |  |
-| 3 | `GAME_C_KEY` | `I` | (not a constant) | static |  |
-| 3 | `GAME_D_KEY` | `I` | (not a constant) | static |  |
-| 3 | `VOLUME_MAX` | `I` | (not a constant) | static |  |
-| 3 | `VOLUME_MIN` | `I` | (not a constant) | static |  |
-| 3 | `PRIORITY_MAX` | `I` | (not a constant) | static |  |
-| 3 | `PRIORITY_MIN` | `I` | (not a constant) | static |  |
+| 3 | `UP_KEY` | `I` | `1` | static |  |
+| 3 | `DOWN_KEY` | `I` | `2` | static |  |
+| 3 | `LEFT_KEY` | `I` | `4` | static |  |
+| 3 | `RIGHT_KEY` | `I` | `8` | static |  |
+| 3 | `FIRE_KEY` | `I` | `16` | static |  |
+| 3 | `GAME_A_KEY` | `I` | `32` | static |  |
+| 3 | `GAME_B_KEY` | `I` | `64` | static |  |
+| 3 | `GAME_C_KEY` | `I` | `128` | static |  |
+| 3 | `GAME_D_KEY` | `I` | `256` (`0x100`) | static |  |
+| 3 | `VOLUME_MAX` | `I` | `100` | static |  |
+| 3 | `VOLUME_MIN` | `I` | `0` | static |  |
+| 3 | `PRIORITY_MAX` | `I` | `100` | static |  |
+| 3 | `PRIORITY_MIN` | `I` | `0` | static |  |
 
 | T | Constructor | Descriptor | Flags | Throws | Notes |
 |---|---|---|---|---|---|
@@ -1106,9 +1106,9 @@ Tier 3. Javadoc: [Motorola_Gaming_API](https://nikita36078.github.io/J2ME_Docs/d
 
 | T | Field | Type | Value | Flags | Notes |
 |---|---|---|---|---|---|
-| 3 | `SCALE_REPLICATE` | `I` | (not a constant) | static |  |
-| 3 | `SCALE_AREA` | `I` | (not a constant) | static |  |
-| 3 | `SCALE_SMOOTH` | `I` | (not a constant) | static |  |
+| 3 | `SCALE_REPLICATE` | `I` | `0` | static |  |
+| 3 | `SCALE_AREA` | `I` | `1` | static |  |
+| 3 | `SCALE_SMOOTH` | `I` | `2` | static |  |
 
 | T | Method | Descriptor | Flags | Throws | Notes |
 |---|---|---|---|---|---|
@@ -1237,20 +1237,20 @@ The colored lights of some Motorola phones. FastEmu can accept and ignore every 
 
 | T | Field | Type | Value | Flags | Notes |
 |---|---|---|---|---|---|
-| 3 | `BLACK` | `I` | (not a constant) | static |  |
-| 3 | `BLANK` | `I` | (not a constant) | static |  |
-| 3 | `BLUE` | `I` | (not a constant) | static |  |
-| 3 | `CYAN` | `I` | (not a constant) | static |  |
-| 3 | `GREEN` | `I` | (not a constant) | static |  |
-| 3 | `MAGENTA` | `I` | (not a constant) | static |  |
-| 3 | `OFF` | `I` | (not a constant) | static |  |
-| 3 | `ON` | `I` | (not a constant) | static |  |
-| 3 | `RED` | `I` | (not a constant) | static |  |
-| 3 | `WHITE` | `I` | (not a constant) | static |  |
-| 3 | `YELLOW` | `I` | (not a constant) | static |  |
-| 3 | `QUEUED` | `I` | (not a constant) | static |  |
-| 3 | `SUCCESS` | `I` | (not a constant) | static |  |
-| 3 | `IGNORED` | `I` | (not a constant) | static |  |
+| 3 | `BLACK` | `I` | `0` | static |  |
+| 3 | `BLANK` | `I` | `0` | static |  |
+| 3 | `BLUE` | `I` | `255` | static |  |
+| 3 | `CYAN` | `I` | `65535` (`0xffff`) | static |  |
+| 3 | `GREEN` | `I` | `65280` | static |  |
+| 3 | `MAGENTA` | `I` | `16711935` (`0xff00ff`) | static |  |
+| 3 | `OFF` | `I` | `0` | static |  |
+| 3 | `ON` | `I` | `16777215` (`0xffffff`) | static |  |
+| 3 | `RED` | `I` | `16711680` (`0xff0000`) | static |  |
+| 3 | `WHITE` | `I` | `16777215` (`0xffffff`) | static |  |
+| 3 | `YELLOW` | `I` | `16776960` (`0xffff00`) | static |  |
+| 3 | `QUEUED` | `I` | `1` | static |  |
+| 3 | `SUCCESS` | `I` | `0` | static |  |
+| 3 | `IGNORED` | `I` | `2` | static |  |
 
 | T | Method | Descriptor | Flags | Throws | Notes |
 |---|---|---|---|---|---|
@@ -1314,14 +1314,14 @@ Extends `java.util.TimerTask`.
 
 | T | Field | Type | Value | Flags | Notes |
 |---|---|---|---|---|---|
-| 3 | `MAX_VIBRATE_TIME` | `I` | (not a constant) | static |  |
-| 3 | `MIN_PAUSE_TIME` | `I` | `2000` | static |  |
-| 3 | `VIBRATE_SILENT` | `I` | `0` | static |  |
-| 3 | `VIBRATE_SHORT` | `I` | `4` | static |  |
-| 3 | `VIBRATE_LONG` | `I` | `2` | static |  |
-| 3 | `VIBRATE_2SHORT` | `I` | `1` | static |  |
-| 3 | `VIBRATE_SHORT_LONG` | `I` | `5` | static |  |
-| 3 | `VIBRATE_PULSE` | `I` | `3` | static |  |
+| 3 | `MAX_VIBRATE_TIME` | `I` | (value not in the sources) | static |  |
+| 3 | `MIN_PAUSE_TIME` | `I` | `2000` (from freej2me-plus only) | static |  |
+| 3 | `VIBRATE_SILENT` | `I` | `0` (from freej2me-plus only) | static |  |
+| 3 | `VIBRATE_SHORT` | `I` | `4` (from freej2me-plus only) | static |  |
+| 3 | `VIBRATE_LONG` | `I` | `2` (from freej2me-plus only) | static |  |
+| 3 | `VIBRATE_2SHORT` | `I` | `1` (from freej2me-plus only) | static |  |
+| 3 | `VIBRATE_SHORT_LONG` | `I` | `5` (from freej2me-plus only) | static |  |
+| 3 | `VIBRATE_PULSE` | `I` | `3` (from freej2me-plus only) | static |  |
 
 | T | Method | Descriptor | Flags | Throws | Notes |
 |---|---|---|---|---|---|
@@ -1483,12 +1483,12 @@ LG's fixed-point math. Its javadoc (Korean) describes 20.12 fixed point: 20 inte
 
 | T | Field | Type | Value | Flags | Since | Notes |
 |---|---|---|---|---|---|---|
-| 3 | `E` | `I` | (not a constant) | static | 1.0 |  |
-| 3 | `PI` | `I` | (not a constant) | static | 1.0 |  |
-| 3 | `MAX_VALUE` | `I` | `524287` (`0x7ffff`) | static | 1.0 |  |
-| 3 | `MIN_VALUE` | `I` | `-524288` (`0xfff80000`) | static | 1.0 |  |
-| 3 | `MAX_VALUE_INT` | `I` | (not a constant) | static | 1.0 |  |
-| 3 | `MIN_VALUE_INT` | `I` | (not a constant) | static | 1.0 |  |
+| 3 | `E` | `I` | (value not in the sources) | static | 1.0 |  |
+| 3 | `PI` | `I` | (value not in the sources) | static | 1.0 |  |
+| 3 | `MAX_VALUE` | `I` | `524287` (`0x7ffff`) (from freej2me-plus only) | static | 1.0 |  |
+| 3 | `MIN_VALUE` | `I` | `-524288` (`0xfff80000`) (from freej2me-plus only) | static | 1.0 |  |
+| 3 | `MAX_VALUE_INT` | `I` | (value not in the sources) | static | 1.0 |  |
+| 3 | `MIN_VALUE_INT` | `I` | (value not in the sources) | static | 1.0 |  |
 
 | T | Method | Descriptor | Flags | Since | Throws | Notes |
 |---|---|---|---|---|---|---|
@@ -1539,43 +1539,43 @@ Tier 3. Javadoc: [LG_MMPP_API](https://nikita36078.github.io/J2ME_Docs/docs/LG_M
 
 | T | Field | Type | Value | Flags | Notes |
 |---|---|---|---|---|---|
-| 3 | `SND_4OCT_A` | `I` | `0` | static |  |
-| 3 | `SND_4OCT_AS` | `I` | `1` | static |  |
-| 3 | `SND_4OCT_B` | `I` | `2` | static |  |
-| 3 | `SND_5OCT_C` | `I` | `6` | static |  |
-| 3 | `SND_5OCT_CS` | `I` | `7` | static |  |
-| 3 | `SND_5OCT_D` | `I` | `8` | static |  |
-| 3 | `SND_5OCT_DS` | `I` | `9` | static |  |
-| 3 | `SND_5OCT_E` | `I` | `10` | static |  |
-| 3 | `SND_5OCT_F` | `I` | `11` | static |  |
-| 3 | `SND_5OCT_FS` | `I` | `12` | static |  |
-| 3 | `SND_5OCT_G` | `I` | `13` | static |  |
-| 3 | `SND_5OCT_GS` | `I` | `14` | static |  |
-| 3 | `SND_5OCT_A` | `I` | `3` | static |  |
-| 3 | `SND_5OCT_AS` | `I` | `4` | static |  |
-| 3 | `SND_5OCT_B` | `I` | `5` | static |  |
-| 3 | `SND_6OCT_C` | `I` | `18` | static |  |
-| 3 | `SND_6OCT_CS` | `I` | `19` | static |  |
-| 3 | `SND_6OCT_D` | `I` | `20` | static |  |
-| 3 | `SND_6OCT_DS` | `I` | `21` | static |  |
-| 3 | `SND_6OCT_E` | `I` | `22` | static |  |
-| 3 | `SND_6OCT_F` | `I` | `23` | static |  |
-| 3 | `SND_6OCT_FS` | `I` | `24` | static |  |
-| 3 | `SND_6OCT_G` | `I` | `25` | static |  |
-| 3 | `SND_6OCT_GS` | `I` | `26` | static |  |
-| 3 | `SND_6OCT_A` | `I` | `15` | static |  |
-| 3 | `SND_6OCT_AS` | `I` | `16` | static |  |
-| 3 | `SND_6OCT_B` | `I` | `17` | static |  |
-| 3 | `SND_7OCT_C` | `I` | `30` | static |  |
-| 3 | `SND_7OCT_CS` | `I` | `31` | static |  |
-| 3 | `SND_7OCT_D` | `I` | `32` | static |  |
-| 3 | `SND_7OCT_DS` | `I` | `33` | static |  |
-| 3 | `SND_7OCT_E` | `I` | `34` | static |  |
-| 3 | `SND_7OCT_F` | `I` | `35` | static |  |
-| 3 | `SND_7OCT_FS` | `I` | `36` | static |  |
-| 3 | `SND_7OCT_G` | `I` | `37` | static |  |
-| 3 | `SND_7OCT_GS` | `I` | `38` | static |  |
-| 3 | `SND_7OCT_A` | `I` | `27` | static |  |
+| 3 | `SND_4OCT_A` | `I` | `0` (from freej2me-plus only) | static |  |
+| 3 | `SND_4OCT_AS` | `I` | `1` (from freej2me-plus only) | static |  |
+| 3 | `SND_4OCT_B` | `I` | `2` (from freej2me-plus only) | static |  |
+| 3 | `SND_5OCT_C` | `I` | `6` (from freej2me-plus only) | static |  |
+| 3 | `SND_5OCT_CS` | `I` | `7` (from freej2me-plus only) | static |  |
+| 3 | `SND_5OCT_D` | `I` | `8` (from freej2me-plus only) | static |  |
+| 3 | `SND_5OCT_DS` | `I` | `9` (from freej2me-plus only) | static |  |
+| 3 | `SND_5OCT_E` | `I` | `10` (from freej2me-plus only) | static |  |
+| 3 | `SND_5OCT_F` | `I` | `11` (from freej2me-plus only) | static |  |
+| 3 | `SND_5OCT_FS` | `I` | `12` (from freej2me-plus only) | static |  |
+| 3 | `SND_5OCT_G` | `I` | `13` (from freej2me-plus only) | static |  |
+| 3 | `SND_5OCT_GS` | `I` | `14` (from freej2me-plus only) | static |  |
+| 3 | `SND_5OCT_A` | `I` | `3` (from freej2me-plus only) | static |  |
+| 3 | `SND_5OCT_AS` | `I` | `4` (from freej2me-plus only) | static |  |
+| 3 | `SND_5OCT_B` | `I` | `5` (from freej2me-plus only) | static |  |
+| 3 | `SND_6OCT_C` | `I` | `18` (from freej2me-plus only) | static |  |
+| 3 | `SND_6OCT_CS` | `I` | `19` (from freej2me-plus only) | static |  |
+| 3 | `SND_6OCT_D` | `I` | `20` (from freej2me-plus only) | static |  |
+| 3 | `SND_6OCT_DS` | `I` | `21` (from freej2me-plus only) | static |  |
+| 3 | `SND_6OCT_E` | `I` | `22` (from freej2me-plus only) | static |  |
+| 3 | `SND_6OCT_F` | `I` | `23` (from freej2me-plus only) | static |  |
+| 3 | `SND_6OCT_FS` | `I` | `24` (from freej2me-plus only) | static |  |
+| 3 | `SND_6OCT_G` | `I` | `25` (from freej2me-plus only) | static |  |
+| 3 | `SND_6OCT_GS` | `I` | `26` (from freej2me-plus only) | static |  |
+| 3 | `SND_6OCT_A` | `I` | `15` (from freej2me-plus only) | static |  |
+| 3 | `SND_6OCT_AS` | `I` | `16` (from freej2me-plus only) | static |  |
+| 3 | `SND_6OCT_B` | `I` | `17` (from freej2me-plus only) | static |  |
+| 3 | `SND_7OCT_C` | `I` | `30` (from freej2me-plus only) | static |  |
+| 3 | `SND_7OCT_CS` | `I` | `31` (from freej2me-plus only) | static |  |
+| 3 | `SND_7OCT_D` | `I` | `32` (from freej2me-plus only) | static |  |
+| 3 | `SND_7OCT_DS` | `I` | `33` (from freej2me-plus only) | static |  |
+| 3 | `SND_7OCT_E` | `I` | `34` (from freej2me-plus only) | static |  |
+| 3 | `SND_7OCT_F` | `I` | `35` (from freej2me-plus only) | static |  |
+| 3 | `SND_7OCT_FS` | `I` | `36` (from freej2me-plus only) | static |  |
+| 3 | `SND_7OCT_G` | `I` | `37` (from freej2me-plus only) | static |  |
+| 3 | `SND_7OCT_GS` | `I` | `38` (from freej2me-plus only) | static |  |
+| 3 | `SND_7OCT_A` | `I` | `27` (from freej2me-plus only) | static |  |
 
 | T | Constructor | Descriptor | Flags | Throws | Notes |
 |---|---|---|---|---|---|
@@ -1678,15 +1678,15 @@ Tier 3. Javadoc: [LG_MMPP_API](https://nikita36078.github.io/J2ME_Docs/docs/LG_M
 
 | T | Field | Type | Value | Flags | Notes |
 |---|---|---|---|---|---|
-| 3 | `DEFAULT_PANPOT` | `I` | (not a constant) | static |  |
-| 3 | `DEFAULT_VOLUME` | `I` | (not a constant) | static |  |
-| 3 | `NO_DATA` | `I` | (not a constant) | static |  |
-| 3 | `READY` | `I` | (not a constant) | static |  |
-| 3 | `PLAY` | `I` | (not a constant) | static |  |
-| 3 | `ENDING` | `I` | (not a constant) | static |  |
-| 3 | `PAUSE` | `I` | (not a constant) | static |  |
-| 3 | `MASTER` | `I` | (not a constant) | static |  |
-| 3 | `SLAVE` | `I` | (not a constant) | static |  |
+| 3 | `DEFAULT_PANPOT` | `I` | `64` | static |  |
+| 3 | `DEFAULT_VOLUME` | `I` | `100` | static |  |
+| 3 | `NO_DATA` | `I` | `1` | static |  |
+| 3 | `READY` | `I` | `2` | static |  |
+| 3 | `PLAY` | `I` | `3` | static |  |
+| 3 | `ENDING` | `I` | `4` | static |  |
+| 3 | `PAUSE` | `I` | `5` | static |  |
+| 3 | `MASTER` | `I` | `0` | static |  |
+| 3 | `SLAVE` | `I` | `1` | static |  |
 
 | T | Method | Descriptor | Flags | Throws | Notes |
 |---|---|---|---|---|---|
@@ -1756,12 +1756,12 @@ Tier 3. Javadoc: [LG_MMPP_API](https://nikita36078.github.io/J2ME_Docs/docs/LG_M
 
 | T | Field | Type | Value | Flags | Notes |
 |---|---|---|---|---|---|
-| 3 | `IM_NONE` | `I` | (not a constant) | static |  |
-| 3 | `IM_ROMAN_CAPS` | `I` | (not a constant) | static |  |
-| 3 | `IM_ROMAN_SMALL` | `I` | (not a constant) | static |  |
-| 3 | `IM_NUMERIC` | `I` | (not a constant) | static |  |
-| 3 | `IM_SYMBOL` | `I` | (not a constant) | static |  |
-| 3 | `IM_KOREAN` | `I` | (not a constant) | static |  |
+| 3 | `IM_NONE` | `I` | (value not in the sources) | static |  |
+| 3 | `IM_ROMAN_CAPS` | `I` | (value not in the sources) | static |  |
+| 3 | `IM_ROMAN_SMALL` | `I` | (value not in the sources) | static |  |
+| 3 | `IM_NUMERIC` | `I` | (value not in the sources) | static |  |
+| 3 | `IM_SYMBOL` | `I` | (value not in the sources) | static |  |
+| 3 | `IM_KOREAN` | `I` | (value not in the sources) | static |  |
 | 3 | `eT` | `Lmmpp/microedition/lcdui/ET;` | (not a constant) | protected not final |  |
 
 | T | Constructor | Descriptor | Flags | Throws | Notes |
