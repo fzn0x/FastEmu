@@ -45,6 +45,25 @@ named.
 - **The JAR of a JAD.** `MIDlet-Jar-URL` as a relative path, then its
   last segment, then the JAD's own name with `.jar`. A JAR picks up a JAD
   of the same name beside it.
+- **The JAR path stays in the folder.** A JAD is hostile input, so
+  `MIDlet-Jar-URL` is only ever a name inside the JAD's folder. The value
+  loses a leading `file://` and anything from the first `?` or `#`, and
+  is split on `/` and `\`. Empty parts and `.` are dropped. Every other
+  part must be a plain name: no `..`, no `:` (so no drive letter and no
+  NTFS stream), none of `< > " | * ?`, no control character, no dot or
+  space at the end, at most 255 bytes, and on Windows no device name such
+  as `NUL`. A guess with a part that is not plain is dropped, which is
+  not an error. A value with `://` gives only its last part. Each part is
+  added to the JAD's folder one at a time, so no drive, `\\host\share`
+  or `..` can replace or leave it. This is text work, done before any
+  file is looked at, and it gives the same answer on every system.
+- **Size limits.** `read_capped` reads each JAR and JAD. A JAR over
+  64 MiB (`MAX_JAR_BYTES`) and a JAD over 1 MiB (`MAX_JAD_BYTES`) give
+  `LaunchError::InvalidSuite` with the file name, its size and the limit,
+  before the file is read. So does a path that is not a regular file. The
+  read stops one byte past the limit, so a file that grows cannot pass it.
+  A JAD beside a JAR that is over its limit is left out, with a note. The
+  JAR stays in the one buffer it was read into.
 - **MIDlets.** `MIDlet-1` up to the first gap; class after the last
   comma, name before the first, icon in between. With no `MIDlet-<n>` at
   all, the classes that extend `MIDlet` (found by walking superclasses in
