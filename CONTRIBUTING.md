@@ -118,9 +118,10 @@ games expect:
   own folders.
 - **`cargo xtask stubs`** writes a Java stub of every class FastEmu
   registers, with the throws clauses of `docs/compat/api`, and compiles
-  them into `fastemu-stubs.jar` in the target folder (`--out DIR` puts it
-  elsewhere). Compile a test MIDlet against it to see whether FastEmu has
-  everything the MIDlet calls. It needs a JDK.
+  them into `fastemu-stubs.jar` in the `fastemu-stubs` folder of the
+  target folder (`--out DIR` puts it in DIR). Compile a test MIDlet
+  against it to see whether FastEmu has everything the MIDlet calls. It
+  needs a JDK.
 - **`cargo xtask coverage`** compares the classes FastEmu registers with
   the API inventory in [docs/compat/api](docs/compat/api/README.md), tier
   by tier, and writes [docs/compat/coverage.md](docs/compat/coverage.md).
