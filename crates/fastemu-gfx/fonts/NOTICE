@@ -1,0 +1,26 @@
+Fonts bundled with fastemu-gfx
+==============================
+
+FastEmu draws the text of MIDP games with these fonts, compiled into the
+fastemu-gfx library. They are the DejaVu LGC fonts, version 2.37, the
+variant of the DejaVu fonts that covers the Latin, Greek and Cyrillic
+scripts. The files are unmodified copies from the release archive
+dejavu-lgc-fonts-ttf-2.37.zip published by the DejaVu fonts team at
+https://github.com/dejavu-fonts/dejavu-fonts/releases/tag/version_2_37
+
+  DejaVuLGCSans.ttf           SYSTEM and PROPORTIONAL faces, regular
+  DejaVuLGCSans-Bold.ttf      SYSTEM and PROPORTIONAL faces, bold
+  DejaVuLGCSansMono.ttf       MONOSPACE face, regular
+  DejaVuLGCSansMono-Bold.ttf  MONOSPACE face, bold
+
+The DejaVu fonts are based on the Bitstream Vera fonts. The fonts are
+copyright (c) 2003 by Bitstream, Inc., with glyphs imported from the Arev
+fonts copyright (c) 2006 by Tavmjong Bah; the DejaVu changes are in the
+public domain. They are distributed under the Bitstream Vera Fonts license
+and the Arev Fonts license, whose full text is in the LICENSE file next to
+this notice. Bitstream Vera is a trademark of Bitstream, Inc.
+
+FastEmu itself is licensed under the GNU General Public License, version 3
+or later. The font licenses permit redistributing the fonts as part of a
+larger software package, which is how FastEmu ships them; they do not
+change the license of FastEmu's code.
