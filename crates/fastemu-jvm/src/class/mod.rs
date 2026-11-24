@@ -258,6 +258,10 @@ pub(crate) struct Class {
     pub(crate) all_interfaces: Box<[ClassId]>,
     /// The superclass chain from `java/lang/Object` to this class.
     pub(crate) supers: Box<[ClassId]>,
+    /// The most classes on any path from this class up to
+    /// `java/lang/Object` through superclasses and interfaces, both ends
+    /// included.
+    pub(crate) height: u16,
     pub(crate) fields: Box<[Field]>,
     /// The starting values of every instance field, inherited ones first.
     pub(crate) template: Box<[Value]>,

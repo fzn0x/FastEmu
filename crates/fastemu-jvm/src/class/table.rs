@@ -32,10 +32,12 @@ pub(crate) const MAX_CLASS_NAME: usize = 255;
 /// The most dimensions of an array class (the limit of JVMS 4.3.2).
 pub(crate) const MAX_ARRAY_DIMS: usize = 255;
 
-/// The most classes in one hierarchy, `java/lang/Object` and the class
-/// itself included. Loading and initializing recurse once per class of
-/// the hierarchy, so this bounds the host stack they use. The chains of
-/// game classes of the test games have 5 classes at most.
+/// The most classes on one path up a hierarchy, through superclasses and
+/// interfaces, `java/lang/Object` and the class itself included. Loading
+/// and initializing recurse once per class of the path, so this bounds the
+/// host stack they use, and the list of interfaces of a class does not
+/// grow past it for a chain. The chains of game classes of the test games
+/// have 5 classes at most.
 pub(crate) const MAX_HIERARCHY_DEPTH: usize = 256;
 
 /// The longest name `load` can accept at all: an array of
@@ -286,6 +288,7 @@ impl ClassTable {
             interfaces: Box::new([]),
             all_interfaces: Box::new([]),
             supers: Box::new([object.id, id]),
+            height: 2,
             fields: Box::new([]),
             template: Box::new([]),
             methods: Box::new([]),
@@ -662,6 +665,52 @@ mod tests {
             assert_eq!(failed, (MAX_HIERARCHY_DEPTH - 1..400).collect::<Vec<_>>());
             let last = t.lookup(&format!("n{}", MAX_HIERARCHY_DEPTH - 2)).unwrap();
             assert_eq!(t.get(last).supers.len(), MAX_HIERARCHY_DEPTH);
+        });
+    }
+
+    /// Natives for the interfaces `n0` to `n<len - 1>`, each extending the
+    /// one before.
+    fn interface_chain(len: usize) -> Vec<NativeClass> {
+        (0..len)
+            .map(|i| match i {
+                0 => NativeClass::interface("n0"),
+                _ => NativeClass::interface(&format!("n{i}")).implements(&format!("n{}", i - 1)),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_interface_chain_over_the_limit_does_not_load_in_either_order() {
+        on_vm_stack(|| {
+            let mut t = table_of(interface_chain(400));
+            let err = t.load("n399").unwrap_err();
+            assert_eq!(err.exception, "java/lang/ClassFormatError");
+            assert!(t.load("n100").is_ok());
+
+            // The root first nests no load, and the list of interfaces of
+            // each interface would grow with the chain.
+            let mut t = table_of(interface_chain(400));
+            let failed: Vec<usize> = (0..400)
+                .filter(|i| t.load(&format!("n{i}")).is_err())
+                .collect();
+            assert_eq!(failed, (MAX_HIERARCHY_DEPTH - 1..400).collect::<Vec<_>>());
+            let last = t.lookup(&format!("n{}", MAX_HIERARCHY_DEPTH - 2)).unwrap();
+            assert_eq!(t.get(last).all_interfaces.len(), MAX_HIERARCHY_DEPTH - 2);
+        });
+    }
+
+    #[test]
+    fn a_class_counts_the_depth_of_its_interfaces() {
+        on_vm_stack(|| {
+            let mut natives = interface_chain(255);
+            natives.push(NativeClass::new("fits").implements("n253"));
+            natives.push(NativeClass::new("deep").implements("n254"));
+            let mut t = table_of(natives);
+            // `n253` has 255 classes on its path, with Object.
+            let fits = t.load("fits").unwrap();
+            assert_eq!(usize::from(t.get(fits).height), MAX_HIERARCHY_DEPTH);
+            let err = t.load("deep").unwrap_err();
+            assert_eq!(err.exception, "java/lang/ClassFormatError");
         });
     }
 

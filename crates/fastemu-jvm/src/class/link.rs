@@ -197,13 +197,13 @@ impl ClassTable {
             None if &*def.name == "java/lang/Object" => None,
             None => return Err(format_error(&def.name, "no superclass")),
         };
-        // A class loaded after its whole chain has no nesting for the load
-        // check to count, but initializing it still recurses once per
-        // class of the chain.
-        if superclass
-            .as_ref()
-            .is_some_and(|s| s.supers.len() >= MAX_HIERARCHY_DEPTH)
-        {
+        // The classes on the longest path above this one. A class loaded
+        // after its whole chain has no nesting for the load check to
+        // count, but initializing it still recurses once per superclass,
+        // and a chain of interfaces loaded one at a time makes each one's
+        // list of interfaces longer.
+        let mut above = superclass.as_ref().map_or(0, |s| usize::from(s.height));
+        if above >= MAX_HIERARCHY_DEPTH {
             return Err(too_deep(&def.name));
         }
         let mut interfaces = Vec::with_capacity(def.interfaces.len());
@@ -218,8 +218,13 @@ impl ClassTable {
                     ),
                 ));
             }
+            above = above.max(usize::from(self.get(id).height));
+            if above >= MAX_HIERARCHY_DEPTH {
+                return Err(too_deep(&def.name));
+            }
             interfaces.push(id);
         }
+        let height = above as u16 + 1;
         let id = self.next_id();
         let mut all_interfaces: Vec<ClassId> = superclass
             .as_ref()
@@ -329,6 +334,7 @@ impl ClassTable {
             interfaces: interfaces.into(),
             all_interfaces: all_interfaces.into(),
             supers,
+            height,
             fields: fields.into(),
             template: template.into(),
             methods: methods.into(),
