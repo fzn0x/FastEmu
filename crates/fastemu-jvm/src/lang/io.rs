@@ -1,0 +1,199 @@
+//! The `java.io` streams `Class.getResourceAsStream` needs:
+//! `InputStream` and `ByteArrayInputStream`. The rest of `java.io` builds
+//! on these.
+
+use super::{check_range, this, throw};
+use crate::ctx::{Ctx, FieldId, JResult};
+use crate::native::NativeClass;
+use crate::value::{ObjRef, Value};
+
+const BAIS: &str = "java/io/ByteArrayInputStream";
+
+/// The fields of a `ByteArrayInputStream`.
+struct Bais {
+    buf: FieldId,
+    pos: FieldId,
+    mark: FieldId,
+    count: FieldId,
+}
+
+fn fields(ctx: &mut Ctx<'_>) -> JResult<Bais> {
+    Ok(Bais {
+        buf: ctx.field_id(BAIS, "buf", "[B")?,
+        pos: ctx.field_id(BAIS, "pos", "I")?,
+        mark: ctx.field_id(BAIS, "mark", "I")?,
+        count: ctx.field_id(BAIS, "count", "I")?,
+    })
+}
+
+/// A `ByteArrayInputStream` over a new `byte[]` holding `bytes`.
+pub(crate) fn new_byte_array_stream(ctx: &mut Ctx<'_>, bytes: &[u8]) -> JResult<ObjRef> {
+    let arr = ctx.new_byte_array(bytes)?;
+    ctx.construct(BAIS, "([B)V", &[arr.into()])
+}
+
+fn init(ctx: &mut Ctx<'_>, a: &[Value], offset: i32, len: Option<i32>) -> JResult<Value> {
+    let arr = ctx.non_null(a[1])?;
+    let size = ctx.array_len(arr)? as i32;
+    let f = fields(ctx)?;
+    let obj = this(a);
+    let count = match len {
+        Some(len) => (offset.saturating_add(len)).min(size),
+        None => size,
+    };
+    ctx.set_field(obj, f.buf, arr.into());
+    ctx.set_field(obj, f.pos, Value::Int(offset));
+    ctx.set_field(obj, f.mark, Value::Int(offset));
+    ctx.set_field(obj, f.count, Value::Int(count));
+    Ok(Value::Void)
+}
+
+pub(crate) fn classes() -> Vec<NativeClass> {
+    vec![
+        NativeClass::new("java/io/InputStream")
+            .abstract_class()
+            .method("<init>", "()V", |_, _| Ok(Value::Void))
+            .abstract_method("read", "()I")
+            .method("read", "([B)I", |ctx, a| {
+                let arr = ctx.non_null(a[1])?;
+                let len = ctx.array_len(arr)? as i32;
+                ctx.call_virtual(
+                    this(a),
+                    "read",
+                    "([BII)I",
+                    &[arr.into(), Value::Int(0), Value::Int(len)],
+                )
+            })
+            .method("read", "([BII)I", |ctx, a| {
+                let arr = ctx.non_null(a[1])?;
+                let size = ctx.array_len(arr)?;
+                let (off, len) = check_range(
+                    ctx,
+                    "java/lang/IndexOutOfBoundsException",
+                    a[2].int(),
+                    a[3].int(),
+                    size,
+                )?;
+                if len == 0 {
+                    return Ok(Value::Int(0));
+                }
+                let mut n = 0;
+                while n < len {
+                    let b = ctx.call_virtual(this(a), "read", "()I", &[])?.int();
+                    if b < 0 {
+                        break;
+                    }
+                    ctx.array_mut::<i8>(arr)?[off + n] = b as i8;
+                    n += 1;
+                }
+                Ok(Value::Int(if n == 0 { -1 } else { n as i32 }))
+            })
+            .method("skip", "(J)J", |ctx, a| {
+                let mut skipped = 0i64;
+                while skipped < a[1].long() {
+                    if ctx.call_virtual(this(a), "read", "()I", &[])?.int() < 0 {
+                        break;
+                    }
+                    skipped += 1;
+                }
+                Ok(Value::Long(skipped))
+            })
+            .method("available", "()I", |_, _| Ok(Value::Int(0)))
+            .method("close", "()V", |_, _| Ok(Value::Void))
+            .method("mark", "(I)V", |_, _| Ok(Value::Void))
+            .method("reset", "()V", |ctx, _| {
+                throw(ctx, "java/io/IOException", "mark/reset not supported")
+            })
+            .method("markSupported", "()Z", |_, _| Ok(Value::from(false))),
+        NativeClass::new(BAIS)
+            .extends("java/io/InputStream")
+            .field_with("buf", "[B", crate::classfile::access::PROTECTED)
+            .field_with("pos", "I", crate::classfile::access::PROTECTED)
+            .field_with("mark", "I", crate::classfile::access::PROTECTED)
+            .field_with("count", "I", crate::classfile::access::PROTECTED)
+            .method("<init>", "([B)V", |ctx, a| init(ctx, a, 0, None))
+            .method("<init>", "([BII)V", |ctx, a| {
+                init(ctx, a, a[2].int(), Some(a[3].int()))
+            })
+            .method("read", "()I", |ctx, a| {
+                let f = fields(ctx)?;
+                let obj = this(a);
+                let pos = ctx.get_field(obj, f.pos).int();
+                let count = ctx.get_field(obj, f.count).int();
+                if pos >= count {
+                    return Ok(Value::Int(-1));
+                }
+                let Some(buf) = ctx.get_field(obj, f.buf).obj() else {
+                    return Ok(Value::Int(-1));
+                };
+                let b = ctx
+                    .array::<i8>(buf)?
+                    .get(pos as usize)
+                    .copied()
+                    .unwrap_or(0);
+                ctx.set_field(obj, f.pos, Value::Int(pos + 1));
+                Ok(Value::Int(i32::from(b as u8)))
+            })
+            .method("read", "([BII)I", |ctx, a| {
+                let dst = ctx.non_null(a[1])?;
+                let size = ctx.array_len(dst)?;
+                let (off, len) = check_range(
+                    ctx,
+                    "java/lang/IndexOutOfBoundsException",
+                    a[2].int(),
+                    a[3].int(),
+                    size,
+                )?;
+                let f = fields(ctx)?;
+                let obj = this(a);
+                let pos = ctx.get_field(obj, f.pos).int();
+                let count = ctx.get_field(obj, f.count).int();
+                if pos >= count {
+                    return Ok(Value::Int(-1));
+                }
+                let n = len.min((count - pos) as usize);
+                if n == 0 {
+                    return Ok(Value::Int(0));
+                }
+                let Some(buf) = ctx.get_field(obj, f.buf).obj() else {
+                    return Ok(Value::Int(-1));
+                };
+                let src: Vec<i8> = ctx.array::<i8>(buf)?[pos as usize..pos as usize + n].to_vec();
+                ctx.array_mut::<i8>(dst)?[off..off + n].copy_from_slice(&src);
+                ctx.set_field(obj, f.pos, Value::Int(pos + n as i32));
+                Ok(Value::Int(n as i32))
+            })
+            .method("skip", "(J)J", |ctx, a| {
+                let f = fields(ctx)?;
+                let obj = this(a);
+                let pos = ctx.get_field(obj, f.pos).int();
+                let count = ctx.get_field(obj, f.count).int();
+                let n = a[1].long().clamp(0, i64::from(count - pos).max(0));
+                ctx.set_field(obj, f.pos, Value::Int(pos + n as i32));
+                Ok(Value::Long(n))
+            })
+            .method("available", "()I", |ctx, a| {
+                let f = fields(ctx)?;
+                let obj = this(a);
+                let pos = ctx.get_field(obj, f.pos).int();
+                let count = ctx.get_field(obj, f.count).int();
+                Ok(Value::Int((count - pos).max(0)))
+            })
+            .method("markSupported", "()Z", |_, _| Ok(Value::from(true)))
+            .method("mark", "(I)V", |ctx, a| {
+                let f = fields(ctx)?;
+                let obj = this(a);
+                let pos = ctx.get_field(obj, f.pos);
+                ctx.set_field(obj, f.mark, pos);
+                Ok(Value::Void)
+            })
+            .method("reset", "()V", |ctx, a| {
+                let f = fields(ctx)?;
+                let obj = this(a);
+                let mark = ctx.get_field(obj, f.mark);
+                ctx.set_field(obj, f.pos, mark);
+                Ok(Value::Void)
+            })
+            .method("close", "()V", |_, _| Ok(Value::Void)),
+    ]
+}

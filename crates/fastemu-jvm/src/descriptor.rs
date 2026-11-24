@@ -1,5 +1,7 @@
 //! Field and method descriptors (JVMS 4.3).
 
+use crate::value::Value;
+
 /// The kind of value a field, parameter or return type holds, as the
 /// operand stack sees it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -35,6 +37,18 @@ impl Kind {
             Kind::Long | Kind::Double => 2,
             Kind::Void => 0,
             _ => 1,
+        }
+    }
+
+    /// The value a field of this kind starts with.
+    pub fn default_value(self) -> Value {
+        match self {
+            Kind::Int => Value::Int(0),
+            Kind::Long => Value::Long(0),
+            Kind::Float => Value::Float(0.0),
+            Kind::Double => Value::Double(0.0),
+            Kind::Ref => Value::NULL,
+            Kind::Void => Value::Void,
         }
     }
 }
