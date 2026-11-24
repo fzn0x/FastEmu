@@ -19,7 +19,9 @@ pub trait Payload: Any + Send {
     }
 
     /// Bytes the payload counts against the heap limit, beyond the object
-    /// itself. A payload that grows is measured again at each collection.
+    /// itself. A payload that grows is measured again at each collection,
+    /// and counted at once when the native that grew it calls
+    /// [`Ctx::recount`](crate::Ctx::recount).
     fn heap_bytes(&self) -> usize {
         0
     }
