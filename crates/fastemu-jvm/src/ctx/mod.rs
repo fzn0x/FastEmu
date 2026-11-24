@@ -144,6 +144,13 @@ impl<'vm> Ctx<'vm> {
         self.shared.is_paused()
     }
 
+    /// The machine's run time: a monotonic clock that stands still while
+    /// the machine is paused, for timing that must not catch up after a
+    /// pause (a timer's next run, a silent player's media time).
+    pub fn clock(&self) -> crate::VmClock {
+        crate::VmClock(std::sync::Arc::clone(&self.shared.clock))
+    }
+
     /// A handle to this virtual machine, for host threads.
     pub fn vm(&self) -> crate::Vm {
         crate::Vm {

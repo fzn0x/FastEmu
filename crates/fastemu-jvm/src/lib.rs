@@ -13,6 +13,7 @@
 mod charset;
 mod class;
 pub mod classfile;
+mod clock;
 mod ctx;
 pub mod descriptor;
 mod gc;
@@ -33,6 +34,7 @@ mod vm;
 mod wait;
 
 pub use class::{ArrayType, ClassId, PayloadFactory};
+pub use clock::VmClock;
 pub use ctx::{ArrayElem, Ctx, FieldId, GlobalRef, JResult, StaticFieldId, Throw, Wake};
 pub use heap::{HeapStats, Payload, Tracer};
 pub use native::{NativeClass, NativeFn};

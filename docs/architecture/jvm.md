@@ -125,15 +125,17 @@ vm.spawn("main", |ctx| {
 | `run_main(class, args)` | Starts thread `main` running `static void main(String[])`, for tests and tools. |
 | `attach(name, f)` | Runs `f` on the calling OS thread as a temporary Java thread, with the lock held. For setup and short work; the host stack is small, so it allows only 16 nested native-to-Java calls. |
 | `post(task)` | Queues a task for a thread that drains posted tasks (MIDP's event thread). |
-| `pause()`, `resume()` | Parks every thread at its next safepoint, and lets them go. |
+| `pause()`, `resume()` | Parks every thread at its next safepoint, and lets them go. The run time stands still meanwhile. |
 | `stop()` | Every thread unwinds at its next safepoint or wait. `finally` blocks do not run. |
 | `wait_finished(timeout)` | Waits until every Java thread has ended. |
+| `clock()` | The machine's run time, a `VmClock` (see [Run time](#run-time)). |
 | `thread_count`, `exit_code`, `heap_stats`, `flush_output` | Status. |
 | `downgrade()` | A `WeakVm`, which does not keep the machine alive. |
 
 `Vm` methods take the VM lock, so they are for host threads only. Native
 code already holds the lock; a native that called `Vm::post` or
 `Vm::stop` would deadlock. Natives use `Ctx::post` and `Ctx::stop_vm`.
+`Vm::clock` and `Ctx::clock` take no lock.
 
 ## Values and references
 
@@ -432,7 +434,40 @@ capture `ObjRef`s; give them `GlobalRef`s.
 (`Notified`, `TimedOut`, `Interrupted`, `Paused`) or `Err(Throw::Stop)`.
 `ctx.notify_waiters()` wakes every waiter. `ctx.sleep(duration)` is
 `Thread.sleep`. `ctx.monitor_enter`, `monitor_exit`, `monitor_wait` and
-`monitor_notify` give natives Java's monitors.
+`monitor_notify` give natives Java's monitors. Deadlines are host time
+(`Instant`): a sleep or wait that ends during a pause parks until the
+resume and then returns.
+
+### Run time
+
+`ctx.clock()` (or `vm.clock()` on a host thread) is the machine's run
+time, a `VmClock`: how long the machine has run since `Vm::new`, not
+counting the time it spent paused. It never goes back and stands still
+during a pause. Timing the library keeps for the game uses it, so a pause
+is invisible to it: `Timer` schedules on it, so a fixed-rate timer paused
+for a minute does not run a minute of late tasks when the machine
+resumes. A media player that keeps its own time (one with no sound
+output) should count its media time on it too. `System.currentTimeMillis`
+stays the wall clock, which games show and compare with dates.
+
+```rust
+let clock = ctx.clock();               // cheap to clone; Send and Sync
+let due = clock.elapsed() + Duration::from_millis(500);
+while clock.elapsed() < due {
+    // instant_at gives the host deadline the run time reaches `due` at
+    // if no pause comes first; a pause wakes the wait with Wake::Paused,
+    // and yield_now, a safepoint, parks until the resume.
+    if ctx.wait_until(clock.instant_at(due))? == Wake::Paused {
+        ctx.yield_now()?;
+    }
+}
+```
+
+`VmClock` holds no reference to the machine, so a payload, an extension
+or a host thread may keep one. `clock.elapsed()` is a `Duration`;
+`clock.instant_at(t)` is `None` for a time too far ahead for an
+`Instant` (wait without a deadline then), and `clock.is_paused()` says
+whether the clock stands still.
 
 ### Host data
 

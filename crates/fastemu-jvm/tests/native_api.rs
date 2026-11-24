@@ -470,6 +470,42 @@ fn a_wait_that_times_out_while_paused_parks_until_resumed() {
 }
 
 #[test]
+fn the_run_time_stands_still_while_paused() {
+    let vm = vm();
+    let clock = vm.clock();
+    let from_ctx = vm.attach("read", |ctx| ctx.clock());
+    std::thread::sleep(Duration::from_millis(20));
+    vm.pause();
+    let paused_at = clock.elapsed();
+    assert!(paused_at >= Duration::from_millis(20));
+    assert!(clock.is_paused() && from_ctx.is_paused());
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(clock.elapsed(), paused_at);
+    assert_eq!(from_ctx.elapsed(), paused_at, "one clock per machine");
+    vm.resume();
+    std::thread::sleep(Duration::from_millis(20));
+    let resumed = clock.elapsed();
+    assert!(resumed >= paused_at + Duration::from_millis(20));
+    assert!(
+        resumed < paused_at + Duration::from_millis(100),
+        "{resumed:?}"
+    );
+    // A deadline on the run time, waited for in host time.
+    let due = resumed + Duration::from_millis(30);
+    let start = Instant::now();
+    vm.spawn("waiter", move |ctx| {
+        let clock = ctx.clock();
+        while clock.elapsed() < due {
+            ctx.wait_until(clock.instant_at(due))?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert!(vm.wait_finished(Some(Duration::from_secs(2))));
+    assert!(start.elapsed() >= Duration::from_millis(25));
+}
+
+#[test]
 fn locks_release_while_a_native_does_slow_work() {
     let vm = vm();
     vm.spawn("spinner", |ctx| {

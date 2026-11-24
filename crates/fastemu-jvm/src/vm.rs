@@ -12,6 +12,7 @@ use fastemu_core::{LogLevel, LogLine};
 use parking_lot::Mutex;
 
 use crate::class::{ClassId, ClassTable};
+use crate::clock::{Clock, VmClock};
 use crate::ctx::{Ctx, JResult};
 use crate::heap::{Heap, HeapStats};
 use crate::lang;
@@ -176,7 +177,8 @@ pub(crate) struct VmShared {
     /// Where blocked threads wait; every change notifies it.
     pub(crate) cond: WaitQueue,
     pub(crate) stopping: AtomicBool,
-    pub(crate) paused: AtomicBool,
+    /// The pause flag, and the run time that stops with it.
+    pub(crate) clock: Arc<Clock>,
     pub(crate) config: VmConfig,
     /// Global roots whose handles were dropped, cleared at the next
     /// collection.
@@ -193,7 +195,7 @@ impl VmShared {
 
     #[inline]
     pub(crate) fn is_paused(&self) -> bool {
-        self.paused.load(Ordering::Relaxed)
+        self.clock.is_paused()
     }
 
     pub(crate) fn arc(&self) -> Arc<VmShared> {
@@ -334,7 +336,7 @@ impl Vm {
             state: Mutex::new(state),
             cond: WaitQueue::default(),
             stopping: AtomicBool::new(false),
-            paused: AtomicBool::new(false),
+            clock: Arc::new(Clock::new()),
             config,
             released_globals: Mutex::new(Vec::new()),
             this: this.clone(),
@@ -411,21 +413,27 @@ impl Vm {
     }
 
     /// Parks every thread at its next safepoint until [`Vm::resume`].
-    /// Waits and sleeps that end while paused park too.
+    /// Waits and sleeps that end while paused park too, and the run time
+    /// ([`Vm::clock`]) stands still.
     pub fn pause(&self) {
-        self.shared.paused.store(true, Ordering::Release);
+        self.shared.clock.set_paused(true);
         self.shared.wake_all();
     }
 
     /// Lets paused threads run again.
     pub fn resume(&self) {
-        self.shared.paused.store(false, Ordering::Release);
+        self.shared.clock.set_paused(false);
         self.shared.wake_all();
     }
 
     /// Whether [`Vm::pause`] is in effect.
     pub fn is_paused(&self) -> bool {
         self.shared.is_paused()
+    }
+
+    /// The machine's run time, which leaves out the time it spent paused.
+    pub fn clock(&self) -> VmClock {
+        VmClock(Arc::clone(&self.shared.clock))
     }
 
     /// Whether [`Vm::stop`] (or `System.exit`) was called.
