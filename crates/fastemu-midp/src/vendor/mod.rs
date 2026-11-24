@@ -128,14 +128,18 @@ mod tests {
     }
 
     #[test]
-    fn nokia_ui_goes_with_nokia_key_codes() {
+    fn nokia_ui_comes_only_with_nokia_key_codes() {
         for profile in builtin_profiles() {
-            assert_eq!(
-                Vendor::of(&profile).has_nokia_ui(),
-                profile.key_codes == KeyCodes::NOKIA,
-                "{}",
-                profile.id
-            );
+            if Vendor::of(&profile).has_nokia_ui() {
+                assert_eq!(profile.key_codes, KeyCodes::NOKIA, "{}", profile.id);
+            }
         }
+        // Samsung copied Nokia's codes but not its UI API.
+        let samsung = builtin_profiles()
+            .into_iter()
+            .find(|p| Vendor::of(p) == Vendor::Samsung)
+            .expect("a Samsung profile");
+        assert_eq!(samsung.key_codes, KeyCodes::NOKIA);
+        assert!(!Vendor::Samsung.has_nokia_ui());
     }
 }

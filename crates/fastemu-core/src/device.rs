@@ -68,6 +68,22 @@ impl KeyCodes {
         end: -11,
     };
 
+    /// LG phones: Nokia's arrows and fire key, soft keys -202 and -203
+    /// and clear -204, as freej2me-plus has them. Send and end are
+    /// Nokia's: no source gives LG codes for them.
+    pub const LG: KeyCodes = KeyCodes {
+        soft_left: -202,
+        soft_right: -203,
+        up: -1,
+        down: -2,
+        left: -3,
+        right: -4,
+        fire: -5,
+        clear: -204,
+        send: -10,
+        end: -11,
+    };
+
     /// The code this phone sends for `key`.
     pub fn code(&self, key: Key) -> i32 {
         if let Some(code) = key.itu_code() {
@@ -267,6 +283,26 @@ pub fn builtin_profiles() -> Vec<DeviceProfile> {
             4,
             MEDIUM_SCREEN_FONTS,
         ),
+        P::preset(
+            "samsung-176x220",
+            "Samsung 176x220",
+            (176, 220),
+            "SAMSUNG-SGH-D500/1.0 Profile/MIDP-2.0 Configuration/CLDC-1.1",
+            KeyCodes::NOKIA,
+            false,
+            4,
+            MEDIUM_SCREEN_FONTS,
+        ),
+        P::preset(
+            "lg-176x220",
+            "LG 176x220",
+            (176, 220),
+            "LG-U8180/V1.0 Profile/MIDP-2.0 Configuration/CLDC-1.1",
+            KeyCodes::LG,
+            false,
+            4,
+            MEDIUM_SCREEN_FONTS,
+        ),
     ]
 }
 
@@ -276,7 +312,12 @@ mod tests {
 
     #[test]
     fn codes_round_trip_through_keys() {
-        for codes in [KeyCodes::NOKIA, KeyCodes::SIEMENS, KeyCodes::MOTOROLA] {
+        for codes in [
+            KeyCodes::NOKIA,
+            KeyCodes::SIEMENS,
+            KeyCodes::MOTOROLA,
+            KeyCodes::LG,
+        ] {
             for key in Key::ALL {
                 assert_eq!(codes.key(codes.code(key)), Some(key), "{key:?}");
             }
