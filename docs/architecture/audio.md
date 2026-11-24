@@ -265,7 +265,7 @@ with; changing the SoundFont affects players created afterwards.
 | `Player.addPlayerListener(l)`                 | Keep listeners per player in Java; route each `PlayerEvent` from the group's channel by `event.player`. |
 | `Player.getControl("VolumeControl")`          | `set_level`, `level`, `set_muted`, `is_muted` |
 | `Player.getControl("ToneControl")`            | Only for tone players: `setSequence(bytes)` is `player.set_tone_sequence(bytes)` |
-| `Player.getControl("MIDIControl")`            | Only for MIDI players: `shortMidiEvent(type, d1, d2)` is `player.midi_short_event(type, d1, d2)`; `setProgram(ch, bank, prog)` sends CC 0 and CC 32 (bank) then a program change; `setChannelVolume(ch, v)` sends CC 7; `getChannelVolume` may return -1 (unknown); `isBankQuerySupported` returns false. |
+| `Player.getControl("MIDIControl")`            | Only for MIDI players: `shortMidiEvent(type, d1, d2)` is `player.midi_short_event(type, d1, d2)` (type 0x80 to 0xFF except 0xF0 and 0xF7; a realized player gives `InvalidState`, as JSR-135 asks); `setProgram(ch, bank, prog)` sends CC 0 and CC 32 (bank) then a program change, or only the program change when the bank is -1 (the default bank); `setChannelVolume(ch, v)` sends CC 7; `getChannelVolume` may return -1 (unknown); `isBankQuerySupported` returns false. |
 | Other controls                                | Return `null` (not provided yet, see the gaps) |
 | `Manager.playTone(note, duration, volume)`    | `group.play_tone(note, duration, volume)` |
 | `Manager.getSupportedContentTypes(protocol)`  | `SUPPORTED_CONTENT_TYPES` |
