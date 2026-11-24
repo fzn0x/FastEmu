@@ -130,8 +130,20 @@ impl Region {
     /// Fails with `ArrayIndexOutOfBoundsException` unless every pixel lies
     /// in an array of `len` elements.
     fn check(&self, format: Format, len: usize) -> Result<()> {
-        let (last, _) = self.position(format, self.width - 1, self.height - 1);
-        if last < len {
+        // The last pixel has the largest index. A packed format counts it
+        // in bits, which overflows i64 for the largest Java arguments, so
+        // it is worked out in 128 bits here; every position `position`
+        // computes afterwards is then below `len` bytes in bits.
+        let last = match format {
+            Format::Packed { bits, .. } => {
+                let pixel = i128::from(self.offset)
+                    + i128::from(self.height - 1) * i128::from(self.scan)
+                    + i128::from(self.width - 1);
+                pixel * i128::from(bits) / 8
+            }
+            _ => self.position(format, self.width - 1, self.height - 1).0 as i128,
+        };
+        if last < len as i128 {
             Ok(())
         } else {
             Err(GfxError::ArrayIndexOutOfBounds)
@@ -816,6 +828,34 @@ mod tests {
         )
         .unwrap();
         assert_eq!(back, [0b0000_0001, 0b1000_0000_u8 as i8]);
+    }
+
+    #[test]
+    fn huge_packed_regions_are_out_of_bounds_not_overflows() {
+        // The last pixel's bit index, (2^31 - 2) * (2^31 - 1) * 8, does
+        // not fit an i64.
+        let (mut s, g) = canvas(2, 2);
+        for format in [TYPE_BYTE_8_GRAY, TYPE_BYTE_4_GRAY, TYPE_BYTE_332_RGB] {
+            let oob = Err(GfxError::ArrayIndexOutOfBounds);
+            let drawn = g.draw_pixels_byte(
+                &mut s,
+                &[0; 16],
+                None,
+                0,
+                i32::MAX,
+                0,
+                0,
+                1,
+                i32::MAX,
+                0,
+                format,
+            );
+            assert_eq!(drawn, oob, "{format}");
+            let mut out = [0_i8; 16];
+            let read =
+                g.get_pixels_byte(&s, &mut out, None, 0, i32::MAX, 0, 0, 1, i32::MAX, format);
+            assert_eq!(read, oob, "{format}");
+        }
     }
 
     #[test]
