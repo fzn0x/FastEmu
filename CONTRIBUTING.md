@@ -174,7 +174,9 @@ their ratio, the CPU time per second alone, the errors, the slowest
 `Instance::send`, whether every thread ended and the virtual machine was
 freed, and the final status. Then it prints the CPU time per second and
 the peak memory of the run side by side, on Linux and Windows. A ratio
-well under 1 means the game slows down when others run.
+well under 1 means the game slows down when others run. Run it on an
+otherwise idle machine: other work that starts or stops between the two
+runs moves the ratios too.
 
 ## Commits
 
