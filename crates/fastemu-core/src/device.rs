@@ -95,7 +95,9 @@ impl KeyCodes {
     }
 }
 
-/// Pixel heights of MIDP's three font sizes on a phone.
+/// The line heights of MIDP's three font sizes on a phone, in pixels: what
+/// `Font.getHeight()` returns. Real phones differ widely and no measured
+/// table exists, so these are choices in the range other emulators use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FontSizes {

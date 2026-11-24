@@ -24,8 +24,10 @@ pub struct SuiteInfo {
 }
 
 impl SuiteInfo {
-    /// The value of attribute `name`, compared without case as the MIDP
-    /// specification asks.
+    /// The value of attribute `name`. MIDP says descriptor attribute names
+    /// are case-sensitive, but this lookup ignores case: suites in the wild
+    /// spell names loosely, and a phone that found nothing returned `null`,
+    /// which no game depends on.
     pub fn property(&self, name: &str) -> Option<&str> {
         self.properties
             .iter()
