@@ -288,7 +288,12 @@ the collector cannot see, so it cannot collect in the middle:
    this one gave up the lock. So a native that allocated nothing gets no
    error, even while another thread's data keeps the heap over its limit.
    What a native allocated before it called other natives from Rust
-   still counts as its own.
+   still counts as its own. An exception that a native throws, or the
+   interpreter makes (a bad index, a null receiver, a number that does
+   not parse), skips that return, so the interpreter judges the heap the
+   same way as it throws one and throws `OutOfMemoryError` in its place.
+   Without that, a game could keep such exceptions and their stack
+   traces in an array it made first, and nothing would check the heap.
 
 A game that fills memory through natives alone (`s = s.concat(s)`,
 appending to a `StringBuffer`, keeping exceptions, resource streams or
@@ -872,8 +877,9 @@ What natives and games can rely on:
   them.
 - `tests/heap_limits.rs` runs the programs in `tests/heap_java/` on a
   256 KiB heap. Each fills memory through natives (`String.concat`,
-  `StringBuffer.append`, kept exceptions, resource streams, arrays,
-  interned strings, thread names) and must end in `OutOfMemoryError`
+  `StringBuffer.append`, kept exceptions, including ones a native or
+  the interpreter throws, resource streams, arrays, interned strings,
+  thread names) and must end in `OutOfMemoryError`
   within a few times the heap, in the thread that ran the native. Three
   cases with two threads keep data over the limit and check that a
   thread that allocates nothing, or only sleeps and wakes, never gets
