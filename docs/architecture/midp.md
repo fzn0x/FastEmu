@@ -21,7 +21,8 @@ named.
 | `env` | `InstanceEnv`, what every native knows about its instance. |
 | `midlet` | `javax.microedition.midlet` and the lifecycle calls. |
 | `lcdui` | `javax.microedition.lcdui`: the event thread, `Display`, `Displayable`, `Canvas`, `Screen`, `Command`, `Graphics`, `Image`, `Font`, keys, soft keys and frames. |
-| `lcdui::game`, `lcdui::highlevel` | Empty: `GameCanvas` and the layers, and `Form`, `List`, `TextBox`, `Alert`, `Ticker` and the items, come next. |
+| `lcdui::game` | `javax.microedition.lcdui.game`: `GameCanvas`, `Layer`, `Sprite`, `TiledLayer` and `LayerManager`, over the plain Rust layer model in `lcdui::game::model`. |
+| `lcdui::highlevel` | Empty: `Form`, `List`, `TextBox`, `Alert`, `Ticker` and the items come next. |
 | `rms`, `media`, `io`, `wma`, `nokia`, `vendor` | The other APIs, built alongside. |
 
 ## Suites
@@ -292,15 +293,77 @@ NativeClass::new("javax/microedition/lcdui/Form")
 - **Suppressed key events.** `GameCanvas(true)` calls
   `DisplayableData::set_suppress_game_keys(true)`: keys with a game action
   then get no key callbacks; other keys still do.
-- **The off-screen buffer.** Make a mutable `Surface` at the full screen
-  size, share it as `image::SharedSurface`, and hand
-  `graphics::new_graphics(ctx, buffer)` to `getGraphics`.
-  `flushGraphics` calls `canvas::flush(ctx, this, &buffer, region)`, which
-  copies the region onto the canvas's back buffer, waits for the frame
-  slot off the event thread and presents a frame. `paint(g)` draws the
-  buffer with the ordinary `Graphics` calls.
+- **The off-screen buffer.** A mutable `Image` at the full screen size,
+  white at first, made by the constructor and kept in a private field
+  (`buffer`), so the collector counts its pixels and keeps it alive.
+  `getGraphics` hands `graphics::new_graphics(ctx, surface)` out at every
+  call. `flushGraphics` calls `canvas::flush(ctx, this, &surface,
+  region)`, which waits for the frame slot off the event thread, checks
+  the canvas is still shown, and only then locks the buffer to copy the
+  region onto the canvas's back buffer and present a frame; a region of
+  no width or height does nothing. `paint(g)` draws the buffer through
+  `g`'s translation and clip, so a repaint shows what was drawn last.
 - `Canvas` already owns the payload type, so `GameCanvas` declares no
   payload of its own.
+
+## The game API
+
+`lcdui::game` splits each class in two. `lcdui::game::model` holds the
+rules as plain Rust with no virtual machine: `Sprite` (frames, the frame
+sequence, the transform, the reference pixel, the collision rectangle),
+`TiledLayer` (cells, static and animated tiles) and `collide` (the three
+`collidesWith` tests). Its unit tests check them pixel by pixel on
+`fastemu-gfx` surfaces. The Java classes keep one model in a
+`LayerData` payload with the layer's image, which the payload traces.
+
+- **Arithmetic.** It follows the MIDP 2.0 reference implementation, which
+  J2ME Loader copies. Positions wrap like Java's `int`. The reference
+  pixel is a pixel: under `TRANS_MIRROR` its `x` in a `w` wide frame
+  becomes `w - 1 - x`, as `Transform::apply` maps pixels. `setTransform`
+  replaces the transform and moves the sprite so the reference pixel
+  stays on the same screen pixel; `setImage` with a new frame size does
+  the same, and resets the collision rectangle to the frame.
+- **Frames.** The default frame sequence is never built as a list, so a
+  sprite of thousands of tiny frames costs nothing. `setFrameSequence`
+  copies the array. `setImage` keeps the current frame and a custom
+  sequence when the new image has at least as many frames, and resets
+  both otherwise.
+- **Drawing.** `Sprite.paint` draws its frame with `fastemu-gfx`'s
+  `draw_region` at the sprite's position, anchored top left; a sprite
+  whose image is the destination throws `drawRegion`'s
+  `IllegalArgumentException`. `TiledLayer.paint` draws only the cells the
+  clip touches, an animated tile through its static tile; cells holding
+  0 draw nothing. Invisible layers draw nothing.
+- **Collisions.** Collision rectangles collide when their insides
+  overlap, the reference implementation's test, so an empty rectangle
+  inside another still collides by rectangle. A pixel-level test looks
+  only at pixels inside both rectangles and both frames, after
+  transforms, and counts a pixel when its alpha is `0xFF`. Against a
+  tiled layer, a cell that is not 0 collides by rectangle even when it is
+  an animated tile showing nothing; pixel by pixel only the opaque pixels
+  of the tiles the cells show count. Two sprites sharing an image lock it
+  once.
+- **Tiled layers.** `setStaticTileSet` keeps the cells and animated
+  tiles when the new set has at least as many tiles, and otherwise
+  empties every cell and deletes the animated tiles. A grid of more than
+  2^24 cells is the `OutOfMemoryError` a phone would throw, and one wider
+  or taller than an `int` is `IllegalArgumentException`.
+- **LayerManager.** It keeps its layers in a traced payload, index 0 on
+  top. `append` and `insert` move a layer already present; `insert`
+  checks its index against the other layers' count, as J2ME Loader does.
+  `paint(g, x, y)` saves `g`'s clip, translates by `(x - viewX, y -
+  viewY)`, clips to the view window, paints the last layer first, then
+  translates back and restores the clip.
+- **Copies.** `Sprite(Sprite)` copies every property; a mutable image is
+  copied as it is at that moment, as `Image.createImage(Image)` would.
+- **Wrong arguments.** An argument of the wrong class, which only code
+  that skipped the verifier can pass, throws `ClassCastException` instead
+  of stopping the virtual machine.
+
+`tests/game_api.rs` runs the MIDlets `tests/java/midlets/t/Game*.java`
+through the launcher: key states, suppression and flush pacing on a
+`GameCanvas`, every rule above read back from images the layers paint
+on, and a `LayerManager` scene checked frame by frame.
 
 ## Adding a class
 
@@ -331,8 +394,8 @@ NativeClass::new("javax/microedition/lcdui/Form")
 
 ## Not done yet
 
-- The high-level screens, `Ticker`, `GameCanvas` and the layers, and
-  `Display.setCurrentItem` (the next wave).
+- The high-level screens, `Ticker` and `Display.setCurrentItem` (the
+  next wave).
 - Telling the app about `vibrate` and `flashBacklight` (they log and
   return `true`): `fastemu-core` has no notification for them.
 - Sending `KEY_END` before `destroyApp`, a per-game choice in J2ME Loader.
