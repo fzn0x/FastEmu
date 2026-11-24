@@ -123,6 +123,7 @@ vm.spawn("main", |ctx| {
 | `stop()` | Every thread unwinds at its next safepoint or wait. `finally` blocks do not run. |
 | `wait_finished(timeout)` | Waits until every Java thread has ended. |
 | `thread_count`, `exit_code`, `heap_stats`, `flush_output` | Status. |
+| `downgrade()` | A `WeakVm`, which does not keep the machine alive. |
 
 `Vm` methods take the VM lock, so they are for host threads only. Native
 code already holds the lock; a native that called `Vm::post` or
@@ -252,7 +253,10 @@ enforces some of them; the rest are on the native's author.
    `JResult`; a long native loop checks `ctx.is_stopping()` and returns
    `Err(Throw::Stop)`.
 9. **Use `Ctx`, not `Vm`, from natives** (`Ctx::post`, `Ctx::stop_vm`);
-   `Vm` methods take the lock the native holds.
+   `Vm` methods take the lock the native holds. State the VM owns (an
+   extension, a native's closure, a payload) must not hold a `Vm` either:
+   that is a cycle that keeps the machine alive after it stops. Hold a
+   `WeakVm` (`vm.downgrade()`) and `upgrade()` it when needed.
 10. **A panic is a bug.** It ends the thread, logs an internal error and
     stops the VM. Report Java-visible failures as exceptions instead:
     `return ctx.throw("java/lang/IllegalArgumentException", "why")`.
