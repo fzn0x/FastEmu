@@ -25,7 +25,7 @@ gpui = { git = "https://github.com/Dylanmurzello/zed-android-port", rev = "746f0
 gpui_android = { path = "../gpui_android" }
 # GPUI's images are `image` frames; the version GPUI builds with.
 image = { version = "0.25", default-features = false }
-jni = "0.21"
+jni = "0.22"
 
 [lints]
 workspace = true

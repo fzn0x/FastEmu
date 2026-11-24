@@ -26,7 +26,7 @@ futures = "0.3"
 # apps draw with one GPUI.
 gpui = { git = "https://github.com/Dylanmurzello/zed-android-port", rev = "746f088ee8d6b8b273354826757dd09e74565854", default-features = false }
 gpui_wgpu = { git = "https://github.com/Dylanmurzello/zed-android-port", rev = "746f088ee8d6b8b273354826757dd09e74565854" }
-jni = "0.21"
+jni = "0.22"
 libc = "0.2"
 log = "0.4"
 ndk = { version = "0.9", features = ["nativewindow", "api-level-31"] }
