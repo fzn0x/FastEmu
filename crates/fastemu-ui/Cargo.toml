@@ -1,0 +1,15 @@
+[package]
+name = "fastemu-ui"
+description = "FastEmu's GPUI views, shared by the desktop and Android apps"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -6,7 +6,11 @@ members = ["crates/*"]
 # pull in a large dependency tree: build them with `-p fastemu` or
 # `--workspace`.
 default-members = [
+  "crates/fastemu-audio",
   "crates/fastemu-core",
+  "crates/fastemu-gfx",
+  "crates/fastemu-jvm",
+  "crates/fastemu-midp",
 ]
 
 [workspace.package]
@@ -19,7 +23,12 @@ repository = "https://github.com/fzn0x/FastEmu"
 homepage = "https://fastemu.functionx.dev"
 
 [workspace.dependencies]
+fastemu-audio = { path = "crates/fastemu-audio" }
 fastemu-core = { path = "crates/fastemu-core" }
+fastemu-gfx = { path = "crates/fastemu-gfx" }
+fastemu-jvm = { path = "crates/fastemu-jvm" }
+fastemu-midp = { path = "crates/fastemu-midp" }
+fastemu-ui = { path = "crates/fastemu-ui" }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }

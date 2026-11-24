@@ -9,12 +9,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
 
 [[package]]
+name = "fastemu"
+version = "0.1.0"
+
+[[package]]
+name = "fastemu-android"
+version = "0.1.0"
+
+[[package]]
+name = "fastemu-audio"
+version = "0.1.0"
+
+[[package]]
 name = "fastemu-core"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
  "serde",
 ]
+
+[[package]]
+name = "fastemu-gfx"
+version = "0.1.0"
+
+[[package]]
+name = "fastemu-jvm"
+version = "0.1.0"
+
+[[package]]
+name = "fastemu-midp"
+version = "0.1.0"
+
+[[package]]
+name = "fastemu-ui"
+version = "0.1.0"
 
 [[package]]
 name = "proc-macro2"

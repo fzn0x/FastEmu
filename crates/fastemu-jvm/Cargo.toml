@@ -1,0 +1,15 @@
+[package]
+name = "fastemu-jvm"
+description = "A Java virtual machine for Java ME games: class files, interpreter, heap, threads and the CLDC 1.1 library"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
