@@ -399,6 +399,10 @@ fn stores_survive_a_restart() {
         stores Progress progress \u5b58\u6863
         ",
     );
+    // An instance killed in the middle of a write leaves its temporary file
+    // behind; the store keeps what it held before.
+    let rms = disk::rms_dir(dir.path());
+    std::fs::write(rms.join("progress.tmp"), b"FERS\x01\x00 half a store").unwrap();
     let read = run(
         classes,
         "RmsPersist",
@@ -418,6 +422,9 @@ fn stores_survive_a_restart() {
         stores Progress progress \u5b58\u6863
         ",
     );
+    // The next write replaced the leftover.
+    assert!(!rms.join("progress.tmp").exists());
+    assert_eq!(read_store(&rms, "progress").next_id, 6);
     // A second instance has its own folder and sees none of it.
     let other = tempfile::tempdir().unwrap();
     let list = run(
