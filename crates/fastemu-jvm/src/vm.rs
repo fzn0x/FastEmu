@@ -16,6 +16,7 @@ use crate::clock::{Clock, VmClock};
 use crate::ctx::{Ctx, JResult};
 use crate::heap::{Heap, HeapStats};
 use crate::lang;
+use crate::limits::VmLimits;
 use crate::monitor::Monitor;
 use crate::native::NativeClass;
 use crate::source::ClassSource;
@@ -96,6 +97,8 @@ pub struct VmConfig {
     /// Whether `System.exit` stops the virtual machine. When false it
     /// throws `SecurityException`, as MIDP requires of MIDlets.
     pub allow_exit: bool,
+    /// The limits on host resources a game can use, besides the heap.
+    pub limits: VmLimits,
 }
 
 impl Default for VmConfig {
@@ -112,6 +115,7 @@ impl Default for VmConfig {
             }),
             diagnostics: None,
             allow_exit: true,
+            limits: VmLimits::default(),
         }
     }
 }
@@ -125,6 +129,7 @@ impl fmt::Debug for VmConfig {
             .field("thread_stack_bytes", &self.thread_stack_bytes)
             .field("properties", &self.properties)
             .field("allow_exit", &self.allow_exit)
+            .field("limits", &self.limits)
             .finish_non_exhaustive()
     }
 }
