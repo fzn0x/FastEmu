@@ -39,15 +39,27 @@ impl Payload for ThreadData {
     fn trace(&self, tracer: &mut Tracer<'_>) {
         tracer.mark_opt(self.target);
     }
+
+    fn heap_bytes(&self) -> usize {
+        self.name.len()
+    }
 }
+
+/// Longest thread name, in UTF-16 units; the rest is cut. A phone's thread
+/// name is a few words, and each thread keeps its name for as long as it
+/// lives.
+const MAX_NAME: usize = 255;
 
 /// A new `Thread` object named `name`, for threads the host starts.
 pub(crate) fn new_thread_object(state: &mut VmState, name: &str) -> ObjRef {
     let obj = state.alloc_instance(state.wk.thread);
-    state.heap.get_mut(obj).payload = Some(Box::new(ThreadData {
-        name: name.to_owned(),
-        ..ThreadData::default()
-    }));
+    state.heap.set_payload(
+        obj,
+        Box::new(ThreadData {
+            name: name.to_owned(),
+            ..ThreadData::default()
+        }),
+    );
     obj
 }
 
@@ -72,12 +84,18 @@ fn init(
     let d = data(ctx, a)?;
     d.name = name;
     d.target = target;
+    ctx.recount(this(a));
     Ok(Value::Void)
 }
 
+/// The thread name `v` stands for, cut to [`MAX_NAME`] units; throws
+/// `NullPointerException` for `null`.
 fn name_arg(ctx: &mut Ctx<'_>, v: Value) -> JResult<String> {
     let s = ctx.non_null(v)?;
-    ctx.string(s)
+    let units = ctx.string_utf16(s)?;
+    Ok(String::from_utf16_lossy(
+        &units[..units.len().min(MAX_NAME)],
+    ))
 }
 
 fn start(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
@@ -203,6 +221,7 @@ pub(crate) fn classes() -> Vec<NativeClass> {
             .method("setName", "(Ljava/lang/String;)V", |ctx, a| {
                 let name = name_arg(ctx, a[1])?;
                 data(ctx, a)?.name = name;
+                ctx.recount(this(a));
                 Ok(Value::Void)
             })
             .method("getPriority", "()I", |ctx, a| {
