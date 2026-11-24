@@ -22,7 +22,7 @@ named.
 | `midlet` | `javax.microedition.midlet` and the lifecycle calls. |
 | `lcdui` | `javax.microedition.lcdui`: the event thread, `Display`, `Displayable`, `Canvas`, `Screen`, `Command`, `Graphics`, `Image`, `Font`, keys, soft keys and frames. |
 | `lcdui::game` | `javax.microedition.lcdui.game`: `GameCanvas`, `Layer`, `Sprite`, `TiledLayer` and `LayerManager`, over the plain Rust layer model in `lcdui::game::model`. |
-| `lcdui::highlevel` | Empty: `Form`, `List`, `TextBox`, `Alert`, `Ticker` and the items come next. |
+| `lcdui::highlevel` | The high-level screens on the extension point below: `Form` and its items, `List`, `TextBox`, `Alert`, `AlertType` and `Ticker`. |
 | `rms`, `media`, `io`, `wma`, `nokia`, `vendor` | The other APIs, built alongside. |
 
 ## Suites
@@ -195,6 +195,9 @@ the repeats (`docs/compat/notes/03-input.md`).
   move are dropped and queued drags merge. A press on the soft key bar
   acts as the soft key under it, whatever the profile.
 - **Text** (`InputEvent::Text`) goes to a high-level screen's handler.
+  `MidpInstance::wants_text` (kept in `HostLink`) is true while an
+  editable `TextBox` is shown or a `TextField` or `DateField` has the
+  focus; the app should then send typed characters as text.
 - **Background.** While the app has the instance paused, input is
   dropped.
 
@@ -215,7 +218,9 @@ default font's height plus 4); a screen always has the bar. While the
 menu is open every key goes to it: up and down move, fire, 5 or the left
 soft key choose, the right soft key, clear or end close it.
 `command::fire(ctx, displayable, command)` fires a command as the soft
-keys do: the screen's own handling first, then `commandAction`.
+keys do: the screen's own handling first, then `commandAction`. A
+command with an empty label (`Alert.DISMISS_COMMAND`) shows its type's
+name: OK, Back, Cancel, Exit, Help, Stop or Select.
 
 ## Lifecycle and status
 
@@ -257,6 +262,9 @@ NativeClass::new("javax/microedition/lcdui/Form")
 - `ScreenHandler` (in `lcdui::screen`) is a `static` with the behaviour;
   `ScreenState` is the per-object state, kept in the payload and traced by
   it, so it may hold Java references (items, images, strings).
+- `prepare(ctx, screen, width, height)` runs before each paint, before
+  the screen's buffer is locked: lay the content out and call Java there
+  (a `CustomItem`'s sizes and `paint`), never in `paint`.
 - `paint(ctx, screen, target)` draws the content area: `target.surface`
   is cleared to the theme's background, `target.width` and `height` give
   the area, `target.fonts` and `target.theme` match what the runtime
@@ -279,8 +287,87 @@ NativeClass::new("javax/microedition/lcdui/Form")
 - `Display.setCurrent(alert, next)` stores `next` in the alert's payload
   (`DisplayableData::after_alert`) and shows the alert; the `Alert`
   handler shows `after_alert` when it is dismissed.
+- `Display.setCurrent(alert)` alone stores what was shown before it (or
+  what that alert would have gone back to) the same way.
 - `Displayable.setTicker` stores the `Ticker`; the frame draws the text
-  its `getString()` returns.
+  its `getString()` returns where `highlevel::ticker::position` says it
+  has scrolled to, and `display::relayout` runs the screen's timer at
+  once.
+
+## The high-level screens
+
+`lcdui::highlevel` builds `Form`, `List`, `TextBox` and `Alert` on that
+extension point. `draw` holds what they draw with (wrapped and cut
+text, focus frames, check boxes, radio buttons, arrows, the scroll bar)
+in the theme and the profile's fonts; labels are the bold medium font,
+notes the small one. Each screen's timer is the `tick` hook: a ticker
+presents a frame every 50 ms, an open multi-tap letter ends on time, an
+alert times out, a running gauge repaints every 80 ms; anything that
+changes one of these calls `highlevel::wake_timer`.
+
+- **Choices.** `choice::ChoiceModel` keeps the elements of a `List` or
+  `ChoiceGroup` with `Choice`'s rules: one selected element in the
+  exclusive kinds, any in `MULTIPLE`, the selection moving on when the
+  selected element is deleted, and in `IMPLICIT` lists the selection
+  following the focus, so a soft key command sees the row the player is
+  on. `rows` draws them, wrapped with `TEXT_WRAP_ON` and cut with an
+  ellipsis otherwise. A `List` wraps its focus round at the ends; select
+  fires `SELECT_COMMAND` (a static `Command("", SCREEN, 0)` that is
+  never on the soft keys) or the command `setSelectCommand` chose.
+- **Text.** `text::editor::TextEditor` is the text, caret, maximum size
+  and constraints of a `TextBox` or `TextField`, and `text` the Java
+  methods both declare. Host text goes in at the caret, filtered by the
+  constraints. The keypad types by multi-tap: the same key within
+  900 ms changes the letter just typed (underlined until then), `#`
+  cycles Abc, abc, ABC and 123, `0` is a space, `1` punctuation (with
+  `@` first for `EMAILADDR` and `URL`), `*` symbols; `NUMERIC` takes
+  digits and `*` or `#` for the minus, `DECIMAL` `*` for the point,
+  `PHONENUMBER` `*` for `*+pw`. Clear deletes, the left and right arrows
+  move the caret (`4` and `6` type), up and down move it a line in a
+  text box. `PASSWORD` shows stars but for the letter being chosen.
+- **Forms.** An item is an `item::ItemData` payload: the label, layout,
+  commands, preferred size and owner every item has, and its kind's
+  state (`item::Kind`). `form::layout::arrange` places them in MIDP 2.0
+  rows; an item without `LAYOUT_2` gets a row of its own (as J2ME Loader
+  and freej2me show every item), and a `LAYOUT_2` `StringItem` whose
+  text starts or ends with a line feed breaks its row there. The focus
+  starts on the first item that takes it if that is on the first screen.
+  Up and down go to the item an item leaves them to (a choice group
+  moves between its elements first, a `CustomItem` traverses inside
+  while `traverse` returns true); when the next focusable item is more
+  than a step below the view, or the focused item runs off it, they
+  scroll instead. The focused item's commands are added to the form's
+  for the soft keys and fire to its `ItemCommandListener`; select fires
+  its default command, or its only one. A change the player makes goes
+  to the `ItemStateListener`; `notifyStateChanged` posts one to the
+  event thread.
+- **Items.** `StringItem` draws `HYPERLINK` underlined in the highlight
+  colour and `BUTTON` in a rounded frame; `ImageItem` draws its image or
+  its alternative text; `TextField` is the editor in a frame that grows
+  with its text; `ChoiceGroup` draws radio buttons or check boxes, or a
+  closed `POPUP` line whose list the form draws over the items below
+  while it is open; an interactive `Gauge` moves with left and right or
+  a tap; `DateField` shows `dd/mm/yyyy hh:mm` in its time zone's raw
+  offset, left and right pick a part, digits type it and select sets an
+  empty field to now; `Spacer` is empty space. A `CustomItem` paints in
+  `prepare` into a surface of its content size through a `Graphics` it
+  keeps; its key callbacks get every key but the up and down arrows,
+  which are traversal, and `showNotify` and `hideNotify` follow the
+  form's.
+- **Alerts.** An `Alert` centres its image or its type's icon, its text
+  and its indicator `Gauge`, and plays its type's tone on the instance's
+  sound group when shown. It holds `DISMISS_COMMAND` until the game adds
+  a command. Its timeout (2000 ms by default) is ignored with `FOREVER`,
+  two or more commands, or text that needs scrolling. When the time is
+  up `DISMISS_COMMAND` fires; without a `CommandListener` any command
+  dismisses the alert and shows what follows it.
+- **The app.** `HostLink::set_wants_text` records whether the shown
+  screen takes text, for `MidpInstance::wants_text`; a screen sets it
+  when shown, when its focus moves and when its constraints change, and
+  clears it when hidden.
+
+`tests/screens.rs` runs the MIDlets in `tests/screens_java` through the
+launcher and checks their frames, logs and `wants_text`.
 
 ## What GameCanvas uses
 
@@ -397,8 +484,12 @@ on, and a `LayerManager` scene checked frame by frame.
 
 ## Not done yet
 
-- The high-level screens, `Ticker` and `Display.setCurrentItem` (the
-  next wave).
+- In the high-level screens: horizontal traversal inside a `CustomItem`
+  (only `TRAVERSE_VERTICAL` is offered); a copy of a mutable image given
+  to a `List`, `ChoiceGroup` or `ImageItem` (the image itself is drawn,
+  so later drawing on it shows); daylight saving time in `DateField`
+  (only the zone's raw offset); predictive text; the full-screen editor
+  some phones open for a `TextField`.
 - Telling the app about `vibrate` and `flashBacklight` (they log and
   return `true`): `fastemu-core` has no notification for them.
 - Sending `KEY_END` before `destroyApp`, a per-game choice in J2ME Loader.
