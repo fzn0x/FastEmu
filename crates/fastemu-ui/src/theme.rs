@@ -1,4 +1,5 @@
-//! FastEmu's colours: a dark and a light palette sharing one amber accent.
+//! FastEmu's colours: a dark and a light palette sharing one teal accent,
+//! the teal of the logo.
 
 use gpui::{App, Global, Hsla, hsla};
 
@@ -52,8 +53,9 @@ impl Theme {
             border: hsl(222.0, 11.0, 20.0),
             text: hsl(220.0, 14.0, 91.0),
             muted: hsl(220.0, 9.0, 60.0),
-            accent: hsl(36.0, 96.0, 56.0),
-            on_accent: hsl(30.0, 40.0, 8.0),
+            // #2DD4BF, the logo's tile, with the phone's ink on it.
+            accent: hsl(172.5, 66.0, 50.4),
+            on_accent: hsl(195.0, 19.0, 5.3),
             danger: hsl(0.0, 78.0, 63.0),
             warning: hsl(44.0, 92.0, 62.0),
             screen: hsl(0.0, 0.0, 0.0),
@@ -71,7 +73,8 @@ impl Theme {
             border: hsl(220.0, 14.0, 86.0),
             text: hsl(222.0, 18.0, 10.0),
             muted: hsl(220.0, 9.0, 40.0),
-            accent: hsl(30.0, 92.0, 46.0),
+            // #0F766E, a deeper teal that keeps white text readable.
+            accent: hsl(175.3, 77.4, 26.1),
             on_accent: hsl(0.0, 0.0, 100.0),
             danger: hsl(0.0, 70.0, 46.0),
             warning: hsl(36.0, 90.0, 38.0),
