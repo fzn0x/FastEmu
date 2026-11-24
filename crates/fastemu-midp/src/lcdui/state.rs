@@ -133,6 +133,9 @@ pub(crate) struct LcduiState {
     pub serial: VecDeque<Arc<GlobalRef>>,
     /// The region of the current displayable waiting to be painted.
     pub dirty: Option<Rect>,
+    /// Whether a paint is under way, so `serviceRepaints` on another
+    /// thread waits for it even when nothing is pending any more.
+    pub painting: bool,
     pub event_thread: Option<ThreadId>,
     pub callback: CallbackLock,
     pub keys: KeyState,
@@ -182,6 +185,7 @@ impl LcduiState {
             internal: VecDeque::new(),
             serial: VecDeque::new(),
             dirty: None,
+            painting: false,
             event_thread: None,
             callback: CallbackLock::default(),
             keys: KeyState::default(),

@@ -133,6 +133,7 @@ MIDlet-7: Many, , t.ManyCommands\r\n\
 MIDlet-8: Full, , t.FullCommands\r\n\
 MIDlet-9: Lifecycle, , t.Lifecycle\r\n\
 MIDlet-10: Crash, , t.Crash\r\n\
+MIDlet-11: SlowPaint, , t.SlowPaint\r\n\
 Game-Speed: 3\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each test program.
@@ -147,6 +148,7 @@ pub mod midlet {
     pub const FULL_COMMANDS: usize = 7;
     pub const LIFECYCLE: usize = 8;
     pub const CRASH: usize = 9;
+    pub const SLOW_PAINT: usize = 10;
 }
 
 /// A 2 by 2 PNG: red, green, blue and half-transparent white.

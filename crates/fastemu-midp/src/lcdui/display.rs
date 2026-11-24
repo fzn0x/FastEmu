@@ -85,10 +85,13 @@ pub fn relayout(ctx: &mut Ctx<'_>, obj: ObjRef) {
 /// Paints `dirty` of the shown displayable and presents a frame. The
 /// caller holds the callback lock.
 pub(crate) fn paint(ctx: &mut Ctx<'_>, obj: ObjRef, dirty: Rect) -> JResult<()> {
-    match data(ctx, obj)?.kind() {
-        Kind::Canvas => canvas::paint(ctx, obj, dirty)?,
-        Kind::Screen => paint_screen(ctx, obj)?,
-    }
+    let outer = std::mem::replace(&mut state(ctx).painting, true);
+    let painted = match data(ctx, obj)?.kind() {
+        Kind::Canvas => canvas::paint(ctx, obj, dirty),
+        Kind::Screen => paint_screen(ctx, obj),
+    };
+    state(ctx).painting = outer;
+    painted?;
     frame::present(ctx)
 }
 

@@ -148,7 +148,8 @@ of games that re-post from `run`); `null` is ignored.
   event thread it paints inline. On another thread it takes the callback
   lock and paints on the calling thread, as J2ME Loader does; when the
   lock is not free within a second it logs a warning once and paints
-  anyway.
+  anyway. A paint the event thread has already started counts as
+  pending there: the call waits for it to finish.
 - **Presenting.** After each paint (and flush, and soft key or menu
   change) `frame::present` composes the frame: the displayable's pixels,
   the title bar and ticker of a screen, the soft key bar, the options

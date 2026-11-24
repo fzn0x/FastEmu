@@ -94,9 +94,14 @@ fn repaint(ctx: &mut Ctx<'_>, canvas: ObjRef, region: Rect) -> JResult<()> {
     display::request_paint(ctx, canvas, region)
 }
 
-/// `serviceRepaints()`.
+/// `serviceRepaints()`. Off the event thread it also waits for a paint
+/// that is under way, whose region is no longer pending, since the game
+/// expects that paint to have finished when the call returns.
 fn service_repaints(ctx: &mut Ctx<'_>, canvas: ObjRef) -> JResult<()> {
-    if state(ctx).dirty.is_none() || !is_shown(ctx, canvas) {
+    let elsewhere = !on_event_thread(ctx);
+    let st = state(ctx);
+    let busy = st.dirty.is_some() || (st.painting && elsewhere);
+    if !busy || !is_shown(ctx, canvas) {
         return Ok(());
     }
     if on_event_thread(ctx) {

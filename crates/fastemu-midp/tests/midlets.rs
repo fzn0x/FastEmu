@@ -110,6 +110,16 @@ fn service_repaints_on_a_game_thread_paints_before_returning() {
 }
 
 #[test]
+fn service_repaints_waits_for_a_paint_already_under_way() {
+    let Some(jar) = suite("slow-paint") else {
+        return;
+    };
+    let mut run = Running::launch(&jar, midlet::SLOW_PAINT);
+    let line = run.wait_log("slow paint done");
+    assert_eq!(line, "slow paint done early 0", "{}", run.dump());
+}
+
+#[test]
 fn call_serially_queues_and_lets_paints_through() {
     let Some(jar) = suite("serial") else { return };
     let mut run = Running::launch(&jar, midlet::SERIAL);
