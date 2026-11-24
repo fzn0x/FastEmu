@@ -71,6 +71,10 @@ pub(crate) struct SecurityDetails {
 /// bounded read or write, with the VM lock released.
 pub(crate) struct Session {
     stream: Mutex<StreamOwned<ClientConnection, TcpStream>>,
+    /// What [`Session::details`] reports, taken once the handshake is
+    /// done. Natives ask for it with the VM lock held, and locking the
+    /// stream then could wait for another thread's read slice.
+    details: OnceLock<SecurityDetails>,
 }
 
 impl Session {
@@ -142,8 +146,14 @@ impl Session {
     }
 
     /// The protocol version and cipher suite, once the handshake is done.
+    /// [`connect`] takes them while no other thread uses the stream.
     pub(crate) fn details(&self) -> SecurityDetails {
-        let guard = lock(&self.stream);
+        self.details
+            .get_or_init(|| Self::read_details(&lock(&self.stream)))
+            .clone()
+    }
+
+    fn read_details(guard: &StreamOwned<ClientConnection, TcpStream>) -> SecurityDetails {
         let version = match guard.conn.protocol_version() {
             Some(ProtocolVersion::TLSv1_3) => "3.4",
             Some(ProtocolVersion::TLSv1_2) => "3.3",
@@ -181,6 +191,7 @@ pub(crate) fn connect(ctx: &mut Ctx<'_>, host: &str, port: u16) -> JResult<Link>
     let session = match session {
         Ok(stream) => Session {
             stream: Mutex::new(stream),
+            details: OnceLock::new(),
         },
         Err(e) => return Err(net::io_exception(ctx, &e)),
     };
@@ -195,6 +206,8 @@ pub(crate) fn connect(ctx: &mut Ctx<'_>, host: &str, port: u16) -> JResult<Link>
             Err(e) => net::again(Err(e)),
         }
     })?;
+    // Take the details now, while no other thread reads the stream.
+    let _ = link.security();
     Ok(link)
 }
 
