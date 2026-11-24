@@ -36,6 +36,44 @@ pub fn blend(dst: u32, src: u32) -> u32 {
     }
 }
 
+/// One translucent colour blended over many pixels, with the source's
+/// share worked out once. Gives the same results as [`blend`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Over {
+    color: u32,
+    inverse_alpha: u32,
+    /// Red and blue times alpha, plus the rounding term.
+    rb: u32,
+    /// Green times alpha, plus the rounding term.
+    g: u32,
+}
+
+impl Over {
+    /// `color` must be neither opaque nor fully transparent; callers
+    /// handle those by copying or skipping.
+    pub fn new(color: u32) -> Self {
+        let sa = color >> 24;
+        Self {
+            color,
+            inverse_alpha: 255 - sa,
+            rb: (color & 0x00FF_00FF) * sa + 0x0080_0080,
+            g: (color & 0x0000_FF00) * sa + 0x0000_8000,
+        }
+    }
+
+    #[inline]
+    pub fn apply(&self, dst: u32) -> u32 {
+        if dst < OPAQUE {
+            return blend(dst, self.color);
+        }
+        let rb = self.rb + (dst & 0x00FF_00FF) * self.inverse_alpha;
+        let rb = ((rb + ((rb >> 8) & 0x00FF_00FF)) >> 8) & 0x00FF_00FF;
+        let g = self.g + (dst & 0x0000_FF00) * self.inverse_alpha;
+        let g = ((g + ((g >> 8) & 0x0000_FF00)) >> 8) & 0x0000_FF00;
+        OPAQUE | rb | g
+    }
+}
+
 /// Source-over onto an opaque destination, red and blue in one word.
 #[inline]
 fn blend_onto_opaque(dst: u32, src: u32, sa: u32) -> u32 {
@@ -177,6 +215,17 @@ mod tests {
                     );
                     assert_eq!(got >> 24, 0xFF);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn over_matches_blend() {
+        for sa in [1, 77, 128, 254] {
+            let src = sa << 24 | 0x00C8_6432;
+            let over = Over::new(src);
+            for dst in [0xFF00_0000, 0xFFFF_FFFF, 0xFF12_3456, 0x8012_3456, 0] {
+                assert_eq!(over.apply(dst), blend(dst, src), "{src:08X} over {dst:08X}");
             }
         }
     }

@@ -7,7 +7,7 @@ pub(crate) mod ellipse;
 pub(crate) mod line;
 pub(crate) mod polygon;
 
-use crate::color::blend;
+use crate::color::{Over, blend};
 use crate::surface::Surface;
 
 /// A half-open rectangle `[x0, x1) x [y0, y1)` in surface pixels.
@@ -128,8 +128,9 @@ fn fill(run: &mut [u32], color: u32) {
         0xFF => run.fill(color),
         0 => {}
         _ => {
+            let over = Over::new(color);
             for p in run {
-                *p = blend(*p, color);
+                *p = over.apply(*p);
             }
         }
     }
