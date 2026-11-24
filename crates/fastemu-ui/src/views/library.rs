@@ -78,6 +78,10 @@ impl FastEmuView {
             this.update_in(cx, |this, window, cx| {
                 let mut changed = false;
                 for (id, found) in results {
+                    // Removed while the scan ran: nothing to update.
+                    if this.library.get(id).is_none() {
+                        continue;
+                    }
                     match found.info {
                         Ok(info) => {
                             this.broken.remove(&id);

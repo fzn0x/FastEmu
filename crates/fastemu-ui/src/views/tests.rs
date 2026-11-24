@@ -591,6 +591,26 @@ fn a_restart_that_ends_after_the_window_closed_is_stopped(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn entries_removed_during_a_library_scan_stay_gone(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    let path = h.dir.path().join("broken.jar");
+    let id = h.view.update_in(h.cx, |v, window, cx| {
+        let id = v.library.add(path, &SuiteInfo::default());
+        // The scan reads every entry in the background; the entry goes
+        // before its result, a read error, comes back.
+        v.refresh_library(window, cx);
+        v.remove_entry(id, window, cx);
+        id
+    });
+    h.cx.run_until_parked();
+    assert!(h.read(|v| v.library.entries().is_empty()));
+    assert!(
+        !h.read(|v| v.broken.contains_key(&id) || v.icons.contains_key(&id)),
+        "the scan's late result must not bring back state for the entry"
+    );
+}
+
+#[gpui::test]
 fn relative_paths_are_stored_absolute(cx: &mut TestAppContext) {
     let mut h = open(cx);
     // As `fastemu snake.jar` passes it from the shell's folder.
