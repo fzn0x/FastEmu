@@ -8,8 +8,12 @@
 //!   and the Android app. See [`icons`].
 //! * `release-notes`: write a GitHub release's notes. See
 //!   [`release_notes`].
+//! * `coverage`: compare the classes the runtime registers with the API
+//!   inventory and write `docs/compat/coverage.md`. See [`coverage`].
 
+mod api;
 mod changelog;
+mod coverage;
 mod icons;
 mod release_notes;
 
@@ -23,6 +27,7 @@ Usage: cargo xtask changelog [--root DIR] <--check | --print | --release VERSION
        cargo xtask release-notes [--root DIR] --version X.Y.Z --tag TAG --repo OWNER/NAME
                                  [--previous-tag TAG] [--head REF] [--unreleased] [--debug-apk]
                                  [--out FILE]
+       cargo xtask coverage [--root DIR] [--out FILE]
 
 changelog:
   --check              fail when a fragment of changelog.d is invalid
@@ -44,6 +49,11 @@ release-notes:
   --debug-apk          say that the APK is signed with a debug key
   --out FILE           write the notes there (default: standard output)
 
+coverage:
+  compares the classes FastEmu registers with docs/compat/api and writes
+  which classes and members of each tier are there and which are missing
+  --out FILE           the report (default: docs/compat/coverage.md)
+
   --root DIR           the repository's root (default: the workspace root)";
 
 fn main() -> ExitCode {
@@ -62,6 +72,7 @@ fn run(args: &[String]) -> Result<(), String> {
         Some("changelog") => run_changelog(&args[1..]),
         Some("icons") => run_icons(&args[1..]),
         Some("release-notes") => run_release_notes(&args[1..]),
+        Some("coverage") => run_coverage(&args[1..]),
         _ => Err(USAGE.to_string()),
     }
 }
@@ -158,6 +169,26 @@ fn run_release_notes(args: &[String]) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+fn run_coverage(args: &[String]) -> Result<(), String> {
+    let mut root = default_root();
+    let mut out = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        let mut value = |name: &str| {
+            iter.next()
+                .cloned()
+                .ok_or_else(|| format!("{name} needs a value\n{USAGE}"))
+        };
+        match arg.as_str() {
+            "--root" => root = PathBuf::from(value("--root")?),
+            "--out" => out = Some(PathBuf::from(value("--out")?)),
+            other => return Err(format!("unknown argument {other}\n{USAGE}")),
+        }
+    }
+    let out = out.unwrap_or_else(|| root.join("docs/compat/coverage.md"));
+    coverage::run(&root, &out)
 }
 
 /// The workspace root: two levels above this crate's manifest.
