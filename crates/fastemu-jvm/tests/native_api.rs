@@ -141,6 +141,29 @@ fn bounce() -> Vec<u8> {
     c.build()
 }
 
+/// Native memory an object holds beyond its fields, as an image holds its
+/// pixels.
+#[derive(Default)]
+struct Blob(usize);
+
+impl Payload for Blob {
+    fn heap_bytes(&self) -> usize {
+        self.0
+    }
+}
+
+/// `demo/Blob(int size)`: its constructor sets a payload of `size` bytes
+/// after the object is allocated, as `Image.createImage` does.
+fn blob() -> NativeClass {
+    NativeClass::new("demo/Blob")
+        .payload::<Blob>()
+        .method("<init>", "(I)V", |ctx, a| {
+            let this = ctx.non_null(a[0])?;
+            ctx.set_payload(this, Blob(a[1].int() as usize));
+            Ok(Value::Void)
+        })
+}
+
 fn vm_with(config: VmConfig) -> Vm {
     let source = support::source(&[
         ("Game", game()),
@@ -149,7 +172,7 @@ fn vm_with(config: VmConfig) -> Vm {
         ("Npes", npes()),
         ("Bounce", bounce()),
     ]);
-    Vm::new(config, Arc::new(source), vec![widget(), recur()])
+    Vm::new(config, Arc::new(source), vec![widget(), recur(), blob()])
 }
 
 fn vm() -> Vm {
@@ -318,6 +341,28 @@ fn exceptions_the_interpreter_raises_are_not_kept_alive() {
         used < 512 * 1024,
         "{used} bytes still in use after the loop"
     );
+}
+
+#[test]
+fn a_payload_set_after_allocation_counts_toward_a_collection() {
+    let vm = vm_with(VmConfig {
+        heap_bytes: 1024 * 1024,
+        ..VmConfig::default()
+    });
+    // A hundred 64 KB objects of garbage, more than six times the heap.
+    vm.attach("main", |ctx| {
+        for _ in 0..100 {
+            ctx.local_frame(|ctx| {
+                ctx.construct("demo/Blob", "(I)V", &[Value::Int(64 * 1024)])
+                    .map(drop)
+            })
+            .expect("a blob");
+            ctx.yield_now().expect("a safepoint");
+        }
+    });
+    let stats = vm.heap_stats();
+    assert!(stats.collections >= 5, "{stats:?}");
+    assert!(stats.used_bytes <= stats.limit_bytes, "{stats:?}");
 }
 
 #[test]

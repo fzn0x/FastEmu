@@ -209,6 +209,24 @@ impl Heap {
         }
     }
 
+    /// Replaces the payload of `r` and counts the change in its size, so
+    /// a payload set after allocation asks for a collection as an
+    /// allocation of its size would. Until the next collection measures
+    /// every object again, the count is an estimate: a payload that grew
+    /// since it was counted is taken off at its new size.
+    pub(crate) fn set_payload(&mut self, r: ObjRef, payload: Box<dyn Payload>) {
+        let (before, after) = {
+            let obj = self.get_mut(r);
+            let before = obj.size();
+            obj.payload = Some(payload);
+            (before, obj.size())
+        };
+        self.used = self.used.saturating_add(after).saturating_sub(before);
+        if self.used > self.threshold {
+            self.gc_requested = true;
+        }
+    }
+
     /// The object `r` names.
     ///
     /// # Panics

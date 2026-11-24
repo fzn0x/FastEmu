@@ -475,9 +475,12 @@ impl Ctx<'_> {
         self.state.heap.get(obj).payload::<T>()
     }
 
-    /// Replaces the payload of `obj`.
+    /// Replaces the payload of `obj`. The heap counts the change in size
+    /// at once, as it counts an allocation, so a native that fills in an
+    /// object after making it (an image's pixels) brings the next
+    /// collection closer.
     pub fn set_payload<T: Payload>(&mut self, obj: ObjRef, payload: T) {
-        self.state.heap.get_mut(obj).payload = Some(Box::new(payload));
+        self.state.heap.set_payload(obj, Box::new(payload));
     }
 
     /// A system property, as `System.getProperty` reads it.
