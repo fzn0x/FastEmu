@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use super::table::{ClassTable, LoadError};
+use super::table::{ClassTable, LoadError, MAX_HIERARCHY_DEPTH, too_deep};
 use super::{
     Bytecode, Class, ClassId, ClassKind, ConstValue, Field, Method, MethodBody, PayloadFactory,
     RtPool, package_of,
@@ -197,6 +197,15 @@ impl ClassTable {
             None if &*def.name == "java/lang/Object" => None,
             None => return Err(format_error(&def.name, "no superclass")),
         };
+        // A class loaded after its whole chain has no nesting for the load
+        // check to count, but initializing it still recurses once per
+        // class of the chain.
+        if superclass
+            .as_ref()
+            .is_some_and(|s| s.supers.len() >= MAX_HIERARCHY_DEPTH)
+        {
+            return Err(too_deep(&def.name));
+        }
         let mut interfaces = Vec::with_capacity(def.interfaces.len());
         for name in &def.interfaces {
             let id = self.load(name)?;

@@ -32,6 +32,12 @@ pub(crate) const MAX_CLASS_NAME: usize = 255;
 /// The most dimensions of an array class (the limit of JVMS 4.3.2).
 pub(crate) const MAX_ARRAY_DIMS: usize = 255;
 
+/// The most classes in one hierarchy, `java/lang/Object` and the class
+/// itself included. Loading and initializing recurse once per class of
+/// the hierarchy, so this bounds the host stack they use. The chains of
+/// game classes of the test games have 5 classes at most.
+pub(crate) const MAX_HIERARCHY_DEPTH: usize = 256;
+
 /// The longest name `load` can accept at all: an array of
 /// [`MAX_ARRAY_DIMS`] dimensions of a class with a [`MAX_CLASS_NAME`] name
 /// (`[[[Lname;`).
@@ -48,6 +54,17 @@ pub(crate) fn short(name: &str) -> String {
         Some((end, _)) => format!("{}...", &name[..end]),
         None => name.to_owned(),
     }
+}
+
+/// The error of a class whose hierarchy has too many classes.
+pub(super) fn too_deep(name: &str) -> LoadError {
+    LoadError::new(
+        "java/lang/ClassFormatError",
+        format!(
+            "{}: the class hierarchy is over {MAX_HIERARCHY_DEPTH} classes deep",
+            short(name)
+        ),
+    )
 }
 
 /// Why a class could not be loaded, as the Java exception to throw.
@@ -149,9 +166,10 @@ impl ClassTable {
     /// Loads, links and returns the class named `name` (an internal name
     /// such as `java/lang/String`, or an array descriptor such as `[I`).
     ///
-    /// A name over [`MAX_CLASS_NAME`] bytes and an array of over
-    /// [`MAX_ARRAY_DIMS`] dimensions do not load: names come from games
-    /// and from files.
+    /// A name over [`MAX_CLASS_NAME`] bytes, an array of over
+    /// [`MAX_ARRAY_DIMS`] dimensions and a hierarchy of over
+    /// [`MAX_HIERARCHY_DEPTH`] classes do not load: names come from games
+    /// and from files, and a load recurses once per class of a hierarchy.
     pub(crate) fn load(&mut self, name: &str) -> Result<ClassId, LoadError> {
         if let Some(id) = self.lookup(name) {
             return Ok(id);
@@ -167,6 +185,11 @@ impl ClassTable {
         }
         if self.loading.iter().any(|n| &**n == name) {
             return Err(LoadError::new("java/lang/ClassCircularityError", name));
+        }
+        // Each class being loaded here waits for its superclass or one of
+        // its interfaces, so this is the depth of the recursion.
+        if self.loading.len() >= MAX_HIERARCHY_DEPTH {
+            return Err(too_deep(name));
         }
         let def = if let Some(native) = self.natives.remove(name) {
             super::link::from_native(native)?
@@ -545,6 +568,52 @@ mod tests {
         assert!(t.load("[La/A").is_err());
         assert!(t.load("[L;").is_err());
         assert!(t.load("[[[").is_err());
+    }
+
+    /// Natives `n0` to `n<len - 1>`, each extending the one before.
+    fn native_chain(len: usize) -> ClassTable {
+        let natives = (0..len)
+            .map(|i| match i {
+                0 => NativeClass::new("n0"),
+                _ => NativeClass::new(&format!("n{i}")).extends(&format!("n{}", i - 1)),
+            })
+            .collect();
+        table_of(natives)
+    }
+
+    /// Runs `f` on a thread with the stack of a virtual machine thread.
+    fn on_vm_stack(f: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(f)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn a_hierarchy_over_the_limit_does_not_load_in_either_order() {
+        on_vm_stack(|| {
+            // The leaf first: the load of each class waits for its
+            // superclass's, and nothing is left behind.
+            let mut t = native_chain(400);
+            let before = t.classes.len();
+            let err = t.load("n399").unwrap_err();
+            assert_eq!(err.exception, "java/lang/ClassFormatError");
+            assert!(err.message.ends_with("classes deep"), "{}", err.message);
+            assert_eq!(t.classes.len(), before);
+            assert!(t.load("n100").is_ok());
+
+            // The root first: no load nests, and the hierarchy of 256
+            // classes (with Object) is the last that loads.
+            let mut t = native_chain(400);
+            let failed: Vec<usize> = (0..400)
+                .filter(|i| t.load(&format!("n{i}")).is_err())
+                .collect();
+            assert_eq!(failed, (MAX_HIERARCHY_DEPTH - 1..400).collect::<Vec<_>>());
+            let last = t.lookup(&format!("n{}", MAX_HIERARCHY_DEPTH - 2)).unwrap();
+            assert_eq!(t.get(last).supers.len(), MAX_HIERARCHY_DEPTH);
+        });
     }
 
     #[test]
