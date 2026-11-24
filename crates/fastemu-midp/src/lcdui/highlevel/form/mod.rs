@@ -207,6 +207,9 @@ fn move_focus(ctx: &mut Ctx<'_>, obj: ObjRef, next: Option<ObjRef>, dir: i32) ->
     if old == next {
         return Ok(());
     }
+    // Callers read `next` from the form's state; the game's traverseOut
+    // below may take it out of the form.
+    let next = next.map(|n| ctx.root(n));
     if let Some(old) = old {
         let old = ctx.root(old);
         match item::tag(ctx, old)? {
@@ -302,13 +305,11 @@ fn traverse(ctx: &mut Ctx<'_>, obj: ObjRef, dir: i32) -> JResult<bool> {
     let (_, view_h) = view(ctx, obj)?;
     let step = step(ctx);
     let down = dir == keys::DOWN;
-    let f = form(ctx, obj)?;
-    let (focus, scroll, height) = (f.focus, f.scroll, f.height);
-    let laid = f.laid.clone();
-    if let Some(item) = focus
+    if let Some(item) = form(ctx, obj)?.focus
         && item::tag(ctx, item)? == Tag::Custom
         && custom::internal(ctx, item)?
     {
+        let item = ctx.root(item);
         let size = view(ctx, obj)?;
         let visible = visible_part(ctx, obj, item)?;
         if custom::traverse(ctx, item, dir, size, visible)? {
@@ -316,6 +317,10 @@ fn traverse(ctx: &mut Ctx<'_>, obj: ObjRef, dir: i32) -> JResult<bool> {
             return Ok(true);
         }
     }
+    // Read after the game's traverse, which may have changed the form.
+    let f = form(ctx, obj)?;
+    let (focus, scroll, height) = (f.focus, f.scroll, f.height);
+    let laid = f.laid.clone();
     let at = focus.and_then(|i| laid.iter().position(|(x, _)| *x == i));
     // A focused item taller than the view scrolls through first.
     if let Some(r) = at.map(|k| laid[k].1) {
