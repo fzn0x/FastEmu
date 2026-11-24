@@ -25,6 +25,7 @@ mod monitor;
 mod native;
 mod source;
 mod thread;
+mod util;
 mod value;
 mod vm;
 
@@ -37,9 +38,11 @@ pub use thread::ThreadId;
 pub use value::{ObjRef, Value};
 pub use vm::{Diagnostic, DiagnosticSink, LogSink, Task, Vm, VmConfig, WeakVm};
 
-/// Every class of the CLDC 1.1 library: `java.lang` and `java.io`.
+/// Every class of the CLDC 1.1 library: `java.lang`, `java.io` and
+/// `java.util`.
 fn library() -> Vec<NativeClass> {
     let mut all = lang::classes();
     all.extend(io::classes());
+    all.extend(util::classes());
     all
 }

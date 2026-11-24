@@ -477,6 +477,14 @@ const HIERARCHY: &[(&str, &str)] = &[
         "java/io/IOException",
     ),
     ("java/io/UTFDataFormatException", "java/io/IOException"),
+    (
+        "java/util/NoSuchElementException",
+        "java/lang/RuntimeException",
+    ),
+    (
+        "java/util/EmptyStackException",
+        "java/lang/RuntimeException",
+    ),
 ];
 
 /// A constructor taking an index, which says it in the message as Java's

@@ -58,6 +58,16 @@ pub(crate) fn chars(state: &VmState, obj: ObjRef) -> Option<&[u16]> {
     state.heap.get(obj).payload::<JString>().map(|s| &*s.chars)
 }
 
+/// `hashCode()` of `obj` if it is a string, computed once and cached as
+/// Java caches it.
+pub(crate) fn cached_hash(state: &mut VmState, obj: ObjRef) -> Option<i32> {
+    let s = state.heap.get_mut(obj).payload_mut::<JString>()?;
+    if s.hash == 0 {
+        s.hash = hash(&s.chars);
+    }
+    Some(s.hash)
+}
+
 fn units<'a>(ctx: &'a Ctx<'_>, obj: ObjRef) -> &'a [u16] {
     &ctx.state
         .heap
@@ -320,11 +330,9 @@ pub(crate) fn classes() -> Vec<NativeClass> {
                 }
             })
             .method("hashCode", "()I", |ctx, a| {
-                let s = ctx.payload_mut::<JString>(this(a))?;
-                if s.hash == 0 {
-                    s.hash = hash(&s.chars);
-                }
-                Ok(Value::Int(s.hash))
+                let h =
+                    cached_hash(&mut ctx.state, this(a)).expect("a String has a JString payload");
+                Ok(Value::Int(h))
             })
             .method("equals", "(Ljava/lang/Object;)Z", |ctx, a| {
                 let Some(other) = a[1].obj() else {

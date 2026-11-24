@@ -196,5 +196,6 @@ programs! {
     strings: "Strings", 8;
     switches: "Switches", 8;
     threads: "Threads", 8;
+    vectors: "Vectors", 8;
     wrappers: "Wrappers", 8;
 }
