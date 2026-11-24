@@ -8,6 +8,7 @@
 /android/app/build/
 /android/app/src/main/jniLibs/
 /android/local.properties
+/android/.kotlin/
 /android/app/signing.properties
 *.keystore
 *.jks
