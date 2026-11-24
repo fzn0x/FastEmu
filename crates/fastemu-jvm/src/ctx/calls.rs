@@ -190,6 +190,20 @@ impl Ctx<'_> {
         self.invoke(&method, &Self::with_this(obj, args))
     }
 
+    /// Calls interface method `name` with descriptor `desc` on `obj`, as
+    /// `invokeinterface` does (a `Runnable`'s `run`, a listener's
+    /// callback). Interface methods dispatch like virtual ones here, so
+    /// this is [`Ctx::call_virtual`] under a name that says what it is for.
+    pub fn call_interface(
+        &mut self,
+        obj: ObjRef,
+        name: &str,
+        desc: &str,
+        args: &[Value],
+    ) -> JResult<Value> {
+        self.call_virtual(obj, name, desc, args)
+    }
+
     /// Calls the static method `name` of class `class` (an internal name),
     /// initializing the class first.
     pub fn call_static(

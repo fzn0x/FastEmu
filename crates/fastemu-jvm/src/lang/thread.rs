@@ -170,7 +170,7 @@ pub(crate) fn classes() -> Vec<NativeClass> {
             })
             .method("run", "()V", |ctx, a| {
                 if let Some(target) = data(ctx, a)?.target {
-                    ctx.call_virtual(target, "run", "()V", &[])?;
+                    ctx.call_interface(target, "run", "()V", &[])?;
                 }
                 Ok(Value::Void)
             })
