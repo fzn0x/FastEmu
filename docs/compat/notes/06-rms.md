@@ -8,7 +8,9 @@ bases are as in [note 1](01-suite-loading.md).
 
 - Ids start at 1 and are never reused: the next id is the highest id
   ever handed out plus one, stored with the store so it survives
-  restarts. J2ME Loader keeps `lastRecordId` in the header file
+  restarts. JSR 118: "The first record created in a record store will
+  have recordId equal to one (1)", and after `deleteRecord` "The
+  recordId for this record is NOT reused." [spec] J2ME Loader keeps `lastRecordId` in the header file
   ([getNextRecordID](https://github.com/nikita36078/J2ME-Loader/blob/e270ed91e67b5cafc18c1991b92ba5249cf41c50/app/src/main/java/javax/microedition/rms/impl/RecordStoreImpl.java#L253));
   freej2me-plus keeps a padding entry at index 0 so ids start at 1. [code]
 - Pinball 3D Timeshock failed to boot in freej2me because the next record
@@ -16,7 +18,8 @@ bases are as in [note 1](01-suite-loading.md).
   ([freej2me issue 152](https://github.com/hex007/freej2me/issues/152));
   J2ME Loader clamps a negative next id to 0. [tracker] [code]
 - `getRecord` of a record with no data returns `null` in both J2ME
-  Loader and freej2me-plus, and an unknown id throws
+  Loader and freej2me-plus, as JSR 118 says ("if the record has no data,
+  this method will return null" [spec]), and an unknown id throws
   `InvalidRecordIDException`
   ([JL getRecord](https://github.com/nikita36078/J2ME-Loader/blob/e270ed91e67b5cafc18c1991b92ba5249cf41c50/app/src/main/java/javax/microedition/rms/impl/RecordStoreImpl.java#L353),
   [FP getRecord](https://github.com/TASEmulators/freej2me-plus/blob/aab3350832c0d82aff1771394d28bff6f66b0aa4/src/javax/microedition/rms/RecordStore.java#L410)). [code]
@@ -58,8 +61,9 @@ overhead per record.
 
 ## Store names and storage
 
-- JSR 118 limits names to 1 to 32 Unicode characters, case-sensitive.
-  [unverified; the spec page for `RecordStore` was not fetched]
+- JSR 118: "Record store names are case sensitive and may consist of
+  any combination of between one and 32 Unicode characters inclusive."
+  [spec]
   J2ME Loader removes the characters `/ \ : * ? " < > |` and cuts names
   to 32 characters, so two names that differ only in those characters
   share a store
@@ -86,9 +90,9 @@ and an atomic rename so a killed instance cannot leave half a store.
 - J2ME Loader returns the same object when an open store is opened again
   and keeps an open count; `closeRecordStore` releases it when the count
   reaches 0, and closing a closed store throws
-  `RecordStoreNotOpenException`. [code] This matches the MIDP rule that
-  a store stays open until closed as many times as it was opened.
-  [unverified spec text]
+  `RecordStoreNotOpenException`. [code] This matches JSR 118: "the
+  record store will not actually be closed until closeRecordStore() is
+  called as many times as openRecordStore() was called." [spec]
 - freej2me-plus creates a new object for every open. [code]
 - `openRecordStore(name, false)` for a missing store must throw
   `RecordStoreNotFoundException`; freej2me threw the wrong thing once

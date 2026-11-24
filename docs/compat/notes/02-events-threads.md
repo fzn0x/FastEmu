@@ -263,8 +263,10 @@ Sources: [JL VibrationController](https://github.com/nikita36078/J2ME-Loader/blo
 [JL Display](https://github.com/nikita36078/J2ME-Loader/blob/e270ed91e67b5cafc18c1991b92ba5249cf41c50/app/src/main/java/javax/microedition/lcdui/Display.java#L156),
 [FP Display](https://github.com/TASEmulators/freej2me-plus/blob/aab3350832c0d82aff1771394d28bff6f66b0aa4/src/javax/microedition/lcdui/Display.java#L183). [code]
 
-The JSR 118 rule for negative values was not checked here; J2ME Loader's
-`IllegalStateException` looks like a mistake. [unverified]
+JSR 118 gives both methods the same rule: they throw
+"`IllegalArgumentException` - if `duration` is negative". [spec] J2ME
+Loader's `IllegalStateException` is therefore wrong, and it never
+throws at all on a device without a vibrator.
 
 **For FastEmu:** both return `true` (the emulated phone has a motor and
 a backlight) and throw `IllegalArgumentException` for negative values.
