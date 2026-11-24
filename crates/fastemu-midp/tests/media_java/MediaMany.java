@@ -43,10 +43,16 @@ public class MediaMany extends MediaUtil {
         Pump.advance(300);
         r.waitFor(10, 5000);
         say("ends heard", r.count("endOfMedia"));
-        // Let the event thread finish with the last one.
-        Thread.sleep(300);
-        System.gc();
-        say("after they ended", Pump.players());
+        // The event thread holds the last one until its listener returns,
+        // which a busy machine may delay: collect until they are all gone,
+        // for five seconds.
+        int left = Pump.players();
+        for (int i = 0; i < 250 && left > 0; i++) {
+            Thread.sleep(20);
+            System.gc();
+            left = Pump.players();
+        }
+        say("after they ended", left);
         System.out.println("done");
     }
 }
