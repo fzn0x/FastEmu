@@ -113,7 +113,8 @@ jobs:
         shell: bash
         run: cargo test $EMULATOR_CRATES --locked
 
-  # The GPUI desktop app builds on every system it ships for.
+  # The GPUI desktop app builds, and the tests of the apps' crates pass, on
+  # every system it ships for. The runner's tests compile a probe MIDlet.
   app:
     name: App (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -121,12 +122,18 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      FASTEMU_REQUIRE_JAVA: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/linux-deps
         if: runner.os == 'Linux'
         with:
           gui: "true"
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
       # GPUI compiles its Metal shaders with Xcode's Metal toolchain, which
       # newer Xcode versions download separately.
       - name: Metal toolchain
@@ -140,6 +147,8 @@ jobs:
         run: cargo build -p fastemu --locked
       - name: Clippy
         run: cargo clippy -p fastemu -p fastemu-ui --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test -p fastemu -p fastemu-ui -p fastemu-android --locked
 
   # The Android app: Rust libraries built by cargo-ndk for two ABIs, and the
   # APK built around them by Gradle. The steps are in
@@ -181,7 +190,7 @@ jobs:
         if: steps.project.outputs.present == 'true'
       - name: cargo-ndk
         if: steps.project.outputs.present == 'true'
-        run: command -v cargo-ndk || cargo install cargo-ndk --locked
+        run: command -v cargo-ndk || cargo install cargo-ndk --version 4.1.2 --locked
       - name: Build the APK
         if: steps.project.outputs.present == 'true'
         working-directory: android
