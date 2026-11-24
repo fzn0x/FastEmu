@@ -6,16 +6,20 @@
 //! asked, and exits with 1 when the game crashed or stopped presenting
 //! frames. No GPUI code runs on this path.
 
+mod script;
+
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use fastemu_core::{
-    DeviceProfile, Frame, InputEvent, Instance, InstanceSettings, InstanceStatus, Key, KeyAction,
-    LaunchRequest, Launcher, LogLevel, builtin_profiles, default_profile,
+    DeviceProfile, Frame, Instance, InstanceSettings, InstanceStatus, LaunchRequest, Launcher,
+    LogLevel, builtin_profiles, default_profile,
 };
 use fastemu_midp::MidpLauncher;
+
+use self::script::{Script, Step};
 
 pub const USAGE: &str = "\
 Usage: fastemu run SUITE [OPTIONS]
@@ -42,8 +46,6 @@ Exits with 1 when the game crashes or presents no new frame for 30
 seconds, and with 2 for a bad command line.
 ";
 
-/// How long a key is held when a script taps it.
-const TAP: Duration = Duration::from_millis(100);
 /// How long the runner waits for a new frame before it gives up.
 const STALL: Duration = Duration::from_secs(30);
 /// How long a stopping game gets to wind down.
@@ -54,14 +56,6 @@ const STOP_WAIT: Duration = Duration::from_secs(5);
 pub enum Limit {
     Frames(u64),
     Seconds(f64),
-}
-
-/// One step of a key script.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Step {
-    Press(Key),
-    Release(Key),
-    Wait(Duration),
 }
 
 /// What `fastemu run` was asked to do.
@@ -75,73 +69,6 @@ pub struct Options {
     pub screenshot: Option<PathBuf>,
     pub keys: Vec<Step>,
     pub encoding: Option<String>,
-}
-
-fn key_named(name: &str) -> Option<Key> {
-    let key = match name.to_ascii_lowercase().as_str() {
-        "0" => Key::Num0,
-        "1" => Key::Num1,
-        "2" => Key::Num2,
-        "3" => Key::Num3,
-        "4" => Key::Num4,
-        "5" => Key::Num5,
-        "6" => Key::Num6,
-        "7" => Key::Num7,
-        "8" => Key::Num8,
-        "9" => Key::Num9,
-        "star" | "*" => Key::Star,
-        "pound" | "#" => Key::Pound,
-        "up" => Key::Up,
-        "down" => Key::Down,
-        "left" => Key::Left,
-        "right" => Key::Right,
-        "fire" => Key::Fire,
-        "softleft" => Key::SoftLeft,
-        "softright" => Key::SoftRight,
-        "clear" => Key::Clear,
-        "send" => Key::Send,
-        "end" => Key::End,
-        _ => return None,
-    };
-    Some(key)
-}
-
-fn millis(text: &str) -> Result<Duration, String> {
-    text.parse::<u64>()
-        .map(Duration::from_millis)
-        .map_err(|_| format!("{text:?} is not a number of milliseconds"))
-}
-
-/// Parses a key script into steps.
-pub fn parse_script(script: &str) -> Result<Vec<Step>, String> {
-    let mut steps = Vec::new();
-    let words = script
-        .lines()
-        .map(|line| line.split('#').next().unwrap_or_default())
-        .flat_map(|line| line.split([',', ' ', '\t']))
-        .filter(|word| !word.is_empty());
-    for word in words {
-        let (name, time) = match word.split_once(':') {
-            Some((name, time)) => (name, Some(time)),
-            None => (word, None),
-        };
-        if name.eq_ignore_ascii_case("wait") {
-            steps.push(Step::Wait(millis(time.unwrap_or_default())?));
-            continue;
-        }
-        if time.is_none() && name.bytes().all(|b| b.is_ascii_digit()) && name.len() > 1 {
-            steps.push(Step::Wait(millis(name)?));
-            continue;
-        }
-        let key =
-            key_named(name).ok_or_else(|| format!("unknown key {name:?} in the key script"))?;
-        let hold = match time {
-            Some(time) => millis(time)?,
-            None => TAP,
-        };
-        steps.extend([Step::Press(key), Step::Wait(hold), Step::Release(key)]);
-    }
-    Ok(steps)
 }
 
 fn value(args: &mut impl Iterator<Item = OsString>, option: &str) -> Result<String, String> {
@@ -211,7 +138,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, String
                 } else {
                     script
                 };
-                keys = parse_script(&text)?;
+                keys = script::parse(&text)?;
             }
             Some("--encoding") => encoding = Some(value(&mut args, "--encoding")?),
             Some(option) if option.starts_with("--") => {
@@ -261,35 +188,6 @@ fn print_log(instance: &dyn Instance, out: &mut dyn Write, err: &mut dyn Write) 
             LogLevel::Warn => writeln!(err, "warning: {}", line.text),
             LogLevel::Info => writeln!(err, "info: {}", line.text),
         };
-    }
-}
-
-/// Plays the key script against the clock.
-struct Script {
-    steps: Vec<Step>,
-    next: usize,
-    due: Option<Instant>,
-}
-
-impl Script {
-    fn advance(&mut self, instance: &dyn Instance, now: Instant) {
-        let due = *self.due.get_or_insert(now);
-        let mut due = due;
-        while self.next < self.steps.len() && now >= due {
-            match self.steps[self.next] {
-                Step::Press(key) => instance.send(InputEvent::Key {
-                    key,
-                    action: KeyAction::Press,
-                }),
-                Step::Release(key) => instance.send(InputEvent::Key {
-                    key,
-                    action: KeyAction::Release,
-                }),
-                Step::Wait(d) => due += d,
-            }
-            self.next += 1;
-        }
-        self.due = Some(due);
     }
 }
 
@@ -380,11 +278,7 @@ fn drive(
     err: &mut dyn Write,
 ) -> u8 {
     let start = Instant::now();
-    let mut script = Script {
-        steps: options.keys.clone(),
-        next: 0,
-        due: None,
-    };
+    let mut script = Script::new(options.keys.clone());
     let mut serial = 0;
     let mut changed = start;
     loop {
@@ -502,29 +396,6 @@ mod tests {
         );
         assert!(parse_strs(&["a.jar", "--frames"]).is_err());
         assert!(parse_strs(&["a.jar", "--fast"]).is_err());
-    }
-
-    #[test]
-    fn scripts_tap_hold_and_wait() {
-        let steps = parse_script("fire, wait:500 down:300\n# a comment\n250 5").unwrap();
-        assert_eq!(
-            steps,
-            vec![
-                Step::Press(Key::Fire),
-                Step::Wait(TAP),
-                Step::Release(Key::Fire),
-                Step::Wait(Duration::from_millis(500)),
-                Step::Press(Key::Down),
-                Step::Wait(Duration::from_millis(300)),
-                Step::Release(Key::Down),
-                Step::Wait(Duration::from_millis(250)),
-                Step::Press(Key::Num5),
-                Step::Wait(TAP),
-                Step::Release(Key::Num5),
-            ]
-        );
-        assert!(parse_script("jump").is_err());
-        assert!(parse_script("fire:soon").is_err());
     }
 
     /// A JAR of stored entries, enough for the runner to open.
