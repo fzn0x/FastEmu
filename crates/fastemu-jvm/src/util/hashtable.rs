@@ -203,7 +203,14 @@ fn put(ctx: &mut Ctx<'_>, ht: ObjRef, key: Value, value: Value) -> JResult<Value
     }
     let t = table(ctx, ht)?;
     if t.count >= t.threshold {
-        rehash(ctx, ht)?;
+        // Java calls the protected rehash() virtually: a game's table may
+        // override it.
+        if ctx
+            .call_if_overridden(ht, HASHTABLE, "rehash", "()V", &[])?
+            .is_none()
+        {
+            rehash(ctx, ht)?;
+        }
         // Java hashes the key again after a rehash.
         hash = keys::hash_code(ctx, key)?;
     }

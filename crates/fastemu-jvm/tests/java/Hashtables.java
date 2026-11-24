@@ -165,8 +165,48 @@ public class Hashtables {
         System.out.println(tiny);
     }
 
+    // put calls the protected rehash() when the table fills up, through
+    // a game's override.
+    static class Growing extends Hashtable {
+        int rehashes;
+
+        Growing() {
+            super(3);
+        }
+
+        protected void rehash() {
+            rehashes++;
+            super.rehash();
+        }
+    }
+
+    // One that never grows: put still adds every entry, in longer chains.
+    static class Fixed extends Hashtable {
+        int rehashes;
+
+        Fixed() {
+            super(2);
+        }
+
+        protected void rehash() {
+            rehashes++;
+        }
+    }
+
+    static void rehashes() {
+        Growing g = new Growing();
+        Fixed f = new Fixed();
+        for (int i = 0; i < 20; i++) {
+            g.put(new Integer(i), "g" + i);
+            f.put(new Integer(i), "f" + i);
+        }
+        System.out.println("growing " + g.rehashes + " " + g.size() + " " + g);
+        System.out.println("fixed " + f.rehashes + " " + f.size() + " " + f.get(new Integer(13)) + " " + f);
+    }
+
     public static void main(String[] args) {
         tables();
         tableErrors();
+        rehashes();
     }
 }
