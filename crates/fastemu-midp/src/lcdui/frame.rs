@@ -7,12 +7,12 @@ use std::time::Instant;
 use fastemu_core::Frame;
 use fastemu_gfx::anchor::{HCENTER, LEFT, RIGHT, TOP};
 use fastemu_gfx::{Font, Graphics, Surface};
-use fastemu_jvm::{Ctx, JResult, ObjRef};
+use fastemu_jvm::{Ctx, JResult, ObjRef, Throw};
 
 use super::canvas::buffer;
 use super::displayable::{self, Layout};
 use super::softkeys;
-use super::state::{Rect, current, state};
+use super::state::{Rect, current, state, warn_once};
 use super::theme::Theme;
 use crate::env::env;
 
@@ -85,8 +85,19 @@ fn read_chrome(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<Chrome> {
     let ticker = match (layout.ticker, ticker) {
         (Some(_), Some(t)) => {
             let t = ctx.root(t);
-            let text = ctx.call_virtual(t, "getString", "()Ljava/lang/String;", &[]);
-            match text.ok().and_then(fastemu_jvm::Value::obj) {
+            let text = match ctx.call_virtual(t, "getString", "()Ljava/lang/String;", &[]) {
+                Ok(text) => text.obj(),
+                Err(Throw::Stop) => return Err(Throw::Stop),
+                Err(Throw::Exception(_)) => {
+                    warn_once(
+                        ctx,
+                        "ticker",
+                        "the ticker's getString threw; drawing it empty",
+                    );
+                    None
+                }
+            };
+            match text {
                 Some(s) => Some(ctx.string_utf16(s)?.to_vec()),
                 None => Some(Vec::new()),
             }
