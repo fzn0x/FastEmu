@@ -668,4 +668,39 @@ mod tests {
             b"data"
         );
     }
+
+    /// Every single-byte corruption and every truncation of a small
+    /// archive opens or fails cleanly, and every entry it finds reads or
+    /// fails cleanly: no panic, whatever the damage.
+    #[test]
+    fn damage_never_panics() {
+        let text = b"compressible text, compressible text, compressible".to_vec();
+        let entries = [
+            TestEntry::stored("META-INF/MANIFEST.MF", b"MIDlet-Name: A\n"),
+            TestEntry::deflated("a/B.class", &text),
+            TestEntry {
+                name: b"c.bin",
+                data: &text,
+                deflate: true,
+                descriptor: true,
+            },
+        ];
+        let good = write(&entries, true);
+        let try_open = |bytes: Vec<u8>| {
+            if let Ok(archive) = ZipArchive::new(bytes) {
+                for entry in archive.entries() {
+                    let _ = archive.read(entry);
+                }
+            }
+        };
+        for at in 0..good.len() {
+            for flip in [0xFF, 0x80, 0x01] {
+                let mut bad = good.clone();
+                bad[at] ^= flip;
+                try_open(bad);
+            }
+            try_open(good[..at].to_vec());
+            try_open(good[at..].to_vec());
+        }
+    }
 }
