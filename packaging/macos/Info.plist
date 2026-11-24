@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- FastEmu.app's Info.plist. packaging/macos/package.sh replaces @VERSION@. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>FastEmu</string>
+	<key>CFBundleExecutable</key>
+	<string>fastemu</string>
+	<key>CFBundleIconFile</key>
+	<string>fastemu.icns</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.fzn0x.fastemu</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>FastEmu</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.games</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>The FastEmu contributors, GPL-3.0-or-later</string>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+	<!-- Open with FastEmu, for Java ME games and their descriptors. FastEmu
+	     is an alternative for .jar files, which belong to Java itself. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Java ME game</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.sun.java-archive</string>
+			</array>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>jar</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Java ME application descriptor</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>io.github.fzn0x.fastemu.jad</string>
+			</array>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>jad</string>
+			</array>
+		</dict>
+	</array>
+	<!-- macOS knows .jar files but not .jad files: this declares them. -->
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>io.github.fzn0x.fastemu.jad</string>
+			<key>UTTypeDescription</key>
+			<string>Java ME application descriptor</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.plain-text</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>jad</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>text/vnd.sun.j2me.app-descriptor</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>
