@@ -3,14 +3,18 @@
 //!
 //! A host keyboard types at the caret ([`InputEvent::Text`]); a keypad
 //! types by multi-tap, `#` changes the input mode, clear deletes, the
-//! left and right arrows move the caret and up and down move it a line.
+//! left and right arrows move the caret and up and down move it a line;
+//! a tap on the text puts the caret there.
 //! While a text box is shown, `MidpInstance::wants_text` is true, so the
 //! apps send typed characters rather than keypad keys.
 //!
 //! [`InputEvent::Text`]: fastemu_core::InputEvent::Text
 
+use std::ops::Range;
 use std::time::Instant;
 
+use fastemu_core::PointerAction;
+use fastemu_gfx::Font;
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Value};
 
 use super::draw::{Painter, width as text_width};
@@ -116,11 +120,39 @@ fn caret_line(ctx: &mut Ctx<'_>, obj: ObjRef, delta: i32) -> JResult<bool> {
     if target < 0 || target >= lines.len() as i64 {
         return Ok(false);
     }
-    let range = lines[target as usize].clone();
-    let mut at = range.start;
-    while at < range.end && text_width(&font, &shown[range.start..=at]) <= x {
+    let at = caret_in_line(&font, &shown, lines[target as usize].clone(), x);
+    tb.editor.set_caret(at);
+    Ok(true)
+}
+
+/// The caret position in `line` of `shown` nearest to `x` pixels from
+/// the line's start: after every character that ends at or before `x`.
+fn caret_in_line(font: &Font, shown: &[u16], line: Range<usize>, x: i32) -> usize {
+    let mut at = line.start;
+    while at < line.end && text_width(font, &shown[line.start..=at]) <= x {
         at += 1;
     }
+    at
+}
+
+/// Puts the caret where the content area was tapped at `(x, y)`, if
+/// that is inside the text's frame. Returns whether it was.
+fn tap(ctx: &mut Ctx<'_>, obj: ObjRef, x: i32, y: i32) -> JResult<bool> {
+    let content = displayable::layout(ctx, obj)?.content;
+    let r = frame(status_height(ctx), (content.width, content.height));
+    if !r.contains(x, y) {
+        return Ok(false);
+    }
+    let font = state(ctx).fonts.default_font();
+    let tb = text_box_mut(ctx, obj)?;
+    if !tb.editor.editable() {
+        return Ok(true);
+    }
+    let shown = text::display_text(&tb.editor);
+    let (lines, _, _) = text::lines(&font, &tb.editor, r.width - 2 * INSET);
+    let row = ((y - r.y - INSET + 1).max(0) / font.height().max(1)) as usize + tb.first;
+    let line = lines[row.min(lines.len() - 1)].clone();
+    let at = caret_in_line(&font, &shown, line, x - r.x - INSET);
     tb.editor.set_caret(at);
     Ok(true)
 }
@@ -177,6 +209,24 @@ impl ScreenHandler for TextBoxHandler {
             super::wake_timer(ctx, obj);
         }
         Ok(used != KeyUse::Ignored)
+    }
+
+    fn pointer(
+        &self,
+        ctx: &mut Ctx<'_>,
+        obj: ObjRef,
+        action: PointerAction,
+        x: i32,
+        y: i32,
+    ) -> JResult<bool> {
+        if action != PointerAction::Press {
+            return Ok(false);
+        }
+        let used = tap(ctx, obj, x, y)?;
+        if used {
+            display::repaint(ctx, obj)?;
+        }
+        Ok(used)
     }
 
     fn text(&self, ctx: &mut Ctx<'_>, obj: ObjRef, typed: &str) -> JResult<bool> {
@@ -249,4 +299,32 @@ pub fn class() -> NativeClass {
             },
         );
     text::methods(class, access)
+}
+
+#[cfg(test)]
+mod tests {
+    use fastemu_core::FontSizes;
+    use fastemu_gfx::{FontLibrary, TextRendering};
+
+    use super::*;
+
+    #[test]
+    fn a_tap_puts_the_caret_between_the_characters_it_passed() {
+        let sizes = FontSizes {
+            small: 12,
+            medium: 14,
+            large: 16,
+        };
+        let font = FontLibrary::new(sizes, TextRendering::Antialiased).default_font();
+        let text: Vec<u16> = "abcdef".encode_utf16().collect();
+        let two = text_width(&font, &text[..2]);
+        assert_eq!(caret_in_line(&font, &text, 0..6, -5), 0);
+        assert_eq!(caret_in_line(&font, &text, 0..6, two), 2);
+        assert_eq!(caret_in_line(&font, &text, 0..6, 10_000), 6);
+        assert_eq!(
+            caret_in_line(&font, &text, 3..6, 0),
+            3,
+            "from the line's start"
+        );
+    }
 }

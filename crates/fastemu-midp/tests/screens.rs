@@ -8,7 +8,7 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use fastemu_core::{Frame, InputEvent, Instance, Key, KeyAction, builtin_profiles};
+use fastemu_core::{Frame, InputEvent, Instance, Key, KeyAction, PointerAction, builtin_profiles};
 use screens_support::{midlet, suite};
 use support::{Running, TIMEOUT, rgb};
 
@@ -136,6 +136,31 @@ fn screens_text_box_takes_typing_and_multi_tap() {
     run.wait_log("text [Bobp] caret 4");
     run.wait_log("canvas shown");
     wait_until(&mut run, "wants_text to end", |r| !r.instance.wants_text());
+}
+
+#[test]
+fn screens_text_box_tap_moves_the_caret() {
+    let Some(jar) = suite("text-tap") else { return };
+    let profile = builtin_profiles()
+        .into_iter()
+        .find(|p| p.touch)
+        .expect("a touch profile");
+    let middle = profile.screen_height as i32 / 2;
+    let mut run = Running::launch_on(&jar, midlet::TEXTS, profile);
+    wait_until(&mut run, "wants_text", |r| r.instance.wants_text());
+    run.instance.send(InputEvent::Text("Bob".into()));
+    // A tap left of the text, in the middle of its frame: the caret goes
+    // before the first letter.
+    for action in [PointerAction::Press, PointerAction::Release] {
+        run.instance.send(InputEvent::Pointer {
+            action,
+            x: 4,
+            y: middle,
+        });
+    }
+    run.instance.send(InputEvent::Text("X".into()));
+    run.tap(Key::SoftLeft);
+    run.wait_log("text [XBob] caret 1");
 }
 
 #[test]

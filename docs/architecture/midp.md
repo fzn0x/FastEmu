@@ -325,7 +325,8 @@ changes one of these calls `highlevel::wake_timer`.
   digits and `*` or `#` for the minus, `DECIMAL` `*` for the point,
   `PHONENUMBER` `*` for `*+pw`. Clear deletes, the left and right arrows
   move the caret (`4` and `6` type), up and down move it a line in a
-  text box. `PASSWORD` shows stars but for the letter being chosen.
+  text box, and a tap on a text box's text puts it there. `PASSWORD`
+  shows stars but for the letter being chosen.
 - **Forms.** An item is an `item::ItemData` payload: the label, layout,
   commands, preferred size and owner every item has, and its kind's
   state (`item::Kind`). `form::layout::arrange` places them in MIDP 2.0
