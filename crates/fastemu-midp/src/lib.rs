@@ -49,6 +49,17 @@ pub fn classes(profile: &DeviceProfile) -> Vec<NativeClass> {
     classes.extend(io::classes());
     classes.extend(wma::classes());
     if vendor.has_nokia_ui() {
+        // Nokia's DirectGraphics is MIDP's Graphics with more methods.
+        classes = classes
+            .into_iter()
+            .map(|class| {
+                if class.name() == nokia::direct_graphics::GRAPHICS {
+                    nokia::direct_graphics::implement(class)
+                } else {
+                    class
+                }
+            })
+            .collect();
         classes.extend(nokia::classes());
     }
     classes.extend(vendor::classes(vendor));

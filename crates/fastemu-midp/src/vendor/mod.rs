@@ -8,6 +8,8 @@
 //! vendor; [`Vendor::of`] reads the vendor from the profile's id.
 //! `docs/architecture/vendors.md` lists what each vendor gets.
 
+pub(crate) mod device;
+
 use fastemu_core::DeviceProfile;
 use fastemu_jvm::NativeClass;
 
