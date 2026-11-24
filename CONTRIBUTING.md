@@ -164,8 +164,10 @@ Security problems go through
 2. Run `cargo xtask changelog --release X.Y.Z`. It folds the fragments into
    CHANGELOG.md under `## [X.Y.Z] - date`, adds an empty `## [Unreleased]`
    and deletes the fragments.
-3. Set `version` in the root `Cargo.toml` to `X.Y.Z`, and commit both as
-   `chore: release vX.Y.Z`. This is the last commit before the tag.
+3. Set `version` in the root `Cargo.toml` to `X.Y.Z` and run `cargo update
+   --workspace`, which writes the new version into `Cargo.lock`. CI builds
+   with `--locked`, so the lock must change with it. Commit the three files
+   as `chore: release vX.Y.Z`. This is the last commit before the tag.
 4. Tag the merged commit and push the tag. The release workflow builds the
    downloads and fills in [.github/release-notes.md](.github/release-notes.md).
 
