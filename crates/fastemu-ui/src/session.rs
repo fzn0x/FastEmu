@@ -65,8 +65,8 @@ pub struct Session {
     /// Typed characters go to the game as text instead of keypad keys,
     /// for its text boxes.
     pub text_mode: bool,
-    /// Whether a pointer press on the screen is in progress.
-    pub pointer_down: bool,
+    /// Where a pointer press on the screen holds it, in phone pixels.
+    pointer_at: Option<(i32, i32)>,
 }
 
 impl Session {
@@ -90,7 +90,7 @@ impl Session {
             keys: KeyTracker::default(),
             muted: false,
             text_mode: false,
-            pointer_down: false,
+            pointer_at: None,
         }
     }
 
@@ -130,7 +130,7 @@ impl Session {
         self.frame = None;
         self.log.clear();
         self.keys = KeyTracker::default();
-        self.pointer_down = false;
+        self.pointer_at = None;
         if self.muted {
             self.instance.set_volume(0.0);
         }
@@ -157,16 +157,43 @@ impl Session {
         });
     }
 
-    pub fn pointer(&self, action: PointerAction, (x, y): (i32, i32)) {
+    fn pointer(&self, action: PointerAction, (x, y): (i32, i32)) {
         self.instance.send(InputEvent::Pointer { action, x, y });
     }
 
-    /// Releases every key the keyboard or keypad holds, as when the game
-    /// loses focus, so none stays pressed inside the game.
+    /// Puts a finger or the mouse button down on the screen at `at`.
+    pub fn pointer_press(&mut self, at: (i32, i32)) {
+        self.pointer_at = Some(at);
+        self.pointer(PointerAction::Press, at);
+    }
+
+    /// Moves a pointer that is down to `at`; does nothing when none is.
+    pub fn pointer_drag(&mut self, at: (i32, i32)) {
+        if self.pointer_at.is_some_and(|last| last != at) {
+            self.pointer_at = Some(at);
+            self.pointer(PointerAction::Drag, at);
+        }
+    }
+
+    /// Lifts a pointer that is down, at `at` or where it last was.
+    pub fn pointer_release(&mut self, at: Option<(i32, i32)>) {
+        if let Some(last) = self.pointer_at.take() {
+            self.pointer(PointerAction::Release, at.unwrap_or(last));
+        }
+    }
+
+    pub fn is_pointer_down(&self) -> bool {
+        self.pointer_at.is_some()
+    }
+
+    /// Releases every key the keyboard or keypad holds and a pointer that
+    /// is down, as when the game or the window loses focus, so nothing
+    /// stays pressed inside the game.
     pub fn release_everything(&mut self) {
         for key in self.keys.release_all() {
             self.release(key);
         }
+        self.pointer_release(None);
     }
 
     pub fn toggle_pause(&mut self) {

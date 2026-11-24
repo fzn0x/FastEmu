@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use fastemu_core::{Instance, InstanceStatus, LaunchError, LaunchRequest, Launcher, PointerAction};
+use fastemu_core::{Instance, InstanceStatus, LaunchError, LaunchRequest, Launcher};
 use gpui::{
     Context, Div, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
     Point, ScrollStrategy, Stateful, Styled, Window, canvas, div, prelude::*, px,
@@ -357,8 +357,7 @@ impl FastEmuView {
             return;
         };
         if inside {
-            tile.session.pointer_down = true;
-            tile.session.pointer(PointerAction::Press, (x, y));
+            tile.session.pointer_press((x, y));
         }
     }
 
@@ -366,11 +365,11 @@ impl FastEmuView {
         let Some(tile) = self.tile_mut(id) else {
             return;
         };
-        if !tile.session.pointer_down || event.pressed_button != Some(MouseButton::Left) {
+        if event.pressed_button != Some(MouseButton::Left) {
             return;
         }
         if let Some((pixel, _)) = map_pointer(tile, event.position) {
-            tile.session.pointer(PointerAction::Drag, pixel);
+            tile.session.pointer_drag(pixel);
         }
     }
 
@@ -378,12 +377,8 @@ impl FastEmuView {
         let Some(tile) = self.tile_mut(id) else {
             return;
         };
-        if !tile.session.pointer_down {
-            return;
-        }
-        tile.session.pointer_down = false;
-        let pixel = map_pointer(tile, event.position).map_or((0, 0), |(p, _)| p);
-        tile.session.pointer(PointerAction::Release, pixel);
+        let pixel = map_pointer(tile, event.position).map(|(p, _)| p);
+        tile.session.pointer_release(pixel);
     }
 
     /// The toolbar, the tiles and the log drawer.

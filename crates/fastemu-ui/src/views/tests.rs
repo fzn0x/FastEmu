@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use fastemu_core::{
     Frame, InputEvent, Instance, InstanceId, InstanceStatus, Key, KeyAction, LaunchError,
-    LaunchRequest, Launcher, LogLevel, LogLine, SuiteInfo,
+    LaunchRequest, Launcher, LogLevel, LogLine, PointerAction, SuiteInfo,
 };
 use gpui::{Entity, KeyDownEvent, KeyUpEvent, Keystroke, TestAppContext, VisualTestContext};
 
@@ -361,6 +361,45 @@ fn the_keypad_presses_and_releases(cx: &mut TestAppContext) {
             key(Key::Star, KeyAction::Press),
             key(Key::Star, KeyAction::Release),
         ]
+    );
+}
+
+#[gpui::test]
+fn a_pointer_held_down_is_released_when_the_game_loses_focus(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    h.launch_first();
+    let first = h.launcher.instance(0);
+    h.view.update(h.cx, |v, cx| {
+        let id = v.tiles[0].id;
+        v.focus_tile(id, cx);
+        v.tiles[0].session.pointer_press((10, 20));
+        v.tiles[0].session.pointer_drag((12, 20));
+        v.cycle_focus(1, cx);
+    });
+    let pointer = |action, x, y| InputEvent::Pointer { action, x, y };
+    assert_eq!(
+        first.events(),
+        vec![
+            pointer(PointerAction::Press, 10, 20),
+            pointer(PointerAction::Drag, 12, 20),
+            pointer(PointerAction::Release, 12, 20),
+        ]
+    );
+    h.view.update(h.cx, |v, _| {
+        assert!(!v.tiles[0].session.is_pointer_down());
+        v.tiles[1].session.pointer_press((1, 1));
+    });
+    let second = h.launcher.instance(1);
+    h.cx.update(|window, _| window.activate_window());
+    h.cx.run_until_parked();
+    h.cx.deactivate_window();
+    h.cx.run_until_parked();
+    assert_eq!(
+        second.events().last(),
+        Some(&pointer(PointerAction::Release, 1, 1)),
+        "the window going to the background lifts the pointer"
     );
 }
 
