@@ -49,9 +49,12 @@ supported; freej2me-plus reports `audio/midi`, `audio/x-wav`,
   J2ME Loader opens `resource://` and `file://` locators, guesses the
   type from the file extension, and returns a silent player for other
   locators. [code]
-- A freej2me-plus comment notes that Sonic Spinball (K800i) relies on an
-  exception from the Siemens `createPlayer` with a `null` type as part
-  of its logic, so "only a lot of testing" will tell which is right
+- A freej2me-plus comment in `createPlayer(InputStream, String)`, copied
+  into the Siemens variant, notes that Sonic Spinball (the Sony Ericsson
+  K800i version) uses an exception from that method as part of its
+  logic; it weighs throwing `MediaException` for a `null` type against
+  guessing the type, and says "only a lot of testing" will tell which is
+  right. The code today guesses and throws only for a `null` stream
   ([Manager](https://github.com/TASEmulators/freej2me-plus/blob/aab3350832c0d82aff1771394d28bff6f66b0aa4/src/javax/microedition/media/Manager.java#L75)). [code comment]
 
 **For FastEmu:** decide the format from magic bytes first and the
