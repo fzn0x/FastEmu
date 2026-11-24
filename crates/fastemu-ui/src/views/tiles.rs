@@ -22,7 +22,7 @@ use crate::layout::{
 };
 use crate::library::EntryId;
 use crate::screenshot;
-use crate::session::{Session, free_slot, phone_pixel, status_label};
+use crate::session::{NotStarted, Session, free_slot, phone_pixel, status_label};
 use crate::settings::{LayoutMode, profile_by_id};
 use crate::theme::Theme;
 
@@ -118,14 +118,11 @@ impl FastEmuView {
             let started = result.as_ref().ok().map(Arc::clone);
             let shown = this.update_in(cx, |this, _, cx| {
                 this.launching.retain(|l| *l != (entry, slot));
-                match result {
-                    Ok(instance) => this.add_tile(entry, slot, request, instance, cx),
-                    Err(err) => this.report(
-                        format!("Could not start {name}: {err}"),
-                        NoticeLevel::Error,
-                        cx,
-                    ),
-                }
+                let instance = result.unwrap_or_else(|err| {
+                    log::warn!("could not start {name}: {err}");
+                    Arc::new(NotStarted::new(name, &err))
+                });
+                this.add_tile(entry, slot, request, instance, cx);
             });
             stop_if_orphaned(shown.is_ok(), started);
         })
@@ -242,21 +239,14 @@ impl FastEmuView {
                     return;
                 };
                 tile.restarting = false;
-                match result {
-                    Ok(instance) => {
-                        tile.screen.borrow_mut().release(window);
-                        tile.session.request = request;
-                        tile.session.replace_instance(instance);
-                    }
-                    Err(err) => {
-                        let title = tile.session.title.clone();
-                        this.report(
-                            format!("Could not restart {title}: {err}"),
-                            NoticeLevel::Error,
-                            cx,
-                        );
-                    }
-                }
+                let instance = result.unwrap_or_else(|err| {
+                    let title = tile.session.title.clone();
+                    log::warn!("could not restart {title}: {err}");
+                    Arc::new(NotStarted::new(title, &err))
+                });
+                tile.screen.borrow_mut().release(window);
+                tile.session.request = request;
+                tile.session.replace_instance(instance);
                 cx.notify();
             });
             stop_if_orphaned(shown.is_ok(), started);
@@ -892,7 +882,11 @@ impl FastEmuView {
                 InstanceStatus::Exited => (Icon::Info, "The game ended".to_owned(), None),
                 InstanceStatus::Crashed { message } => (
                     Icon::Crash,
-                    "The game crashed".to_owned(),
+                    if s.frame.is_some() {
+                        "The game crashed".to_owned()
+                    } else {
+                        "The game could not start".to_owned()
+                    },
                     Some(message.clone()),
                 ),
                 InstanceStatus::Starting if s.frame.is_none() => {
@@ -917,7 +911,15 @@ impl FastEmuView {
                 .text_center()
                 .child(icon(mark, 24.0, theme.text))
                 .child(div().child(title))
-                .children(detail.map(|d| div().text_xs().text_color(theme.muted).child(d)))
+                .children(detail.map(|d| {
+                    div()
+                        .max_w_full()
+                        .max_h(px(120.0))
+                        .overflow_hidden()
+                        .text_xs()
+                        .text_color(theme.muted)
+                        .child(d)
+                }))
                 .when(finished && interactive, |d| {
                     d.child(
                         div()

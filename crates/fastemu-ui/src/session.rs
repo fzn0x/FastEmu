@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use fastemu_core::{
-    Frame, InputEvent, Instance, InstanceStatus, Key, KeyAction, LaunchRequest, PointerAction,
+    Frame, InputEvent, Instance, InstanceId, InstanceStatus, Key, KeyAction, LaunchError,
+    LaunchRequest, LogLine, PointerAction,
 };
 
 use crate::bindings::KeyTracker;
@@ -44,6 +45,59 @@ pub fn free_slot(taken: impl IntoIterator<Item = u32>) -> u32 {
         .enumerate()
         .find(|&(i, &slot)| i as u32 != slot)
         .map_or(taken.len() as u32, |(i, _)| i as u32)
+}
+
+/// Stands in for a game that could not start, so its tile shows why and
+/// can try again. It reads as crashed with the launch error and ignores
+/// everything sent to it.
+pub struct NotStarted {
+    id: InstanceId,
+    title: String,
+    message: String,
+}
+
+impl NotStarted {
+    pub fn new(title: impl Into<String>, error: &LaunchError) -> Self {
+        Self {
+            id: InstanceId::next(),
+            title: title.into(),
+            message: error.to_string(),
+        }
+    }
+}
+
+impl Instance for NotStarted {
+    fn id(&self) -> InstanceId {
+        self.id
+    }
+
+    fn title(&self) -> String {
+        self.title.clone()
+    }
+
+    fn status(&self) -> InstanceStatus {
+        InstanceStatus::Crashed {
+            message: self.message.clone(),
+        }
+    }
+
+    fn frame(&self) -> Option<Frame> {
+        None
+    }
+
+    fn send(&self, _: InputEvent) {}
+
+    fn pause(&self) {}
+
+    fn resume(&self) {}
+
+    fn stop(&self) {}
+
+    fn set_volume(&self, _: f32) {}
+
+    fn drain_log(&self) -> Vec<LogLine> {
+        Vec::new()
+    }
 }
 
 /// A running game.
@@ -331,6 +385,26 @@ mod tests {
             phone_pixel((1.0, 1.0), (0.0, 0.0), (0.0, 0.0), (240, 320)),
             ((0, 0), false)
         );
+    }
+
+    #[test]
+    fn a_game_that_did_not_start_says_why() {
+        let error = LaunchError::NoSuchMidlet(2);
+        let instance: Arc<dyn Instance> = Arc::new(NotStarted::new("Snake", &error));
+        let session = Session::new(
+            EntryId(1),
+            0,
+            LaunchRequest::new("snake.jar", "unused"),
+            instance,
+        );
+        assert_eq!(session.title, "Snake");
+        assert_eq!(
+            session.status,
+            InstanceStatus::Crashed {
+                message: "the suite has no MIDlet number 3".into()
+            }
+        );
+        assert!(!session.is_running());
     }
 
     #[test]

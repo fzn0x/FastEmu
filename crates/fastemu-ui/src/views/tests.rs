@@ -127,6 +127,9 @@ impl Launcher for FakeLauncher {
 
     fn launch(&self, request: LaunchRequest) -> Result<Arc<dyn Instance>, LaunchError> {
         let info = self.inspect(&request.suite)?;
+        if info.name.starts_with("FAILS") {
+            return Err(LaunchError::Unsupported("JSR-184 3D graphics".into()));
+        }
         let instance = Arc::new(FakeInstance {
             id: InstanceId::next(),
             title: info.name,
@@ -720,6 +723,37 @@ fn pausing_and_muting_reach_the_instance(cx: &mut TestAppContext) {
     assert!(lock(&game.volume).abs() < f32::EPSILON);
     h.key_down("up", None, false);
     assert!(game.events().is_empty(), "a paused game gets no keys");
+}
+
+#[gpui::test]
+fn a_game_that_cannot_start_shows_why_in_its_tile(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["fails.jar"]);
+    h.launch_first();
+    h.redraw();
+    let (count, title, status) = h.read(|v| {
+        (
+            v.tiles.len(),
+            v.tiles[0].session.title.clone(),
+            v.tiles[0].session.status.clone(),
+        )
+    });
+    assert_eq!(count, 1, "the failure gets a tile");
+    assert_eq!(title, "FAILS");
+    assert_eq!(
+        status,
+        InstanceStatus::Crashed {
+            message: "unsupported: JSR-184 3D graphics".into()
+        }
+    );
+    // Trying again keeps the tile and its message.
+    h.view.update_in(h.cx, |v, window, cx| {
+        let id = v.tiles[0].id;
+        v.restart_tile(id, window, cx);
+    });
+    h.cx.run_until_parked();
+    assert_eq!(h.read(|v| v.tiles.len()), 1);
+    assert!(h.read(|v| matches!(v.tiles[0].session.status, InstanceStatus::Crashed { .. })));
 }
 
 #[gpui::test]
