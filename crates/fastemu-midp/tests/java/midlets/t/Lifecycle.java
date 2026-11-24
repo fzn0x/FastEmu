@@ -46,4 +46,8 @@ class LifecycleCanvas extends Canvas {
     protected void hideNotify() {
         System.out.println("hideNotify");
     }
+
+    protected void keyPressed(int code) {
+        System.out.println("keyPressed " + code);
+    }
 }

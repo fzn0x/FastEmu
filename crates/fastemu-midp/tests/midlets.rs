@@ -272,6 +272,7 @@ fn stopping_a_paused_instance_still_destroys_the_midlet() {
     run.instance.stop();
     run.wait_status(|s| *s == InstanceStatus::Exited);
     assert!(run.has("destroyApp true"), "{}", run.dump());
+    assert!(!run.has("keyPressed"), "{}", run.dump());
     assert_eq!(run.instance.error_count(), 0, "{}", run.dump());
 }
 
