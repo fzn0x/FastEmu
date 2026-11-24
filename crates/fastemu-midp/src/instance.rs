@@ -335,6 +335,12 @@ impl Instance for MidpInstance {
     fn drain_log(&self) -> Vec<LogLine> {
         self.host.drain_log()
     }
+
+    /// True while a `TextBox` is shown or a `TextField` or `DateField`
+    /// has the focus, until the instance stops.
+    fn wants_text(&self) -> bool {
+        !self.host.peek_status().is_finished() && self.host.wants_text()
+    }
 }
 
 impl Drop for MidpInstance {

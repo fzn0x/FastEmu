@@ -50,6 +50,8 @@ struct Inner {
     /// Set when the app has been notified and has not read anything since,
     /// so a burst of frames and log lines makes one notification.
     pending: AtomicBool,
+    /// Whether a text box is shown or a text field has the focus.
+    wants_text: AtomicBool,
     state: Mutex<HostState>,
     errors: AtomicU64,
     control: Mutex<Option<mpsc::Sender<Control>>>,
@@ -75,6 +77,7 @@ impl HostLink {
             id,
             notify,
             pending: AtomicBool::new(false),
+            wants_text: AtomicBool::new(false),
             state: Mutex::new(HostState {
                 status: InstanceStatus::Starting,
                 frame: None,
@@ -118,6 +121,20 @@ impl HostLink {
     /// thrown out of a callback) and internal errors, since launch.
     pub fn error_count(&self) -> u64 {
         self.0.errors.load(Ordering::Relaxed)
+    }
+
+    /// Whether the game shows a text box or a focused text or date field,
+    /// so the app should send typed text: `Instance::wants_text`.
+    pub fn wants_text(&self) -> bool {
+        self.0.wants_text.load(Ordering::Acquire)
+    }
+
+    /// Records whether the game wants typed text, telling the app when
+    /// that changes.
+    pub(crate) fn set_wants_text(&self, wants: bool) {
+        if self.0.wants_text.swap(wants, Ordering::AcqRel) != wants {
+            self.changed();
+        }
     }
 
     /// Tells the app something changed, once until it reads again.
