@@ -56,7 +56,7 @@ format.
 
 | Key | T | Defined by | Value |
 |---|---|---|---|
-| `microedition.media.version` | 2 | JSR-135 | `1.1` or `1.2` on a phone with MMAPI; MUST be `1.2` where `java.security.Permission` exists, so a CLDC 1.1 phone answers `1.1`. `null` without MMAPI (a MIDP 2.0 phone with only the audio subset). J2ME Loader reports `1.0`, freej2me-plus `1.1`. |
+| `microedition.media.version` | 2 | JSR-135 | `1.1` or `1.2` on a phone with MMAPI; MUST be `1.2` where `java.security.Permission` exists, and may be either on CLDC, which has no `java.security.Permission`. `null` without MMAPI (a MIDP 2.0 phone with only the audio subset). J2ME Loader reports `1.0`, freej2me-plus `1.1`. |
 | `supports.mixing` | 2 | JSR-135 | `true` or `false`. `true` promises two simultaneous `playTone` tones, a tone during playback, and two `Player`s playing at once. Games that see `false` play only one sound at a time, so FastEmu should answer `true`. |
 | `supports.audio.capture` | 3 | JSR-135 | `true` or `false`; when `true`, `audio.encodings` must not be empty. FastEmu has no microphone: `false`. |
 | `supports.video.capture` | 3 | JSR-135 | `true` or `false`; FastEmu: `false`. |
