@@ -42,6 +42,11 @@ file, the steps are read from it, one or more per line; # starts a
 comment. Key names: 0 to 9, star, pound, up, down, left, right, fire,
 softleft, softright, clear, send, end.
 
+Pointer steps touch the screen at phone pixel X,Y: press@XxY puts a
+finger down, drag@XxY moves it, release@XxY lifts it, and tap@XxY does
+all three (tap@XxY:MS holds for MS milliseconds). Games get them only on
+a touch screen, such as the generic-360x640 profile.
+
 Exits with 1 when the game crashes or presents no new frame for 30
 seconds, and with 2 for a bad command line.
 ";
