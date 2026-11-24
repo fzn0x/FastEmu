@@ -119,6 +119,25 @@ fn packed(two_bit: bool, n: usize) -> (usize, u32) {
     }
 }
 
+/// The pixels of a `width` by `height` packed region at `(x, y)` that an
+/// array of `len` bytes holds, row by row: each pixel's number in the
+/// region and its place on the image, which may lie outside it. A region
+/// larger than the array stops where the array ends, so a huge size
+/// cannot keep the loop running.
+fn region_pixels(
+    two_bit: bool,
+    len: usize,
+    (x, y, width, height): (i32, i32, i32, i32),
+) -> impl Iterator<Item = (usize, i64, i64)> {
+    let per_byte = if two_bit { 4 } else { 8 };
+    let width = i64::from(width);
+    let count = (width * i64::from(height)).min(len as i64 * per_byte);
+    (0..count).map(move |n| {
+        let (row, col) = (n / width, n % width);
+        (n as usize, i64::from(x) + col, i64::from(y) + row)
+    })
+}
+
 fn set_pixels(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let array = ctx.non_null(a[1])?;
     let [x, y, w, h] = [a[2].int(), a[3].int(), a[4].int(), a[5].int()];
@@ -129,16 +148,13 @@ fn set_pixels(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let (sw, sh) = (surface.width() as i64, surface.height() as i64);
     let mask = if two_bit { 3 } else { 1 };
     surface.edit_pixels(|to| {
-        for row in 0..i64::from(h) {
-            for col in 0..i64::from(w) {
-                let (px, py) = (i64::from(x) + col, i64::from(y) + row);
-                let (index, shift) = packed(two_bit, (row * i64::from(w) + col) as usize);
-                if px < 0 || py < 0 || px >= sw || py >= sh || index >= bytes.len() {
-                    continue;
-                }
-                let value = (i32::from(bytes[index] as u8) >> shift) & mask;
-                to[(py * sw + px) as usize] = colour(two_bit, value);
+        for (n, px, py) in region_pixels(two_bit, bytes.len(), (x, y, w, h)) {
+            if px < 0 || py < 0 || px >= sw || py >= sh {
+                continue;
             }
+            let (index, shift) = packed(two_bit, n);
+            let value = (i32::from(bytes[index] as u8) >> shift) & mask;
+            to[(py * sw + px) as usize] = colour(two_bit, value);
         }
     });
     Ok(Value::Void)
@@ -152,22 +168,16 @@ fn get_pixel_bytes(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let mut bytes = ctx.array::<i8>(array)?.to_vec();
     {
         let surface = shared.lock();
-        for row in 0..h {
-            for col in 0..w {
-                let n = (i64::from(row) * i64::from(w) + i64::from(col)) as usize;
-                let (index, shift) = packed(two_bit, n);
-                if index >= bytes.len() {
-                    continue;
-                }
-                let value = u32::try_from(x + col)
-                    .ok()
-                    .zip(u32::try_from(y + row).ok())
-                    .and_then(|(px, py)| surface.pixel(px, py))
-                    .map_or(0, |p| index_of(two_bit, p));
-                let field = if two_bit { 3 } else { 1 };
-                let byte = (i32::from(bytes[index] as u8) & !(field << shift)) | (value << shift);
-                bytes[index] = byte as u8 as i8;
-            }
+        let field = if two_bit { 3 } else { 1 };
+        for (n, px, py) in region_pixels(two_bit, bytes.len(), (x, y, w, h)) {
+            let (index, shift) = packed(two_bit, n);
+            let value = u32::try_from(px)
+                .ok()
+                .zip(u32::try_from(py).ok())
+                .and_then(|(px, py)| surface.pixel(px, py))
+                .map_or(0, |p| index_of(two_bit, p));
+            let byte = (i32::from(bytes[index] as u8) & !(field << shift)) | (value << shift);
+            bytes[index] = byte as u8 as i8;
         }
     }
     ctx.array_mut::<i8>(array)?.copy_from_slice(&bytes);

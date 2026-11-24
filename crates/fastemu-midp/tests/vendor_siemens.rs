@@ -137,3 +137,21 @@ fn a_siemens_game_canvas_flushes_and_reads_its_keys() {
     let frame = game.wait_frame(|f| f.pixel(0, 0).is_some_and(|p| p & 0xFF_FFFF == 0xFF_0000));
     assert_eq!(rgb(&frame, 20, 20), 0x00_00FF);
 }
+
+#[test]
+fn extreme_arguments_return_at_once() {
+    let started = std::time::Instant::now();
+    check(
+        "SiemensLimits",
+        &profile(SIEMENS),
+        r"
+        pixel bytes far right: 0 0
+        pixel bytes far down: 0 0
+        pixel bytes huge: 0 0
+        set pixels huge: 1 0
+        far background: ff000000
+        empty repeats: 1
+        ",
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(20));
+}
