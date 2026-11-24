@@ -693,4 +693,28 @@ mod tests {
         assert!(!region_matches(&u("Hello"), false, 1, &u("ELL"), 0, 3));
         assert!(!region_matches(&u("Hello"), false, 4, &u("ELL"), 0, 3));
     }
+
+    /// `new String(bytes)` and `getBytes()` with the encoding setting
+    /// naming no known charset read and write ISO-8859-1.
+    #[test]
+    fn an_unknown_encoding_setting_means_latin_1() {
+        let config = crate::VmConfig {
+            properties: vec![("microedition.encoding".into(), "x-no-such".into())],
+            ..crate::VmConfig::default()
+        };
+        let source = std::sync::Arc::new(crate::MemorySource::new());
+        let vm = crate::Vm::new(config, source, Vec::new());
+        let (text, bytes) = vm.attach("test", |ctx| {
+            let arr = ctx.new_byte_array(&[0x41, 0xE9, 0xFF]).unwrap();
+            let s = ctx
+                .construct("java/lang/String", "([B)V", &[arr.into()])
+                .unwrap();
+            let text = ctx.string(s).unwrap();
+            let back = ctx.call_virtual(s, "getBytes", "()[B", &[]).unwrap();
+            let bytes = ctx.array::<i8>(back.obj().unwrap()).unwrap().to_vec();
+            (text, bytes)
+        });
+        assert_eq!(text, "A\u{e9}\u{ff}");
+        assert_eq!(bytes, [0x41, 0xE9_u8 as i8, -1]);
+    }
 }

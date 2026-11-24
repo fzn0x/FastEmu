@@ -122,10 +122,11 @@ impl Charset {
     }
 
     /// The charset of conversions that name none, from the value of
-    /// `microedition.encoding`; UTF-8 when it names no charset this
-    /// virtual machine has.
+    /// `microedition.encoding`. When that names no charset this virtual
+    /// machine has, ISO-8859-1, which maps every byte to a character and
+    /// back, so text a game reads and writes again survives unchanged.
     pub(crate) fn default_for(name: Option<&str>) -> Charset {
-        name.and_then(Charset::lookup).unwrap_or(Charset::Utf8)
+        name.and_then(Charset::lookup).unwrap_or(Charset::Latin1)
     }
 
     /// Decodes all of `bytes`.
@@ -200,6 +201,13 @@ mod tests {
         assert_eq!(Charset::lookup("windows-1250"), page(Cp1250));
         assert_eq!(Charset::lookup("WINDOWS-1252"), page(Cp1252));
         assert_eq!(Charset::lookup("Shift_JIS"), None);
+    }
+
+    #[test]
+    fn an_unknown_default_encoding_falls_back_to_latin_1() {
+        assert_eq!(Charset::default_for(Some("x-unknown")), Charset::Latin1);
+        assert_eq!(Charset::default_for(None), Charset::Latin1);
+        assert_eq!(Charset::default_for(Some("utf-8")), Charset::Utf8);
     }
 
     #[test]
