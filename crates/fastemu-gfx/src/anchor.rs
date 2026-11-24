@@ -22,19 +22,26 @@ const HORIZONTAL: i32 = LEFT | HCENTER | RIGHT;
 const VERTICAL: i32 = TOP | VCENTER | BASELINE | BOTTOM;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// Where on the box's width the anchor point is.
 pub enum Horizontal {
+    /// `LEFT`: the left edge.
     Left,
+    /// `HCENTER`: the middle.
     Center,
+    /// `RIGHT`: the right edge.
     Right,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// Where on the box's height the anchor point is.
 pub enum Vertical {
+    /// `TOP`: the top edge.
     Top,
     /// The middle of an image; text in lenient mode.
     Center,
     /// The baseline of text.
     Baseline,
+    /// `BOTTOM`: the bottom edge.
     Bottom,
 }
 
@@ -55,7 +62,9 @@ pub enum AnchorPolicy {
 /// A parsed anchor point.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Anchor {
+    /// The horizontal position.
     pub horizontal: Horizontal,
+    /// The vertical position.
     pub vertical: Vertical,
 }
 

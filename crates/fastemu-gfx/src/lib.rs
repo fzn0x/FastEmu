@@ -31,6 +31,9 @@
 //! # Ok::<(), fastemu_gfx::GfxError>(())
 //! ```
 
+// The MIDP wrapper is written against this API; keep all of it documented.
+#![warn(missing_docs)]
+
 pub mod anchor;
 pub mod color;
 pub mod decode;

@@ -22,9 +22,13 @@ const MAX_SIDE: u32 = 16384;
 /// An image file format FastEmu decodes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ImageFormat {
+    /// PNG, the format MIDP requires.
     Png,
+    /// JPEG, baseline or progressive.
     Jpeg,
+    /// GIF; only the first frame is used.
     Gif,
+    /// Windows BMP.
     Bmp,
 }
 

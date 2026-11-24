@@ -184,14 +184,17 @@ impl Surface {
         Self { kind, ..self }
     }
 
+    /// `Image.getWidth()`.
     pub fn width(&self) -> u32 {
         self.width
     }
 
+    /// `Image.getHeight()`.
     pub fn height(&self) -> u32 {
         self.height
     }
 
+    /// Whether this is the screen, a mutable or an immutable image.
     pub fn kind(&self) -> SurfaceKind {
         self.kind
     }

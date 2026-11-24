@@ -46,8 +46,11 @@ pub const FONT_INPUT_TEXT: i32 = 1;
 /// most phones drew them alike; MONOSPACE uses DejaVu LGC Sans Mono.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Face {
+    /// `FACE_SYSTEM`.
     System,
+    /// `FACE_MONOSPACE`.
     Monospace,
+    /// `FACE_PROPORTIONAL`.
     Proportional,
 }
 
@@ -62,6 +65,7 @@ impl Face {
         }
     }
 
+    /// The `Font.FACE_*` value, as `Font.getFace()` returns it.
     pub fn to_midp(self) -> i32 {
         match self {
             Self::System => FACE_SYSTEM,
@@ -74,8 +78,11 @@ impl Face {
 /// A font size, whose pixel height comes from the phone's [`FontSizes`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Size {
+    /// `SIZE_SMALL`.
     Small,
+    /// `SIZE_MEDIUM`, the default.
     Medium,
+    /// `SIZE_LARGE`.
     Large,
 }
 
@@ -90,6 +97,7 @@ impl Size {
         }
     }
 
+    /// The `Font.SIZE_*` value, as `Font.getSize()` returns it.
     pub fn to_midp(self) -> i32 {
         match self {
             Self::Small => SIZE_SMALL,
@@ -113,9 +121,13 @@ impl Size {
 pub struct Style(u8);
 
 impl Style {
+    /// `STYLE_PLAIN`: no bits.
     pub const PLAIN: Style = Style(0);
+    /// `STYLE_BOLD`.
     pub const BOLD: Style = Style(STYLE_BOLD as u8);
+    /// `STYLE_ITALIC`.
     pub const ITALIC: Style = Style(STYLE_ITALIC as u8);
+    /// `STYLE_UNDERLINED`.
     pub const UNDERLINED: Style = Style(STYLE_UNDERLINED as u8);
 
     /// The style for a `Font.STYLE_*` combination. Other bits are the
@@ -127,6 +139,7 @@ impl Style {
         Ok(Self(value as u8))
     }
 
+    /// The `Font.STYLE_*` bits, as `Font.getStyle()` returns them.
     pub fn to_midp(self) -> i32 {
         self.0.into()
     }
@@ -137,14 +150,17 @@ impl Style {
         Style(self.0 | other.0)
     }
 
+    /// Whether `STYLE_BOLD` is set.
     pub fn is_bold(self) -> bool {
         self.0 & Self::BOLD.0 != 0
     }
 
+    /// Whether `STYLE_ITALIC` is set.
     pub fn is_italic(self) -> bool {
         self.0 & Self::ITALIC.0 != 0
     }
 
+    /// Whether `STYLE_UNDERLINED` is set.
     pub fn is_underlined(self) -> bool {
         self.0 & Self::UNDERLINED.0 != 0
     }
@@ -171,6 +187,7 @@ pub struct FontLibrary {
 }
 
 impl FontLibrary {
+    /// The fonts of a phone with `sizes`, drawn with `rendering`.
     pub fn new(sizes: FontSizes, rendering: TextRendering) -> Self {
         Self {
             sizes,
@@ -179,10 +196,12 @@ impl FontLibrary {
         }
     }
 
+    /// The pixel heights of the three sizes.
     pub fn sizes(&self) -> FontSizes {
         self.sizes
     }
 
+    /// How this library's fonts draw glyph edges.
     pub fn rendering(&self) -> TextRendering {
         self.rendering
     }
@@ -210,6 +229,7 @@ impl FontLibrary {
         self.font(Face::System, Style::PLAIN, Size::Medium)
     }
 
+    /// The font for checked arguments, the same one each time.
     pub fn font(&self, face: Face, style: Style, size: Size) -> Font {
         let slot = (face as usize * 8 + usize::from(style.0)) * 3 + size as usize;
         self.fonts[slot]
@@ -254,14 +274,17 @@ struct FontInner {
 pub struct Font(Arc<FontInner>);
 
 impl Font {
+    /// `Font.getFace()`, as an enum.
     pub fn face(&self) -> Face {
         self.0.face
     }
 
+    /// `Font.getStyle()`, as bits.
     pub fn style(&self) -> Style {
         self.0.style
     }
 
+    /// `Font.getSize()`, as an enum.
     pub fn size(&self) -> Size {
         self.0.size
     }
@@ -286,6 +309,7 @@ impl Font {
         self.0.style.is_underlined()
     }
 
+    /// How the font draws glyph edges.
     pub fn rendering(&self) -> TextRendering {
         self.0.rendering
     }

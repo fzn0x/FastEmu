@@ -29,6 +29,7 @@ pub const DOTTED: i32 = 1;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum StrokeStyle {
     #[default]
+    /// Every pixel of the outline.
     Solid,
     /// Every other pixel along the outline, starting with the first.
     Dotted,
@@ -107,6 +108,7 @@ impl Graphics {
         self.anchors
     }
 
+    /// Chooses how anchors are checked.
     pub fn set_anchor_policy(&mut self, policy: AnchorPolicy) {
         self.anchors = policy;
     }
@@ -123,10 +125,12 @@ impl Graphics {
         self.translate_y = self.translate_y.wrapping_add(y);
     }
 
+    /// `getTranslateX()`.
     pub fn translate_x(&self) -> i32 {
         self.translate_x
     }
 
+    /// `getTranslateY()`.
     pub fn translate_y(&self) -> i32 {
         self.translate_y
     }
@@ -167,10 +171,12 @@ impl Graphics {
         (self.clip.y0 - i64::from(self.translate_y)) as i32
     }
 
+    /// `getClipWidth()`.
     pub fn clip_width(&self) -> i32 {
         (self.clip.x1 - self.clip.x0) as i32
     }
 
+    /// `getClipHeight()`.
     pub fn clip_height(&self) -> i32 {
         (self.clip.y1 - self.clip.y0) as i32
     }
@@ -203,14 +209,17 @@ impl Graphics {
         self.color
     }
 
+    /// `getRedComponent()`.
     pub fn red_component(&self) -> i32 {
         ((self.color >> 16) & 0xFF) as i32
     }
 
+    /// `getGreenComponent()`.
     pub fn green_component(&self) -> i32 {
         ((self.color >> 8) & 0xFF) as i32
     }
 
+    /// `getBlueComponent()`.
     pub fn blue_component(&self) -> i32 {
         (self.color & 0xFF) as i32
     }
