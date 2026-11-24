@@ -80,6 +80,7 @@ impl FastEmuView {
             .unwrap_or_else(|| self.settings.default_profile.clone());
         let mut request = LaunchRequest::new(e.path.clone(), self.paths.game_dir(entry, slot));
         request.profile = profile_by_id(&profile);
+        request.profile.touch |= e.settings.touch;
         request.settings = e.settings.instance_settings();
         request.notify = Some(self.wake.callback());
         Some(request)

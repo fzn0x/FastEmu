@@ -1054,6 +1054,7 @@ fn game_settings_apply_to_the_next_start(cx: &mut TestAppContext) {
         v.update_game_settings(id, cx, |s| {
             s.profile = Some("nokia-s40-128x160".into());
             s.network = true;
+            s.touch = true;
             "windows-1251".clone_into(&mut s.encoding);
             s.step_volume(-0.5);
         });
@@ -1061,6 +1062,10 @@ fn game_settings_apply_to_the_next_start(cx: &mut TestAppContext) {
     h.launch_first();
     let request = h.launcher.request(0);
     assert_eq!(request.profile.screen_width, 128);
+    assert!(
+        request.profile.touch,
+        "the touch switch gives a keypad phone a touch screen"
+    );
     assert_eq!(request.settings.encoding, "windows-1251");
     assert_eq!(request.settings.network, fastemu_core::NetworkPolicy::Allow);
     assert!((request.settings.volume - 0.5).abs() < 1e-6);

@@ -66,6 +66,9 @@ pub struct GameSettings {
     pub network: bool,
     /// The `microedition.encoding` the game sees.
     pub encoding: String,
+    /// Gives the phone a touch screen whatever its profile, for games
+    /// played by touch on a screen size no touch profile has.
+    pub touch: bool,
 }
 
 impl Default for GameSettings {
@@ -76,6 +79,7 @@ impl Default for GameSettings {
             volume: base.volume,
             network: base.network == NetworkPolicy::Allow,
             encoding: base.encoding,
+            touch: false,
         }
     }
 }
@@ -147,6 +151,10 @@ mod tests {
             serde_json::from_str(r#"{"volume":0.5,"future":true}"#).expect("parses");
         assert!((s.volume - 0.5).abs() < f32::EPSILON);
         assert_eq!(s.encoding, "ISO-8859-1");
+        assert!(
+            !s.touch,
+            "settings saved before the touch switch keep it off"
+        );
     }
 
     #[test]
@@ -156,6 +164,7 @@ mod tests {
             volume: 1.5,
             network: true,
             encoding: "windows-1251".into(),
+            touch: false,
         };
         let s = game.instance_settings();
         assert_eq!(s.network, NetworkPolicy::Allow);

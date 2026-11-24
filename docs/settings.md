@@ -30,9 +30,10 @@ Each game in the library keeps its own:
 | Allow network access | Whether the game may open connections | Off |
 | Text encoding | The game's `microedition.encoding` | ISO-8859-1 |
 | Phone | A phone profile, or the app's default phone | The app's default |
+| Touch screen | Gives the phone a touch screen, whatever its profile | Off |
 
-The volume changes at once. The phone, the network and the encoding apply
-when the game starts again: use **Restart** on its tile.
+The volume changes at once. The phone, the touch screen, the network and
+the encoding apply when the game starts again: use **Restart** on its tile.
 
 ## Phone profiles
 
@@ -56,9 +57,12 @@ FastEmu ships these profiles:
 
 If a game looks too small or too large, try a profile that matches the
 screen size it was made for. The game's name or its download page often
-says which phone it targets. Games that are played by touch need the touch
-profile: on the others, clicks and taps on the screen do not reach the
-game. The ids are what `fastemu run --profile` takes.
+says which phone it targets. Games that are played by touch need a touch
+screen: on the others, clicks and taps on the screen do not reach the
+game. Pick the touch profile, or turn on **Touch screen** in the game's
+settings to keep another screen size, as a 320x240 touch game needs. The
+ids are what `fastemu run --profile` takes; `--touch` adds the touch
+screen there.
 
 ## Vendor key codes
 

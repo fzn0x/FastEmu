@@ -485,9 +485,19 @@ impl FastEmuView {
                         });
                     },
                 ))
+                .child(setting_row(
+                    "Touch screen",
+                    Some("For games played by touch on a phone without one".into()),
+                    switch("touch-switch", settings.touch, &theme).on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            this.update_game_settings(id, cx, |s| s.touch = !s.touch);
+                        },
+                    )),
+                    &theme,
+                ))
                 .child(div().pt(px(12.0)).text_xs().text_color(theme.muted).child(
-                    "Phone, network and encoding apply when the game starts again; \
-                             volume applies at once.",
+                    "Phone, touch, network and encoding apply when the game starts \
+                     again; volume applies at once.",
                 )),
         )
     }
