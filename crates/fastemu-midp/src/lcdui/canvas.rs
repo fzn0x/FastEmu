@@ -107,7 +107,6 @@ fn service_repaints(ctx: &mut Ctx<'_>, canvas: ObjRef) -> JResult<()> {
             None => Ok(()),
         };
     }
-    frame::wait_for_slot(ctx)?;
     let locked = acquire(ctx, Some(SERVICE_TIMEOUT))?;
     if !locked {
         warn_once(

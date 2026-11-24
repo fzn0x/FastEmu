@@ -157,9 +157,11 @@ of games that re-post from `run`); `null` is ignored.
   count presented frames from 1.
 - **Frame rate.** `InstanceSettings::max_fps`, 60 when unset
   (`lcdui::state::DEFAULT_MAX_FPS`), `Some(0)` for no bound. Game threads
-  wait for the next frame slot in `repaint` (when no paint is pending),
-  `serviceRepaints` and flushes; the event thread defers its paint
-  instead (`docs/compat/notes/05-timing.md`).
+  wait in `repaint` (when no paint is pending) and in flushes until one
+  frame period has passed since the previous such call, as J2ME Loader
+  paces them; spacing the calls rather than waiting on the last frame
+  keeps a loop that sleeps a little each frame at the full rate. The event
+  thread defers its paint instead (`docs/compat/notes/05-timing.md`).
 - **Notifications.** `HostLink` calls the app's `Notify` on a new frame,
   status or log line, once until the app reads the frame, the status or
   the log again.

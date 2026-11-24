@@ -7,7 +7,7 @@ use std::time::Instant;
 use fastemu_core::Frame;
 use fastemu_gfx::anchor::{HCENTER, LEFT, RIGHT, TOP};
 use fastemu_gfx::{Font, Graphics, Surface};
-use fastemu_jvm::{Ctx, JResult, ObjRef, Wake};
+use fastemu_jvm::{Ctx, JResult, ObjRef};
 
 use super::canvas::buffer;
 use super::displayable::{self, Layout};
@@ -198,22 +198,32 @@ fn draw_menu(
     }
 }
 
-/// Waits until the next frame may be presented, so games that loop on
-/// `repaint`, `serviceRepaints` or `flushGraphics` run at the instance's
-/// frame rate. Only game threads wait; the event thread defers its paints
-/// instead. An interrupt ends the wait early and stays set for the game.
+/// Holds a game thread to the instance's frame rate: waits until one frame
+/// period has passed since the previous paced call, as J2ME Loader paces
+/// `repaint` and `flushGraphics`. Spacing the calls themselves, rather than
+/// waiting on the last presented frame, keeps a loop that sleeps a little
+/// each frame at the full rate instead of every other slot. Only game
+/// threads wait; the event thread defers its paints instead. An interrupt
+/// ends the wait early and stays set for the game.
 pub(crate) fn wait_for_slot(ctx: &mut Ctx<'_>) -> JResult<()> {
-    loop {
-        let Some(at) = state(ctx).next_frame_at() else {
-            return Ok(());
-        };
-        if Instant::now() >= at {
-            return Ok(());
-        }
-        match ctx.wait_until(Some(at))? {
-            Wake::Paused => ctx.yield_now()?,
-            Wake::Interrupted => return Ok(()),
-            Wake::Notified | Wake::TimedOut => {}
-        }
+    let st = state(ctx);
+    if let Some(at) = st.last_paced.zip(st.frame_period).map(|(t, p)| t + p) {
+        sleep_until(ctx, at)?;
     }
+    state(ctx).last_paced = Some(Instant::now());
+    Ok(())
+}
+
+/// Sleeps until `at` with the VM lock released, then passes a safepoint
+/// so a stop or pause that came meanwhile takes effect. For waits of at
+/// most a frame or so: the thread sees no notification while it sleeps.
+/// `std::thread::sleep` uses a high-resolution timer where the system has
+/// one, while timed waits on the VM's condition variable wake on the
+/// system tick (15.6 ms on Windows), which would cost every other frame.
+pub(crate) fn sleep_until(ctx: &mut Ctx<'_>, at: Instant) -> JResult<()> {
+    let now = Instant::now();
+    if at > now {
+        ctx.without_lock(|| std::thread::sleep(at - now));
+    }
+    ctx.yield_now()
 }

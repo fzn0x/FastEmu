@@ -29,6 +29,9 @@ use super::state::{Internal, Rect, current, report, state};
 pub(crate) const FIRST_REPEAT: Duration = Duration::from_millis(400);
 /// How often a held key repeats after that.
 pub(crate) const REPEAT_PERIOD: Duration = Duration::from_millis(120);
+/// The longest wait for a deferred paint done with a precise sleep, which
+/// sees no new input until it ends.
+const PRECISE_WAIT: Duration = Duration::from_millis(20);
 
 /// The body of the event thread. Runs until the VM stops.
 pub fn run(ctx: &mut Ctx<'_>) -> JResult<()> {
@@ -63,6 +66,18 @@ fn pass(ctx: &mut Ctx<'_>) -> JResult<()> {
         return Ok(());
     }
     let deadline = next_deadline(ctx);
+    // A deferred paint due within a frame or so is waited for with a
+    // precise sleep; timed waits on the VM's condition variable can wake a
+    // whole system tick late and halve the frame rate.
+    let paint_at = {
+        let st = state(ctx);
+        st.dirty.and(st.next_frame_at())
+    };
+    if let Some(at) = paint_at.filter(|&at| Some(at) == deadline)
+        && at.saturating_duration_since(Instant::now()) <= PRECISE_WAIT
+    {
+        return super::frame::sleep_until(ctx, at);
+    }
     match ctx.wait_until(deadline)? {
         Wake::Paused => ctx.yield_now()?,
         Wake::Interrupted => {

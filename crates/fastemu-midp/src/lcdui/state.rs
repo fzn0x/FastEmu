@@ -147,6 +147,8 @@ pub(crate) struct LcduiState {
     pub last_pointer: (i32, i32),
     pub frame_serial: u64,
     pub last_present: Option<Instant>,
+    /// When a game thread last passed the frame rate check.
+    pub last_paced: Option<Instant>,
     /// The shortest time between two presented frames.
     pub frame_period: Option<Duration>,
     /// The screen the frame is composed on when it needs more than the
@@ -190,6 +192,7 @@ impl LcduiState {
             last_pointer: (0, 0),
             frame_serial: 0,
             last_present: None,
+            last_paced: None,
             frame_period: (fps > 0).then(|| Duration::from_secs(1) / fps),
             composed: None,
             warned: Vec::new(),
@@ -197,9 +200,13 @@ impl LcduiState {
         }
     }
 
-    /// When the next frame may be presented, if not now.
+    /// When the event thread may paint the next frame, if not now: a
+    /// frame period after the last one, less a quarter period of slack, so
+    /// a game that paces its own repaints at the frame rate is painted at
+    /// once and not a whole slot late for arriving a moment early.
     pub fn next_frame_at(&self) -> Option<Instant> {
-        Some(self.last_present? + self.frame_period?)
+        let period = self.frame_period?;
+        Some(self.last_present? + period * 3 / 4)
     }
 }
 
