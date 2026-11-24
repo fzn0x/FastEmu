@@ -1,0 +1,18 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.sf2 binary
+*.jar binary
+*.class binary
+*.mid binary
+*.wav binary
+
+# cmd reads batch files best with CRLF, such as the Android project's gradlew.bat
+*.bat text eol=crlf
+*.ps1 text eol=crlf

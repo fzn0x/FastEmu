@@ -1,0 +1,30 @@
+# Rust build output
+/target/
+
+# Android: Gradle state and outputs, the native libraries cargo-ndk stages,
+# and machine-only settings such as the SDK path and signing secrets
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/app/src/main/jniLibs/
+/android/local.properties
+/android/app/signing.properties
+*.keystore
+*.jks
+*.p12
+
+# Documentation site build output and what wrangler keeps beside its config
+/site/public/
+.wrangler/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local environment
+.env
+.env.*
+!.env.example
