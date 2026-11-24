@@ -867,4 +867,10 @@ What natives and games can rely on:
 - `tests/timing.rs` measures how late sleeps and timed waits wake (run
   it with `--nocapture`) and how quickly an interrupt or a stop ends
   them.
-- `tests/bench.rs` is the benchmark.
+- `tests/heap_limits.rs` runs the programs in `tests/heap_java/` on a
+  256 KiB heap. Each fills memory through natives (`String.concat`,
+  `StringBuffer.append`, kept exceptions, resource streams, arrays,
+  interned strings, thread names) and must end in `OutOfMemoryError`
+  within a few times the heap, in the thread that ran the native.
+- `tests/bench.rs` is the benchmark: a plain loop, static calls and
+  `StringBuffer.append`.
