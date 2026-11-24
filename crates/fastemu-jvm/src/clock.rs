@@ -205,10 +205,20 @@ mod tests {
     #[test]
     fn instants_line_up_with_the_run_time() {
         let clock = clock();
+        let ahead = Duration::from_millis(50);
+        let before = Instant::now();
         let now = clock.elapsed();
-        let soon = clock.instant_at(now + Duration::from_millis(50)).unwrap();
-        let wait = soon.saturating_duration_since(Instant::now());
-        assert!(wait > Duration::from_millis(40) && wait <= Duration::from_millis(50));
+        let after = Instant::now();
+        let soon = clock.instant_at(now + ahead).unwrap();
+        // The run time moves with host time while not paused, so the run
+        // time 50 ms after `now` comes 50 ms after `now` was read, which
+        // was between `before` and `after`. This holds however late the
+        // thread runs; a "how long from now" check would not.
+        assert!(
+            before + ahead <= soon && soon <= after + ahead,
+            "{:?} after the read",
+            soon.saturating_duration_since(before)
+        );
         let past = clock.instant_at(Duration::ZERO).unwrap();
         assert!(past <= Instant::now());
         assert_eq!(clock.instant_at(Duration::MAX), None);
