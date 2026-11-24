@@ -226,7 +226,7 @@ as a tracker report; it follows from the class-probe pattern above]
   Ratatouille), `compatoverrideplatchecks` (on by default),
   `compatsiemensfriendlydrawing`, `compatignorevolumechanges`,
   `compatnotranslatedrawrgb` (Peggle, Sony Ericsson versions),
-  `compatmcv3horizfovfix` (a `System.gc` setting existed for two weeks
+  `compatmcv3horizfovfix` (a `System.gc` setting existed for ten days
   and was removed, see [timing](05-timing.md#systemgc));
 - M3G quality settings (anti-aliasing, bilinear filtering, dithering,
   perspective correction, mipmaps, fog);

@@ -107,14 +107,15 @@ measure before adding that.
 
 freej2me-plus's history with `System.gc()`:
 
-1. It made every call a no-op because games such as Bomberman 08 call it
-   so often that they stutter
+1. It made every call a no-op because some games call it between
+   frames so often that they stutter (the next commit names Bomberman
+   08)
    ([commit 9d7810d](https://github.com/TASEmulators/freej2me-plus/commit/9d7810d)).
 2. Gradius Neo then ran too fast: it "uses System.gc ... calls to help
    with timing and synchronization", so ignoring them became a per-game
    setting ([issue 90](https://github.com/TASEmulators/freej2me-plus/issues/90),
    [commit 3367186](https://github.com/TASEmulators/freej2me-plus/commit/3367186)).
-3. Two weeks later the setting was removed again, "since the instances
+3. Ten days later the setting was removed again, "since the instances
    where it caused issues have been fixed"
    ([commit a298580](https://github.com/TASEmulators/freej2me-plus/commit/a298580)).
    Today every `System.gc()` in a game is a no-op
