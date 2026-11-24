@@ -256,20 +256,28 @@ fn relayout(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<()> {
 /// to the shown displayable and dropping held keys, or back to the
 /// foreground with `showNotify` and a full repaint. Runs on the event
 /// thread; the instance posts it when the app pauses and resumes.
+///
+/// Input still queued when the instance goes to the background was sent
+/// before the pause, so it reaches the game first. The apps let go of
+/// every key just before they pause: dropping those releases would leave
+/// the keys held in the game.
 pub fn set_visible(ctx: &mut Ctx<'_>, visible: bool) -> JResult<()> {
     let was_background = state(ctx).background;
     if was_background != visible {
         return Ok(());
     }
-    let shown = current(ctx);
     if visible {
         state(ctx).background = false;
-        if let Some(obj) = shown {
+        if let Some(obj) = current(ctx) {
             notify(ctx, obj, true)?;
             mark_all_dirty(ctx, obj)?;
         }
     } else {
-        if let Some(obj) = shown {
+        let inputs: Vec<_> = state(ctx).inputs.drain(..).collect();
+        for event in inputs {
+            input::dispatch(ctx, event)?;
+        }
+        if let Some(obj) = current(ctx) {
             notify(ctx, obj, false)?;
         }
         reset_input(ctx);
