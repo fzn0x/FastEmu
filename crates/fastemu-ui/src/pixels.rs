@@ -61,10 +61,17 @@ pub fn icon_bgra(png: &[u8], min_side: u32) -> Option<Bgra> {
     );
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().ok()?;
+    // The decoder's limits do not cover the frame buffer, which is ours:
+    // check the size the header claims before allocating for it, or a
+    // crafted icon could ask for gigabytes.
+    let header = reader.info();
+    if !usable_icon_size(header.width, header.height) {
+        return None;
+    }
     let mut buf = vec![0; reader.output_buffer_size()?];
     let info = reader.next_frame(&mut buf).ok()?;
     let (w, h) = (info.width, info.height);
-    if w == 0 || h == 0 || w > MAX_ICON_SIDE || h > MAX_ICON_SIDE {
+    if !usable_icon_size(w, h) {
         return None;
     }
     let channels = match info.color_type {
@@ -90,6 +97,10 @@ pub fn icon_bgra(png: &[u8], min_side: u32) -> Option<Bgra> {
         .collect();
     let factor = min_side.div_ceil(w.max(h)).max(1);
     Some(screen_bgra(&Frame::new(w, h, pixels.into(), 0), factor))
+}
+
+fn usable_icon_size(width: u32, height: u32) -> bool {
+    (1..=MAX_ICON_SIDE).contains(&width) && (1..=MAX_ICON_SIDE).contains(&height)
 }
 
 /// Encodes `frame` as an RGBA PNG at its own size.
@@ -138,6 +149,44 @@ mod tests {
         assert_eq!(&icon.bytes[..4], &[0, 0, 0xFF, 0xFF]);
         // The right half is half-transparent green.
         assert_eq!(&icon.bytes[16..20], &[0, 0xFF, 0, 0x80]);
+    }
+
+    /// The CRC-32 a PNG chunk ends with.
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for &b in bytes {
+            crc ^= u32::from(b);
+            for _ in 0..8 {
+                crc = if crc & 1 == 1 {
+                    (crc >> 1) ^ 0xEDB8_8320
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        !crc
+    }
+
+    /// A valid one-pixel PNG whose header claims `width` by `height`.
+    fn png_claiming(width: u32, height: u32) -> Vec<u8> {
+        let mut png = encode_png(&Frame::filled(1, 1, 0xFF00_0000, 0)).expect("encodes");
+        // Signature (8), IHDR length (4), then "IHDR" and its 13 bytes.
+        png[16..20].copy_from_slice(&width.to_be_bytes());
+        png[20..24].copy_from_slice(&height.to_be_bytes());
+        let crc = crc32(&png[12..29]);
+        png[29..33].copy_from_slice(&crc.to_be_bytes());
+        png
+    }
+
+    #[test]
+    fn oversized_icons_are_refused_before_decoding() {
+        assert!(
+            icon_bgra(&png_claiming(1, 1), 8).is_some(),
+            "the patch is valid"
+        );
+        // 100000 x 100000 RGBA would need a 40 GB buffer.
+        assert!(icon_bgra(&png_claiming(100_000, 100_000), 8).is_none());
+        assert!(icon_bgra(&png_claiming(MAX_ICON_SIDE + 1, 1), 8).is_none());
     }
 
     #[test]
