@@ -10,3 +10,6 @@ pub mod keymap;
 pub mod keypad;
 pub mod screen;
 pub mod session;
+
+#[cfg(target_os = "android")]
+mod android;
