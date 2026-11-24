@@ -17,7 +17,9 @@ import javax.microedition.rms.RecordStore;
  * and its own id, so a test can tell from a frame which input reached
  * which instance. Its id comes from the application property Multi-Id.
  * At its first start it writes the id to a record store; # reads the
- * store back and * plays a sound.
+ * store back and * plays a sound. Its game loop says when it stood still,
+ * so a test can tell that a pause stopped its threads, not only its
+ * frames.
  */
 public class Multi extends MIDlet implements Runnable, PlayerListener {
     private final Board board = new Board();
@@ -50,8 +52,13 @@ public class Multi extends MIDlet implements Runnable, PlayerListener {
         System.out.println("destroyApp " + id);
     }
 
-    /** The game loop: a repaint every 10 ms. */
+    /**
+     * The game loop: a repaint every 10 ms. A pass that comes 100 ms or
+     * more after the one before says how long the loop stood still, as it
+     * does while the instance is paused.
+     */
     public void run() {
+        long last = System.currentTimeMillis();
         while (running) {
             board.repaint();
             try {
@@ -59,6 +66,11 @@ public class Multi extends MIDlet implements Runnable, PlayerListener {
             } catch (InterruptedException e) {
                 return;
             }
+            long now = System.currentTimeMillis();
+            if (now - last >= 100) {
+                System.out.println("stood still " + id + " for " + (now - last));
+            }
+            last = now;
         }
     }
 

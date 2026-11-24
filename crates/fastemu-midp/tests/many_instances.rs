@@ -206,6 +206,18 @@ impl Game {
         self.lines().iter().filter(|l| *l == line).count()
     }
 
+    /// The longest the MIDlet's game loop said it stood still, in its log
+    /// lines from line `from` on.
+    fn stood_still(&mut self, from: usize) -> Duration {
+        let prefix = format!("stood still {} for ", self.id);
+        let longest = self.lines()[from..]
+            .iter()
+            .filter_map(|l| l.strip_prefix(&prefix)?.parse().ok())
+            .max()
+            .unwrap_or(0);
+        Duration::from_millis(longest)
+    }
+
     fn tap(&self, key: Key) {
         for action in [KeyAction::Press, KeyAction::Release] {
             self.instance().send(InputEvent::Key { key, action });
@@ -325,6 +337,8 @@ fn side_by_side(jar: &Path, root: &Path) {
     wait_until("instance 3 pauses", &mut games, |games| {
         games[PAUSED].host.status() == InstanceStatus::Paused
     });
+    let paused_at = Instant::now();
+    let pause_line = games[PAUSED].lines().len();
     assert!(games[PAUSED].has("pauseApp 3"), "{}", report(&mut games));
     let held = games[PAUSED].serial();
     let marks = serials(&games);
@@ -347,12 +361,23 @@ fn side_by_side(jar: &Path, root: &Path) {
         assert!(!game.has("pauseApp"), "instance {} paused too", game.id);
         assert_eq!(game.host.status(), InstanceStatus::Running);
     }
+    let paused_for = paused_at.elapsed();
     games[PAUSED].instance().resume();
     wait_until("instance 3 runs again", &mut games, |games| {
         games[PAUSED].host.status() == InstanceStatus::Running
             && games[PAUSED].serial() > held
             && games[PAUSED].count("startApp 3") == 2
     });
+    // A hidden canvas presents nothing even while its threads run on, so
+    // the frames above cannot tell a pause that stops nothing. The game
+    // loop stands still from the pause to the resume, longer than the
+    // test saw it paused; half of that leaves room for a loop that ran a
+    // moment past the pause.
+    wait_until(
+        "instance 3's game loop stood still while it was paused",
+        &mut games,
+        |games| games[PAUSED].stood_still(pause_line) >= paused_for / 2,
+    );
 
     // Record stores stay apart: every instance wrote its id at its first
     // start to a store of the same name, and reads back only its own.
