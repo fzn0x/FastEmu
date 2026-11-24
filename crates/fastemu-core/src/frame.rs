@@ -35,9 +35,11 @@ impl Frame {
         }
     }
 
-    /// A frame of one colour, for placeholders and tests.
+    /// A frame of one colour, for placeholders and tests. The pixels are
+    /// written once, into the shared buffer itself.
     pub fn filled(width: u32, height: u32, argb: u32, serial: u64) -> Self {
-        let pixels: Arc<[u32]> = vec![argb; width as usize * height as usize].into();
+        let count = width as usize * height as usize;
+        let pixels: Arc<[u32]> = std::iter::repeat_n(argb, count).collect();
         Self::new(width, height, pixels, serial)
     }
 
