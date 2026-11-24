@@ -71,13 +71,19 @@ pub fn info(ctx: &Ctx<'_>, command: ObjRef) -> JResult<CommandInfo> {
 
 /// Fires `command` on `displayable`, as a soft key or menu choice does:
 /// the screen's own handling first (an `Alert` dismissing itself), then
-/// the listener's `commandAction` on the event thread. An exception the
-/// listener throws is logged.
+/// the listener's `commandAction` on the event thread. Both run as
+/// callbacks, inside the callback lock; an exception either throws is
+/// logged.
 pub fn fire(ctx: &mut Ctx<'_>, displayable: ObjRef, command: ObjRef) -> JResult<()> {
-    if let Some(handler) = displayable::handler(ctx, displayable)?
-        && handler.command(ctx, displayable, command)?
-    {
-        return Ok(());
+    if let Some(handler) = displayable::handler(ctx, displayable)? {
+        let mut handled = false;
+        callback(ctx, "a screen's command", |ctx| {
+            handled = handler.command(ctx, displayable, command)?;
+            Ok(())
+        })?;
+        if handled {
+            return Ok(());
+        }
     }
     let Some(listener) = displayable::data(ctx, displayable)?.listener else {
         return Ok(());
@@ -156,4 +162,73 @@ pub fn classes() -> Vec<NativeClass> {
     let listener =
         NativeClass::interface(LISTENER).abstract_method("commandAction", COMMAND_ACTION);
     vec![command, listener]
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use fastemu_jvm::{MemorySource, Vm, VmConfig};
+
+    use super::*;
+    use crate::env::InstanceEnv;
+    use crate::lcdui::displayable::DisplayableData;
+    use crate::lcdui::screen::{ScreenHandler, ScreenState, ScreenTarget};
+    use crate::lcdui::state::state;
+
+    /// A screen whose command hook throws and checks the callback lock.
+    struct Throws;
+
+    impl ScreenHandler for Throws {
+        fn paint(&self, _: &mut Ctx<'_>, _: ObjRef, _: &mut ScreenTarget<'_>) -> JResult<()> {
+            Ok(())
+        }
+
+        fn command(&self, ctx: &mut Ctx<'_>, _: ObjRef, _: ObjRef) -> JResult<bool> {
+            let me = ctx.thread_id();
+            if state(ctx).callback.holder != Some(me) {
+                return ctx.throw("java/lang/IllegalStateException", "outside the lock");
+            }
+            ctx.throw("java/lang/IllegalStateException", "from the screen")
+        }
+    }
+
+    static THROWS: Throws = Throws;
+
+    struct NoState;
+
+    impl ScreenState for NoState {}
+
+    #[test]
+    fn a_screen_command_runs_as_a_callback() {
+        let env = InstanceEnv::for_tests("unused");
+        let host = env.host.clone();
+        let mut classes = crate::classes();
+        classes.push(
+            NativeClass::new("t/Throwing")
+                .extends("javax/microedition/lcdui/Screen")
+                .payload_with(|| Box::new(DisplayableData::for_screen(&THROWS, NoState)))
+                .method("<init>", "()V", |_, _| Ok(Value::Void)),
+        );
+        let config = VmConfig {
+            log: host.log_sink(),
+            ..VmConfig::default()
+        };
+        let vm = Vm::new(config, Arc::new(MemorySource::new()), classes);
+        let fired = vm.attach("test", move |ctx| {
+            ctx.set_extension(env);
+            let screen = ctx.construct("t/Throwing", "()V", &[])?;
+            let label = ctx.new_string("Go")?;
+            let command = ctx.construct(
+                CLASS,
+                "(Ljava/lang/String;II)V",
+                &[label.into(), Value::Int(SCREEN), Value::Int(1)],
+            )?;
+            fire(ctx, screen, command)
+        });
+        assert!(fired.is_ok(), "the exception escaped the event thread");
+        let log: Vec<String> = host.drain_log().into_iter().map(|l| l.text).collect();
+        assert!(log.iter().any(|l| l.contains("from the screen")), "{log:?}");
+        assert_eq!(host.error_count(), 1);
+    }
 }
