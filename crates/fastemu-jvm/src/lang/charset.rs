@@ -60,18 +60,23 @@ impl Charset {
     }
 
     pub(crate) fn encode(self, chars: &[u16]) -> Vec<u8> {
-        match self {
-            Charset::Utf8 => encode_utf8(chars),
-            Charset::Latin1 => chars
-                .iter()
-                .map(|&c| u8::try_from(c).unwrap_or(b'?'))
-                .collect(),
-            Charset::Ascii => chars
-                .iter()
-                .map(|&c| if c < 0x80 { c as u8 } else { b'?' })
-                .collect(),
-            Charset::Cp1251 => chars.iter().map(|&c| encode_cp1251(c)).collect(),
+        if self == Charset::Utf8 {
+            return encode_utf8(chars);
         }
+        // A surrogate pair is one character, so it becomes one `?`.
+        char::decode_utf16(chars.iter().copied())
+            .map(|c| {
+                let Some(unit) = c.ok().and_then(|c| u16::try_from(u32::from(c)).ok()) else {
+                    return b'?';
+                };
+                match self {
+                    Charset::Latin1 => u8::try_from(unit).unwrap_or(b'?'),
+                    Charset::Ascii if unit < 0x80 => unit as u8,
+                    Charset::Cp1251 => encode_cp1251(unit),
+                    _ => b'?',
+                }
+            })
+            .collect()
     }
 }
 
@@ -164,6 +169,8 @@ mod tests {
             Charset::Latin1.encode(&utf16("\u{e9}\u{20ac}")),
             [0xE9, b'?']
         );
+        assert_eq!(Charset::Ascii.encode(&utf16("a\u{1F600}b")), b"a?b");
+        assert_eq!(Charset::Cp1251.encode(&[0xD800, 0x41]), b"?A");
         assert_eq!(Charset::Ascii.decode(&[0x41, 0xE9]), utf16("A\u{FFFD}"));
     }
 }
