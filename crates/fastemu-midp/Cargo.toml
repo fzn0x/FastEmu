@@ -10,6 +10,10 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
+fastemu-audio.workspace = true
+fastemu-core.workspace = true
+fastemu-gfx.workspace = true
+fastemu-jvm.workspace = true
 
 [lints]
 workspace = true

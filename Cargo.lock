@@ -1807,6 +1807,12 @@ dependencies = [
 [[package]]
 name = "fastemu-midp"
 version = "0.1.0"
+dependencies = [
+ "fastemu-audio",
+ "fastemu-core",
+ "fastemu-gfx",
+ "fastemu-jvm",
+]
 
 [[package]]
 name = "fastemu-ui"
