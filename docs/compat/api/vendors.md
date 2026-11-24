@@ -1157,8 +1157,8 @@ A tile grid with sprites, like `TiledLayer` and `LayerManager` together.
 
 | T | Method | Descriptor | Flags | Throws | Notes |
 |---|---|---|---|---|---|
-| 3 | `void addSprite(Sprite s)` | `addSprite(Ljavax/microedition/lcdui/game/Sprite;)V` |  | `NullPointerException` if s is null |  |
-| 3 | `void removeSprite(Sprite s)` | `removeSprite(Ljavax/microedition/lcdui/game/Sprite;)V` |  | `NullPointerException` if s is null; `RuntimeException` if Sprite s is not associated with the PlayField |  |
+| 3 | `void addSprite(Sprite s)` | `addSprite(Lcom/motorola/game/Sprite;)V` |  | `NullPointerException` if s is null |  |
+| 3 | `void removeSprite(Sprite s)` | `removeSprite(Lcom/motorola/game/Sprite;)V` |  | `NullPointerException` if s is null; `RuntimeException` if Sprite s is not associated with the PlayField |  |
 | 3 | `void removeAllSprites()` | `removeAllSprites()V` |  |  |  |
 | 3 | `int createAnimatedTile(int staticTileIdx)` | `createAnimatedTile(I)I` |  | `IndexOutOfBoundsException` if there is no static tile with index staticTileIdx |  |
 | 3 | `void setAnimatedTileImage(int animTileIdx, int staticTileIdx)` | `setAnimatedTileImage(II)V` |  | `IndexOutOfBoundsException` if there is no static tile with index staticTileIdx or no animated tile with index animTileIdx |  |
@@ -1173,9 +1173,9 @@ A tile grid with sprites, like `TiledLayer` and `LayerManager` together.
 | 3 | `int getGridWidth()` | `getGridWidth()I` |  |  |  |
 | 3 | `int getGridHeight()` | `getGridHeight()I` |  |  |  |
 | 3 | `boolean anyCollisions()` | `anyCollisions()Z` |  |  |  |
-| 3 | `boolean collidesWithSprites(Sprite s)` | `collidesWithSprites(Ljavax/microedition/lcdui/game/Sprite;)Z` |  | `NullPointerException` if s is null |  |
-| 3 | `boolean collidesWithAnyTile(Sprite s)` | `collidesWithAnyTile(Ljavax/microedition/lcdui/game/Sprite;)Z` |  | `NullPointerException` if s is null |  |
-| 3 | `boolean collidesWithTiles(int col, int row, int width, int height, Sprite s, boolean pixelLevel)` | `collidesWithTiles(IIIILjavax/microedition/lcdui/game/Sprite;Z)Z` |  | `NullPointerException` if s is null; `ArrayIndexOutOfBoundsException` if the rectangular region defined by the parameters extends beyond the bounds of the PlayField grid |  |
+| 3 | `boolean collidesWithSprites(Sprite s)` | `collidesWithSprites(Lcom/motorola/game/Sprite;)Z` |  | `NullPointerException` if s is null |  |
+| 3 | `boolean collidesWithAnyTile(Sprite s)` | `collidesWithAnyTile(Lcom/motorola/game/Sprite;)Z` |  | `NullPointerException` if s is null |  |
+| 3 | `boolean collidesWithTiles(int col, int row, int width, int height, Sprite s, boolean pixelLevel)` | `collidesWithTiles(IIIILcom/motorola/game/Sprite;Z)Z` |  | `NullPointerException` if s is null; `ArrayIndexOutOfBoundsException` if the rectangular region defined by the parameters extends beyond the bounds of the PlayField grid |  |
 | 3 | `void setStaticTileImage(int staticTileIdx, Image img, int x, int y)` | `setStaticTileImage(ILjavax/microedition/lcdui/Image;II)V` |  | `IndexOutOfBoundsException` if there is no static tile with index staticTileIdx or if the rectangular region required for the tile extends beyond the bounds of the Image; `NullPointerException` if img is null |  |
 | 3 | `void setStaticTileSet(Image img, int tWidth, int tHeight)` | `setStaticTileSet(Ljavax/microedition/lcdui/Image;II)V` |  | `NullPointerException` if img is null; `IllegalArgumentException` if tWidth |  |
 | 3 | `void setViewWindow(int x, int y, int width, int height)` | `setViewWindow(IIII)V` |  |  |  |
@@ -1200,7 +1200,7 @@ Tier 3. Javadoc: [Motorola_Gaming_API](https://nikita36078.github.io/J2ME_Docs/d
 |---|---|---|---|---|---|
 | 3 | `(Image img)` | `<init>(Ljavax/microedition/lcdui/Image;)V` |  | `NullPointerException` if img is null |  |
 | 3 | `(Image img, int fWidth, int fHeight)` | `<init>(Ljavax/microedition/lcdui/Image;II)V` |  | `NullPointerException` if img is null; `IllegalArgumentException` if fWidth |  |
-| 3 | `(Sprite s)` | `<init>(Ljavax/microedition/lcdui/game/Sprite;)V` |  | `NullPointerException` if s is null |  |
+| 3 | `(Sprite s)` | `<init>(Lcom/motorola/game/Sprite;)V` |  | `NullPointerException` if s is null |  |
 
 | T | Method | Descriptor | Flags | Throws | Notes |
 |---|---|---|---|---|---|
@@ -1212,7 +1212,7 @@ Tier 3. Javadoc: [Motorola_Gaming_API](https://nikita36078.github.io/J2ME_Docs/d
 | 3 | `int getDepth()` | `getDepth()I` |  |  |  |
 | 3 | `int getHeight()` | `getHeight()I` |  |  |  |
 | 3 | `int getWidth()` | `getWidth()I` |  |  |  |
-| 3 | `boolean collidesWith(Sprite s, boolean pixelLevel)` | `collidesWith(Ljavax/microedition/lcdui/game/Sprite;Z)Z` |  | `NullPointerException` if s is null |  |
+| 3 | `boolean collidesWith(Sprite s, boolean pixelLevel)` | `collidesWith(Lcom/motorola/game/Sprite;Z)Z` |  | `NullPointerException` if s is null |  |
 | 3 | `void setFrame(int f)` | `setFrame(I)V` |  | `ArrayIndexOutOfBoundsException` if f = (getFrameSequence().length) |  |
 | 3 | `int getFrame()` | `getFrame()I` |  |  |  |
 | 3 | `int getNumRawFrames()` | `getNumRawFrames()I` |  |  |  |
