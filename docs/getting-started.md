@@ -61,7 +61,8 @@ fastemu run snake.jar --frames 300 --keys "wait:1500 5" --screenshot snake.png
 It runs the game for 300 frames of its screen (five seconds, at 60 frames a
 second), presses 5 after a second and a half, saves the last picture as a
 PNG and prints what the game logged. It exits with 1 if the game crashes or
-shows nothing. The options:
+shows nothing in its first 30 seconds, and with 2 for a mistake on the
+command line. The options:
 
 | Option | What it does |
 | --- | --- |

@@ -181,9 +181,10 @@ keys. `Ctrl+K` (`Cmd+K`) or the toolbar's keypad button shows or hides the
 keypads.
 
 A click or a touch on a game's screen reaches the game as a pointer press,
-drags and a release, on phone profiles with a touch screen (see
-[Settings](/docs/settings/)). A press still held when another game or
-another window takes the focus is let go.
+drags and a release when its phone has a touch screen: a touch phone
+profile, or any profile with **Touch screen** turned on in the game's
+settings (see [Settings](/docs/settings/)). A press still held when
+another game or another window takes the focus is let go.
 
 The key codes a game sees depend on its phone profile, because phone makers
 used different codes. See [Settings](/docs/settings/).
