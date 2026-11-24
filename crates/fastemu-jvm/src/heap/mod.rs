@@ -69,7 +69,8 @@ impl Body {
         }
     }
 
-    fn bytes(&self) -> usize {
+    /// The bytes the body counts against the heap limit.
+    pub(crate) fn bytes(&self) -> usize {
         match self {
             Body::Fields(f) => f.iter().map(|v| if v.is_wide() { 8 } else { 4 }).sum(),
             Body::Bytes(a) => 4 + a.len(),
@@ -207,6 +208,18 @@ impl Heap {
     #[inline]
     pub(crate) fn would_exceed(&self, bytes: usize) -> bool {
         self.used.saturating_add(bytes) > self.limit
+    }
+
+    /// Whether a native should refuse to make an object of `bytes`: more
+    /// than the whole heap, or more than twice the heap with what is
+    /// counted now. The second bound is twice the limit, not the limit,
+    /// because the count includes garbage not yet collected and a native
+    /// cannot collect (it may hold references the collector cannot see);
+    /// it still keeps one native call from asking for more than about
+    /// three times the heap.
+    #[inline]
+    pub(crate) fn refuses(&self, bytes: usize) -> bool {
+        bytes > self.limit || self.used.saturating_add(bytes) > self.limit.saturating_mul(2)
     }
 
     /// Estimated bytes of an array of `len` elements of `elem_bytes` each.
@@ -624,6 +637,19 @@ mod tests {
             std::mem::size_of::<HeapObject>(),
             std::mem::size_of::<(Body, Option<Box<dyn Payload>>, u64)>()
         );
+    }
+
+    #[test]
+    fn a_native_may_not_ask_for_more_than_the_heap_or_twice_it_with_what_is_counted() {
+        let mut heap = Heap::new(64 * 1024);
+        assert!(!heap.refuses(64 * 1024), "the whole heap is allowed");
+        assert!(heap.refuses(64 * 1024 + 1));
+        assert!(heap.refuses(usize::MAX));
+        sized(&mut heap, 60_000);
+        assert!(!heap.refuses(64 * 1024), "60 KB and 64 KB are under 128 KB");
+        sized(&mut heap, 60_000);
+        assert!(heap.refuses(64 * 1024), "120 KB and 64 KB are over 128 KB");
+        assert!(!heap.refuses(1000));
     }
 
     #[test]

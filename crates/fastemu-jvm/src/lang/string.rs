@@ -22,8 +22,14 @@ pub(crate) struct JString {
 
 impl Payload for JString {
     fn heap_bytes(&self) -> usize {
-        24 + 2 * self.chars.len()
+        string_bytes(self.chars.len())
     }
+}
+
+/// The bytes a string of `chars` UTF-16 units counts against the heap,
+/// beyond the object itself.
+pub(crate) fn string_bytes(chars: usize) -> usize {
+    24usize.saturating_add(chars.saturating_mul(2))
 }
 
 /// Java's `String.hashCode`.

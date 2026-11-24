@@ -197,14 +197,18 @@ impl Ctx<'_> {
         Ok(self.root(obj))
     }
 
-    /// A new `java.lang.String`.
+    /// A new `java.lang.String`. Throws `OutOfMemoryError` when its
+    /// characters would not fit, as [`Ctx::check_alloc`] decides.
     pub fn new_string(&mut self, s: &str) -> JResult<ObjRef> {
-        let obj = lang::string::new_string(&mut self.state, s.encode_utf16().collect());
-        Ok(self.root(obj))
+        self.new_string_utf16(s.encode_utf16().collect())
     }
 
-    /// A new `java.lang.String` from UTF-16 code units.
+    /// A new `java.lang.String` from UTF-16 code units. Throws
+    /// `OutOfMemoryError` when they would not fit, as [`Ctx::check_alloc`]
+    /// decides. A native that builds `chars` from something it can size
+    /// first checks that size before it builds them.
     pub fn new_string_utf16(&mut self, chars: Vec<u16>) -> JResult<ObjRef> {
+        self.check_alloc(lang::string::string_bytes(chars.len()))?;
         let obj = lang::string::new_string(&mut self.state, chars);
         Ok(self.root(obj))
     }
@@ -244,6 +248,31 @@ impl Ctx<'_> {
         }
     }
 
+    /// Throws `OutOfMemoryError` when a native should not make an object
+    /// of `bytes` bytes now: when `bytes` is more than the whole heap, or
+    /// when it and what the heap counts now come to more than twice the
+    /// heap.
+    ///
+    /// Call it before building a large host buffer (a `Vec`, a decoded
+    /// image, a resource) that will become an object's data, so a request
+    /// the heap could never hold fails before the host allocates it.
+    /// `bytes` is what the object will count: its array size, or its
+    /// payload's `heap_bytes`.
+    ///
+    /// The check cannot collect, because a native may hold references the
+    /// collector does not see. The count may therefore include garbage,
+    /// and the bound is twice the limit. A native that stays under it can
+    /// still leave the heap over its limit: the interpreter then collects
+    /// when the native returns, and throws `OutOfMemoryError` into the
+    /// thread that ran it if the live data still does not fit.
+    #[inline]
+    pub fn check_alloc(&mut self, bytes: usize) -> JResult<()> {
+        if self.state.heap.refuses(bytes) {
+            return Err(self.out_of_memory());
+        }
+        Ok(())
+    }
+
     fn check_array_len(&mut self, len: i32, elem_bytes: usize) -> JResult<usize> {
         if len < 0 {
             return Err(self.new_exception(
@@ -251,10 +280,7 @@ impl Ctx<'_> {
                 Some(&len.to_string()),
             ));
         }
-        let bytes = Heap::array_bytes(len as usize, elem_bytes);
-        if bytes > self.state.heap.limit() {
-            return Err(self.out_of_memory());
-        }
+        self.check_alloc(Heap::array_bytes(len as usize, elem_bytes))?;
         Ok(len as usize)
     }
 
@@ -489,7 +515,10 @@ impl Ctx<'_> {
     ///
     /// It is cheap, a few additions, so call it where the size changed,
     /// not on every call; a payload that grows by doubling calls it once
-    /// per doubling.
+    /// per doubling. Checking the new size against the heap before the
+    /// change is [`Ctx::check_alloc`]'s job. The thread that recounted
+    /// gets `OutOfMemoryError` at the next call return if the live data
+    /// no longer fits.
     pub fn recount(&mut self, obj: ObjRef) {
         self.state.heap.recount(obj);
     }

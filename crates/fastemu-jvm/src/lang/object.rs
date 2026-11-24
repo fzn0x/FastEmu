@@ -95,6 +95,8 @@ fn clone(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
             return throw(ctx, "java/lang/CloneNotSupportedException", &name);
         }
     }
+    let bytes = ctx.state.heap.get(obj).body.bytes();
+    ctx.check_alloc(bytes)?;
     let body = match &ctx.state.heap.get(obj).body {
         Body::Fields(f) => Body::Fields(f.clone()),
         other => other.duplicate(),
