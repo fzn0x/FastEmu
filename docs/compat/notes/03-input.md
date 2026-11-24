@@ -13,7 +13,7 @@ define, verified in their source:
 
 | Layout | Up | Down | Left | Right | Fire | Left soft | Right soft | Clear | Send | End | Source |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Nokia (and most others) | -1 | -2 | -3 | -4 | -5 | -6 | -7 | -8 | -10 | -11 | JL, FP, ME |
+| Nokia (and most others) | -1 | -2 | -3 | -4 | -5 | -6 | -7 | -8 (not FP) | -10 | -11 | JL, FP, ME |
 | Sony Ericsson | as Nokia | | | | | | | | | | JL |
 | Siemens | -59 | -60 | -61 | -62 | -26 | -1 | -4 | | | | FP |
 | Siemens (J2ME Loader) | -59 | -60 | -61 | -62 | -5 | -1 | -4 | | | | JL |
@@ -60,8 +60,11 @@ triplets because the two were identical
 ### Nokia
 
 `KeyCodes::NOKIA` (soft -6/-7, arrows -1 to -4, fire -5, clear -8,
-send -10, end -11) matches J2ME Loader, freej2me-plus, MicroEmulator and
-Nokia's own `FullCanvas` constants. **Correct.** The doc comment says
+send -10, end -11) matches J2ME Loader and Nokia's own `FullCanvas`
+constants. freej2me-plus and MicroEmulator agree on every key they
+define: freej2me-plus has no clear key for Nokia, and MicroEmulator's
+default buttons have clear (-8, its backspace) but no send or end; both
+declare -10 and -11 only as `FullCanvas.KEY_SEND` and `KEY_END`. **Correct.** The doc comment says
 Sony Ericsson and Samsung copied these codes. Sony Ericsson: J2ME Loader
 uses the Nokia layout for it. Samsung: none of the emulators has a
 Samsung layout, so the claim is unverified.
@@ -117,7 +120,7 @@ characters; that needs either an override table in `KeyCodes` or
 | `*` | GAME_C | 42 (bug) | 0 | 0 |
 | `#` | GAME_D | 35 (bug) | 0 | 0 |
 | 0 | 0 | 48 (bug) | 0 | 0 |
-| Soft keys | 0 | 0 on Nokia; GAME_A and GAME_B on KDDI, LG and Motorola layouts | 0 | 0 |
+| Soft keys | 0 | 0 on most layouts; GAME_A and GAME_B on the KDDI and BlackBerry 89xx layouts | 0 | 0 |
 | Unknown code | 0 | 0 | 0 | 0 |
 
 Sources: [JL KeyMapper static block](https://github.com/nikita36078/J2ME-Loader/blob/e270ed91e67b5cafc18c1991b92ba5249cf41c50/app/src/main/java/javax/microedition/lcdui/keyboard/KeyMapper.java#L75),
@@ -131,10 +134,16 @@ Notes:
   that compares the result with `Canvas.FIRE` (8) or `GAME_A` (9) is
   unaffected, but any game that switches on the value can misread 48.
   It is a bug to avoid.
-- freej2me-plus maps the soft keys to GAME_A and GAME_B on KDDI, LG and
-  Motorola layouts because "KDDI's documentation specifies that this is
-  what they should return" and a Motorola 176x220 game expects it
-  ([commit 0443389](https://github.com/TASEmulators/freej2me-plus/commit/0443389)). [tracker]
+- freej2me-plus maps the soft keys to GAME_A and GAME_B only on the
+  KDDI and BlackBerry 89xx layouts. [code] A first change did it for
+  every layout because "KDDI's documentation specifies that this is
+  what they should return"
+  and a Motorola 176x220 game seemed to expect it
+  ([commit 0443389](https://github.com/TASEmulators/freej2me-plus/commit/0443389));
+  a fix 32 minutes later removed it again for LG, Motorola and the
+  others: "Only KDDI uses GAME_A and GAME_B for soft keys, Motorola
+  doesn't"
+  ([commit 43c0846](https://github.com/TASEmulators/freej2me-plus/commit/43c0846)). [tracker]
 - J2ME Loader used to throw `IllegalArgumentException` for codes with no
   mapping; it now returns 0 ([commit 4866947d](https://github.com/nikita36078/J2ME-Loader/commit/4866947d)).
   Games call `getGameAction` on every key, soft keys included. [code]

@@ -125,8 +125,9 @@ the note that backs it.
 
 The full reasoning is in the notes; this is the list for the lead.
 
-- `KeyCodes::NOKIA` matches J2ME Loader, freej2me-plus and
-  MicroEmulator. [code]
+- `KeyCodes::NOKIA` matches J2ME Loader. freej2me-plus (no clear key)
+  and MicroEmulator (no send or end button) agree on every key they
+  define. [code]
 - `KeyCodes::SIEMENS`: the soft keys, arrows and fire match
   freej2me-plus. The `clear: -12`, `send: -11` and `end: -12` values
   appear in none of the studied emulators, and clear sharing a code with
