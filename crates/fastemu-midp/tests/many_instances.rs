@@ -550,6 +550,10 @@ struct Outcome {
     status: Option<InstanceStatus>,
     /// The longest an `Instance::send` call took.
     slowest_send: Duration,
+    /// The longest the calls the apps make on every frame took together:
+    /// `frame`, `status`, `wants_text`, `drain_log` and
+    /// `take_link_request`.
+    slowest_poll: Duration,
     /// Whether every thread ended and the virtual machine was freed after
     /// the stop.
     freed: bool,
@@ -611,7 +615,15 @@ fn soak(
                 game.instance.send(event);
                 game.outcome.slowest_send = game.outcome.slowest_send.max(sent.elapsed());
             }
-            let serial = game.instance.frame().map_or(0, |f| f.serial());
+            // What the apps' UI thread asks every instance on every frame.
+            let polled = Instant::now();
+            let frame = game.instance.frame();
+            let _ = game.instance.status();
+            let _ = game.instance.wants_text();
+            let lines = game.instance.drain_log();
+            let _ = game.instance.take_link_request();
+            game.outcome.slowest_poll = game.outcome.slowest_poll.max(polled.elapsed());
+            let serial = frame.map_or(0, |f| f.serial());
             if elapsed >= WARMUP && game.warm.is_none() {
                 game.warm = Some(serial);
             }
@@ -619,7 +631,7 @@ fn soak(
                 game.outcome.window_frames = serial - game.warm.unwrap_or(serial);
             }
             game.outcome.frames = serial;
-            for line in game.instance.drain_log() {
+            for line in lines {
                 if line.level == LogLevel::Err && game.outcome.error_lines.len() < 3 {
                     game.outcome.error_lines.push(line.text);
                 }
@@ -795,7 +807,7 @@ fn soak_real_games() {
 
     let span = solo.saturating_sub(WARMUP).as_secs_f64();
     println!(
-        "\n{:<24} {:>7} {:>8} {:>9} {:>8} {:>6} {:>8} {:>7} {:>9} {:>6}  status",
+        "\n{:<24} {:>7} {:>8} {:>9} {:>8} {:>6} {:>8} {:>7} {:>9} {:>9} {:>6}  status",
         "game",
         "frames",
         "fps all",
@@ -805,6 +817,7 @@ fn soak_real_games() {
         "cpu solo",
         "errors",
         "send max",
+        "poll max",
         "freed"
     );
     for ((with, solo_run), cpu) in together.iter().zip(&alone).zip(&solo_cpu) {
@@ -816,7 +829,7 @@ fn soak_real_games() {
             f64::NAN
         };
         println!(
-            "{:<24} {:>7} {:>8.1} {:>9.1} {:>8.1} {:>6.2} {:>8} {:>7} {:>9} {:>6}  {:?}",
+            "{:<24} {:>7} {:>8.1} {:>9.1} {:>8.1} {:>6.2} {:>8} {:>7} {:>9} {:>9} {:>6}  {:?}",
             with.name,
             with.frames,
             with.frames as f64 / length.as_secs_f64(),
@@ -826,6 +839,7 @@ fn soak_real_games() {
             cpu,
             with.errors,
             format!("{:.1?}", with.slowest_send),
+            format!("{:.1?}", with.slowest_poll),
             with.freed && solo_run.freed,
             with.status.as_ref().unwrap_or(&InstanceStatus::Starting),
         );
@@ -833,11 +847,15 @@ fn soak_real_games() {
             println!("    {line}");
         }
     }
+    let slowest = |of: fn(&Outcome) -> Duration| together.iter().map(of).max().unwrap_or_default();
     println!(
-        "\ntogether: cpu {}, peak memory {}, memory after they stopped {}",
+        "\ntogether: cpu {}, peak memory {}, memory after they stopped {}, \
+         slowest send {:.1?}, slowest poll {:.1?}",
         cpu_share(before, after, length),
         after.map_or("n/a".to_owned(), |u| mib(u.peak_bytes)),
         after.map_or("n/a".to_owned(), |u| mib(u.now_bytes)),
+        slowest(|o| o.slowest_send),
+        slowest(|o| o.slowest_poll),
     );
     for outcome in together.iter().chain(&alone) {
         assert!(

@@ -171,10 +171,14 @@ is the length of the run side by side, 60 by default. For each game it
 prints the frames presented, the frame rate over the whole run, the frame
 rate from 3 s to the end of the solo window side by side and alone with
 their ratio, the CPU time per second alone, the errors, the slowest
-`Instance::send`, whether every thread ended and the virtual machine was
-freed, and the final status. Then it prints the CPU time per second and
-the peak memory of the run side by side, on Linux and Windows. A ratio
-well under 1 means the game slows down when others run. Run it on an
+`Instance::send`, the slowest poll (the calls the apps make on every
+frame: `frame`, `status`, `wants_text`, `drain_log` and
+`take_link_request`), whether every thread ended and the virtual machine
+was freed, and the final status. Then it prints the CPU time per second
+and the peak memory of the run side by side, on Linux and Windows, and
+the slowest send and poll of any game. A ratio well under 1 means the
+game slows down when others run. A slow send or poll means the app's
+window waited on a game. Run it on an
 otherwise idle machine: other work that starts or stops between the two
 runs moves the ratios too.
 
