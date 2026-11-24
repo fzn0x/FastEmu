@@ -1,0 +1,94 @@
+name: Site
+
+# Pull requests build and check the site. Pushes to main build it and deploy
+# it to Cloudflare with wrangler. The deploy needs two repository secrets:
+# CLOUDFLARE_API_TOKEN (a token that can edit Workers) and
+# CLOUDFLARE_ACCOUNT_ID.
+
+on:
+  pull_request:
+    paths:
+      - "site/**"
+      - "docs/**"
+      - "assets/**"
+      - ".github/workflows/site.yml"
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/**"
+      - "assets/**"
+      - ".github/workflows/site.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  WRANGLER_VERSION: "4.167.0"
+
+jobs:
+  build:
+    name: Build and check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Build the site
+        working-directory: site
+        run: |
+          npm ci
+          node build.mjs
+      - name: Check the output
+        working-directory: site
+        run: |
+          for f in index.html 404.html sitemap.xml robots.txt favicon.svg docs/index.html docs/getting-started/index.html; do
+            test -s "public/$f" || { echo "::error::public/$f is missing or empty"; exit 1; }
+          done
+      - name: Check the Worker config
+        working-directory: site
+        run: npx --yes "wrangler@${WRANGLER_VERSION}" deploy --dry-run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: site/public
+          retention-days: 7
+
+  deploy:
+    name: Deploy
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Build the site
+        working-directory: site
+        run: |
+          npm ci
+          node build.mjs
+      - name: Deploy to Cloudflare
+        working-directory: site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Cannot deploy the site. Add these repository secrets:$missing"
+            exit 1
+          fi
+          npx --yes "wrangler@${WRANGLER_VERSION}" deploy
