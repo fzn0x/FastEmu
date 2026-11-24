@@ -953,7 +953,7 @@ CLDC 1.1 only. The CLDC 1.1 javadoc documents `get` and `clear` on `WeakReferenc
 
 ## Cross-check
 
-Every member above comes from the spec javadoc. The script that writes this file compared it with the stub and implementation sources listed under Sources: constant values, member lists and `static` flags. What differs is listed here; a class not listed matched everywhere it appears.
+Every member above comes from the spec javadoc. The script that writes this file compared it with the stub and implementation sources listed under Sources: constant values, member lists and `static` flags. Member lists are compared only where the parsed source holds the implementation's whole class hierarchy. What differs is listed here; a class not listed matched everywhere it was compared.
 
 - `java.lang.ref.WeakReference`
   - cldcapi11.jar does not declare `clear()V`, `get()Ljava/lang/Object;`
