@@ -280,6 +280,16 @@ Exceptions in callbacks, posted tasks and game threads are logged and
 the game keeps running; only the cases above end it. Dropping a
 `MidpInstance` stops it.
 
+A stop ends in this order: the VM's stop flag first, then the wake of
+paused threads, then `flush_output`, then the wait for the threads (2 s at
+most), then the sound group, then the status. The flag comes before
+anything that takes the VM lock, since a game thread stuck in a native
+loop around calls into Java holds the lock, and its next call into Java
+ends it. The control thread waits for the lock a second at most for a
+lifecycle call or posted input, and gives up on it, so a game that holds
+the lock for ever can still be paused and closed: its `pauseApp` and
+`destroyApp` do not run, and the status changes after about two seconds.
+
 `getAppProperty` reads the settings' properties, then the JAD, then the
 manifest, an exact name before one that differs in case.
 `checkPermission` answers network permissions from the network policy
