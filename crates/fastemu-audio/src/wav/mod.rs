@@ -114,7 +114,7 @@ fn parse_format(body: &[u8]) -> Result<FormatChunk, AudioError> {
     let block_align = u16_at(body, 12).unwrap_or(0);
     let bits = u16_at(body, 14).unwrap_or_else(|| {
         // WAVEFORMAT without the bits field: derive them from the block.
-        (block_align / channels.max(1)) * 8
+        (block_align / channels.max(1)).saturating_mul(8)
     });
     let mut format = FormatChunk {
         tag: u16_at(body, 0).unwrap_or(0),
@@ -203,6 +203,9 @@ fn container_bytes(format: &FormatChunk) -> usize {
 
 fn decode_pcm(format: &FormatChunk, data: &[u8]) -> Result<Vec<i16>, AudioError> {
     let width = container_bytes(format);
+    if width == 0 {
+        return Err(malformed("PCM with no sample size"));
+    }
     let take = data.len() / (width * usize::from(format.channels)) * usize::from(format.channels);
     let chunks = data.chunks_exact(width).take(take);
     let samples = match width {
@@ -447,5 +450,21 @@ pub(crate) mod tests {
         assert!(matches!(decode(&wav), Err(AudioError::Malformed { .. })));
         let wav = wav_bytes(0x0055, 1, 8000, 16, 2, &[], &[0, 0]);
         assert!(matches!(decode(&wav), Err(AudioError::Unsupported(_))));
+    }
+
+    #[test]
+    fn refuses_pcm_without_a_sample_size() {
+        // Neither the block size nor the bit depth gives a sample width.
+        let wav = wav_bytes(PCM, 1, 8000, 0, 0, &[], &[0, 0, 0, 0]);
+        assert!(matches!(decode(&wav), Err(AudioError::Malformed { .. })));
+    }
+
+    #[test]
+    fn a_short_fmt_chunk_with_a_huge_block_size_is_refused() {
+        // A 14-byte WAVEFORMAT: the bits come from the block size.
+        let mut wav = b"RIFF\0\0\0\0WAVEfmt \x0e\0\0\0".to_vec();
+        wav.extend_from_slice(&[1, 0, 1, 0, 0x40, 0x1F, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF]);
+        wav.extend_from_slice(b"data\x04\0\0\0\0\0\0\0");
+        assert!(matches!(decode(&wav), Err(AudioError::Malformed { .. })));
     }
 }
