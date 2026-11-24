@@ -1,0 +1,180 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # A merge queue tests each pull request merged on top of those ahead.
+  merge_group:
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels its older run. Runs on main all
+# finish, so every merged commit keeps its result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # The emulator crates: what `cargo test` covers by default, and the xtask.
+  # The GPUI apps are built by their own jobs below.
+  EMULATOR_CRATES: >-
+    -p fastemu-core -p fastemu-jvm -p fastemu-gfx -p fastemu-audio
+    -p fastemu-midp -p xtask
+
+jobs:
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - run: cargo fmt --all --check
+
+  changelog:
+    name: Changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check the fragments
+        run: cargo xtask changelog --check
+
+  # No em-dash or en-dash anywhere in the tree, apart from the license text.
+  # The characters are built from their UTF-8 bytes so that this file has
+  # none either.
+  dashes:
+    name: No dashes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Look for U+2014 and U+2013
+        run: |
+          em="$(printf '\342\200\224')"
+          en="$(printf '\342\200\223')"
+          if git grep -nI -e "$em" -e "$en" -- . ':(exclude)LICENSE'; then
+            echo "::error::Use a comma, a colon, a period or a plain hyphen instead of an em-dash or an en-dash."
+            exit 1
+          fi
+          echo "no dashes"
+
+  deny:
+    name: Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  # Clippy and the tests of the emulator crates, on every system. The
+  # virtual machine's differential tests run real Java programs against
+  # a JDK, so it must be there: FASTEMU_REQUIRE_JAVA makes a missing JDK
+  # fail them instead of skipping them.
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      FASTEMU_REQUIRE_JAVA: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/linux-deps
+        if: runner.os == 'Linux'
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Rust toolchain
+        shell: bash
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        shell: bash
+        run: cargo clippy $EMULATOR_CRATES --all-targets --locked -- -D warnings
+      - name: Test
+        shell: bash
+        run: cargo test $EMULATOR_CRATES --locked
+
+  # The GPUI desktop app builds on every system it ships for.
+  app:
+    name: App (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/linux-deps
+        if: runner.os == 'Linux'
+        with:
+          gui: "true"
+      # GPUI compiles its Metal shaders with Xcode's Metal toolchain, which
+      # newer Xcode versions download separately.
+      - name: Metal toolchain
+        if: runner.os == 'macOS'
+        run: xcodebuild -downloadComponent MetalToolchain || true
+      - name: Rust toolchain
+        shell: bash
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build -p fastemu --locked
+      - name: Clippy
+        run: cargo clippy -p fastemu -p fastemu-ui --all-targets --locked -- -D warnings
+
+  # The Android app: Rust libraries built by cargo-ndk for two ABIs, and the
+  # APK built around them by Gradle. The steps are in
+  # docs/building-android.md. Until android/gradlew exists, every step
+  # after the first is skipped, and the job says so.
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Is there an Android project yet
+        id: project
+        run: |
+          if [ -f android/gradlew ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::android/gradlew does not exist yet: the Android build is skipped."
+          fi
+      - uses: ./.github/actions/linux-deps
+        if: steps.project.outputs.present == 'true'
+        with:
+          gui: "true"
+      - uses: actions/setup-java@v6
+        if: steps.project.outputs.present == 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+      # The runner's preinstalled SDK and NDK are used where there are,
+      # and this action adds the command-line tools and licenses.
+      - uses: android-actions/setup-android@v4
+        if: steps.project.outputs.present == 'true'
+      - name: Rust toolchain
+        if: steps.project.outputs.present == 'true'
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        if: steps.project.outputs.present == 'true'
+      - name: cargo-ndk
+        if: steps.project.outputs.present == 'true'
+        run: command -v cargo-ndk || cargo install cargo-ndk --locked
+      - name: Build the APK
+        if: steps.project.outputs.present == 'true'
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug
