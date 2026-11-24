@@ -9,10 +9,9 @@ Rules from the `RecordStore` class description:
 
 - Record stores belong to a MIDlet suite, which is identified by its
   `MIDlet-Vendor` and `MIDlet-Name`. Names are case-sensitive, 1 to 32
-  characters, unique within the suite. FastEmu keeps each suite's stores
-  apart, and each instance of the same suite shares them (the spec has no
-  notion of two copies of a suite running at once, so FastEmu must
-  serialize their writes).
+  characters, unique within the suite. In FastEmu each instance keeps
+  its stores under its own `LaunchRequest::data_dir`, so two instances of
+  one game never share saves.
 - Record IDs start at 1 and each new record gets the previous ID plus
   one, so IDs of deleted records are never reused. Games often save in
   record 1 and read it back with `getRecord(1)`, so the numbering must be
