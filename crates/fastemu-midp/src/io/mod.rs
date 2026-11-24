@@ -17,6 +17,7 @@ mod datagram;
 mod http;
 mod interfaces;
 mod net;
+mod push;
 mod socket;
 mod streams;
 mod url;
@@ -36,6 +37,7 @@ pub fn classes() -> Vec<NativeClass> {
     classes.extend(http::classes());
     classes.extend(socket::classes());
     classes.extend(datagram::classes());
+    classes.push(push::class());
     classes
 }
 
