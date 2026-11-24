@@ -24,6 +24,32 @@ pub(crate) enum InitState {
     Failed,
 }
 
+/// The longest class name `load` takes, in bytes. javac and ProGuard
+/// output stays far below it (the longest name of the test games is 57
+/// bytes).
+pub(crate) const MAX_CLASS_NAME: usize = 255;
+
+/// The most dimensions of an array class (the limit of JVMS 4.3.2).
+pub(crate) const MAX_ARRAY_DIMS: usize = 255;
+
+/// The longest name `load` can accept at all: an array of
+/// [`MAX_ARRAY_DIMS`] dimensions of a class with a [`MAX_CLASS_NAME`] name
+/// (`[[[Lname;`).
+pub(crate) const MAX_LOADABLE_NAME: usize = MAX_ARRAY_DIMS + MAX_CLASS_NAME + 2;
+
+/// The longest piece of a game chosen name that goes into an error
+/// message, in characters.
+const MAX_SHOWN: usize = 100;
+
+/// `name` cut to [`MAX_SHOWN`] characters, for an error message that
+/// carries a name a game chose.
+pub(crate) fn short(name: &str) -> String {
+    match name.char_indices().nth(MAX_SHOWN) {
+        Some((end, _)) => format!("{}...", &name[..end]),
+        None => name.to_owned(),
+    }
+}
+
 /// Why a class could not be loaded, as the Java exception to throw.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LoadError {
@@ -39,7 +65,7 @@ impl LoadError {
     pub(crate) fn no_class(name: &str) -> Self {
         Self {
             exception: "java/lang/NoClassDefFoundError",
-            message: name.to_owned(),
+            message: short(name),
             missing: Some(name.to_owned()),
         }
     }
@@ -122,12 +148,22 @@ impl ClassTable {
 
     /// Loads, links and returns the class named `name` (an internal name
     /// such as `java/lang/String`, or an array descriptor such as `[I`).
+    ///
+    /// A name over [`MAX_CLASS_NAME`] bytes and an array of over
+    /// [`MAX_ARRAY_DIMS`] dimensions do not load: names come from games
+    /// and from files.
     pub(crate) fn load(&mut self, name: &str) -> Result<ClassId, LoadError> {
         if let Some(id) = self.lookup(name) {
             return Ok(id);
         }
         if name.starts_with('[') {
             return self.load_array(name);
+        }
+        if name.len() > MAX_CLASS_NAME {
+            return Err(LoadError::new(
+                "java/lang/NoClassDefFoundError",
+                short(name),
+            ));
         }
         if self.loading.iter().any(|n| &**n == name) {
             return Err(LoadError::new("java/lang/ClassCircularityError", name));
@@ -144,7 +180,7 @@ impl ClassTable {
             if &*file.name != name {
                 return Err(LoadError::new(
                     "java/lang/NoClassDefFoundError",
-                    format!("{name} (wrong name: {})", file.name),
+                    format!("{name} (wrong name: {})", short(&file.name)),
                 ));
             }
             super::link::from_class_file(file)?
@@ -174,13 +210,27 @@ impl ClassTable {
         ClassId(self.classes.len() as u32)
     }
 
+    /// Loads the array class `name` and the array classes inside it. The
+    /// classes are made from the innermost out in a loop, so the stack a
+    /// name needs does not grow with its dimensions.
     fn load_array(&mut self, name: &str) -> Result<ClassId, LoadError> {
-        let component = &name[1..];
-        let kind = match component.as_bytes() {
+        let dims = name.bytes().take_while(|&b| b == b'[').count();
+        if dims > MAX_ARRAY_DIMS {
+            return Err(LoadError::new(
+                "java/lang/ClassFormatError",
+                "array type has too many dimensions",
+            ));
+        }
+        if name.len() > MAX_LOADABLE_NAME {
+            return Err(LoadError::new(
+                "java/lang/NoClassDefFoundError",
+                short(name),
+            ));
+        }
+        let kind = match &name.as_bytes()[dims..] {
             [c] => ClassKind::PrimArray(
                 ArrayType::from_descriptor(*c).ok_or_else(|| LoadError::no_class(name))?,
             ),
-            [b'[', ..] => ClassKind::RefArray(self.load(component)?),
             [b'L', inner @ .., b';'] if !inner.is_empty() => {
                 let inner = std::str::from_utf8(inner).expect("a slice of a str at ASCII bounds");
                 ClassKind::RefArray(self.load(inner)?)
@@ -189,6 +239,20 @@ impl ClassTable {
         };
         let object = self.load("java/lang/Object")?;
         let object = Arc::clone(self.get(object));
+        // The array of the innermost dimension is `name[dims - 1..]`, and
+        // each dimension out from it adds one `[` in front.
+        let mut class = self.make_array(&name[dims - 1..], kind, &object);
+        for start in (0..dims - 1).rev() {
+            class = self.make_array(&name[start..], ClassKind::RefArray(class), &object);
+        }
+        Ok(class)
+    }
+
+    /// The array class `name` of `kind`, made if it is not there yet.
+    fn make_array(&mut self, name: &str, kind: ClassKind, object: &Arc<Class>) -> ClassId {
+        if let Some(id) = self.lookup(name) {
+            return id;
+        }
         let id = self.next_id();
         let class = Class {
             id,
@@ -207,7 +271,7 @@ impl ClassTable {
             payload: None,
             array_type: std::sync::OnceLock::new(),
         };
-        Ok(self.insert(class, true))
+        self.insert(class, true)
     }
 
     /// The class of arrays whose elements are `component`.
@@ -430,6 +494,57 @@ mod tests {
         let array = t.array_of(b).unwrap();
         assert_eq!(&*t.get(array).name, "[La/B;");
         assert_eq!(t.prim_array(ArrayType::Int), ints);
+    }
+
+    /// A table of `natives` and `java/lang/Object`.
+    fn table_of(natives: Vec<NativeClass>) -> ClassTable {
+        let mut all = vec![NativeClass::new("java/lang/Object")];
+        all.extend(natives);
+        ClassTable::new(Arc::new(MemorySource::new()), all)
+    }
+
+    #[test]
+    fn names_and_arrays_over_the_limits_do_not_load() {
+        let mut t = table_of(vec![NativeClass::new("a/A")]);
+        let err = t.load(&"a".repeat(MAX_CLASS_NAME + 1)).unwrap_err();
+        assert_eq!(err.exception, "java/lang/NoClassDefFoundError");
+        assert_eq!((err.message.len(), err.missing), (103, None));
+        let err = t.load("a/A").and_then(|_| t.load(&"b".repeat(100_000)));
+        assert_eq!(err.unwrap_err().message.len(), 103);
+
+        let deep = |dims: usize| format!("{}I", "[".repeat(dims));
+        for dims in [MAX_ARRAY_DIMS + 1, 40_000] {
+            let err = t.load(&deep(dims)).unwrap_err();
+            assert_eq!(err.exception, "java/lang/ClassFormatError");
+            assert_eq!(err.missing, None);
+        }
+        let err = t.load(&format!("[L{};", "c".repeat(MAX_CLASS_NAME + 1)));
+        assert_eq!(err.unwrap_err().exception, "java/lang/NoClassDefFoundError");
+        let err = t.load(&format!("{}La/A;", "[".repeat(MAX_ARRAY_DIMS + 1)));
+        assert_eq!(err.unwrap_err().exception, "java/lang/ClassFormatError");
+
+        // The limit itself loads, each dimension its own class.
+        let id = t.load(&deep(MAX_ARRAY_DIMS)).unwrap();
+        assert_eq!(t.get(id).name.len(), MAX_ARRAY_DIMS + 1);
+        for dims in 1..=MAX_ARRAY_DIMS {
+            assert!(t.lookup(&deep(dims)).is_some(), "{dims} dimensions");
+        }
+        let a = t
+            .load(&format!("{}La/A;", "[".repeat(MAX_ARRAY_DIMS)))
+            .unwrap();
+        let inner = t.load("[[La/A;").unwrap();
+        assert_ne!(a, inner);
+        assert_eq!(
+            t.get(a).kind,
+            ClassKind::RefArray(
+                t.lookup(&format!("{}La/A;", "[".repeat(MAX_ARRAY_DIMS - 1)))
+                    .unwrap()
+            )
+        );
+        // A name with no end, and an empty one, are just not found.
+        assert!(t.load("[La/A").is_err());
+        assert!(t.load("[L;").is_err());
+        assert!(t.load("[[[").is_err());
     }
 
     #[test]
