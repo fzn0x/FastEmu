@@ -313,9 +313,9 @@ The app's threads wait on an instance's VM lock only to post input
 (`Instance::send`), which a Java thread gives up at its next safepoint
 or wait. `frame`, `status` and `drain_log` take only the `HostLink`'s
 own lock, and pause, resume and stop go through the control thread.
-Stopping or dropping an instance ends its threads; once the app lets go
-of the instance, its virtual machine is freed and its group closes,
-which takes its players out of the mixer.
+Stopping or dropping an instance ends its threads and closes its group,
+which takes its players out of the mixer; once the app lets go of the
+instance, its virtual machine is freed.
 
 `tests/many_instances.rs` runs eight instances of one MIDlet at once and
 checks frames, input, a pause, record stores, sound and the stop of each.
