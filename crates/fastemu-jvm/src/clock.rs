@@ -154,8 +154,10 @@ mod tests {
 
     #[test]
     fn the_run_time_stands_still_while_paused() {
-        let clock = clock();
+        // Taken before the clock starts, so the wall time measured from it
+        // is never shorter than the clock's own.
         let start = Instant::now();
+        let clock = clock();
         std::thread::sleep(Duration::from_millis(20));
         clock.0.set_paused(true);
         let at_pause = clock.elapsed();
