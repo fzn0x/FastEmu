@@ -21,7 +21,7 @@ mod push;
 mod socket;
 mod streams;
 pub mod tls;
-mod url;
+pub(crate) mod url;
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 

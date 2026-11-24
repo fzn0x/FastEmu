@@ -59,6 +59,7 @@ pub(crate) fn open(ctx: &mut Ctx<'_>, name: Value, mode: i32, timeouts: bool) ->
         "socket" => socket::open(ctx, rest, &name, options),
         "ssl" => socket::open_secure(ctx, rest, &name, options),
         "datagram" => datagram::open(ctx, rest, &name, options),
+        "sms" | "cbs" => crate::wma::open(ctx, &scheme, rest),
         "comm" => ctx.throw(
             NOT_FOUND,
             &format!("this phone has no serial ports: {name}"),
