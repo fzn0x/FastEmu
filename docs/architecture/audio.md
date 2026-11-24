@@ -79,7 +79,10 @@ the MIDP layer (see the mapping below):
 - `set_loop_count(n)`: `n` passes, `-1` forever, `0` is refused, and not
   while started. Each pass ends with `EndOfMedia`, and each new pass
   starts with `Started { media_time_us: 0 }`, as JSR-135 asks. A stopped
-  player resumes the remaining passes.
+  player resumes the remaining passes. `EndOfMedia` says with `last`
+  whether the player stopped there or another pass follows: by the time
+  a listener reads the event, the player's state may already be past the
+  whole loop.
 - Media time is in microseconds. `set_media_time` clamps to the media and
   returns the time set; it works while playing.
 - `set_level(0..=100)` clamps and returns the level. The scale follows
@@ -284,7 +287,7 @@ Events map to `PlayerListener` constants and event data:
 | --------------------------------- | ---------------- | ---------- |
 | `Started { media_time_us }`       | `STARTED`        | `Long` media time |
 | `Stopped { media_time_us }`       | `STOPPED`        | `Long` media time |
-| `EndOfMedia { media_time_us }`    | `END_OF_MEDIA`   | `Long` media time |
+| `EndOfMedia { media_time_us, .. }` | `END_OF_MEDIA`  | `Long` media time |
 | `VolumeChanged { .. }`            | `VOLUME_CHANGED` | the player's `VolumeControl` |
 | `Closed`                          | `CLOSED`         | `null` |
 | `Error { message }`               | `ERROR`          | `String` message |
@@ -302,7 +305,7 @@ Events map to `PlayerListener` constants and event data:
 | `setGain(0..255)` / `getGain()`        | `set_level(gain * 100 / 255)`; keep the gain in Java to return it |
 | `getState()`                           | `Started` is `SOUND_PLAYING`, a closed player is `SOUND_UNINITIALIZED`, anything else `SOUND_STOPPED` |
 | `release()`                            | `close()` |
-| `SoundListener.soundStateChanged`      | From the group's events: `Started` to `SOUND_PLAYING`, `Stopped` and the last `EndOfMedia` to `SOUND_STOPPED` |
+| `SoundListener.soundStateChanged`      | From the group's events: `Started` to `SOUND_PLAYING`, `Stopped` and `EndOfMedia { last: true, .. }` to `SOUND_STOPPED` |
 | `getConcurrentSoundCount(type)`        | Any small number the games accept; the engine plays as many as asked |
 
 Other vendor APIs (Siemens, Samsung, Motorola, Sony Ericsson) take bytes

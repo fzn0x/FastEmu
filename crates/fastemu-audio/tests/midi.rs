@@ -116,16 +116,19 @@ fn midi_loops_and_seeks_by_media_time() {
     let onsets = onsets_ms(&heard);
     assert_eq!(onsets.len(), 6, "{onsets:?}");
     assert!(onsets[3].abs_diff(1500) <= 30, "{onsets:?}");
-    let end = PlayerEventKind::EndOfMedia {
-        media_time_us: 1_500_000,
-    };
     assert_eq!(
         kinds(&events),
         vec![
             PlayerEventKind::Started { media_time_us: 0 },
-            end.clone(),
+            PlayerEventKind::EndOfMedia {
+                media_time_us: 1_500_000,
+                last: false,
+            },
             PlayerEventKind::Started { media_time_us: 0 },
-            end
+            PlayerEventKind::EndOfMedia {
+                media_time_us: 1_500_000,
+                last: true,
+            },
         ]
     );
     // Seek to the third note and play from there, once.

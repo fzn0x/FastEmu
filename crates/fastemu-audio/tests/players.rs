@@ -54,7 +54,8 @@ fn a_player_goes_through_the_mmapi_states() {
                 media_time_us: 50_000
             },
             PlayerEventKind::EndOfMedia {
-                media_time_us: 100_000
+                media_time_us: 100_000,
+                last: true,
             },
             PlayerEventKind::Closed,
         ]
@@ -99,17 +100,22 @@ fn loops_post_end_of_media_and_started_each_time() {
     // Three times through, then silence.
     assert!(heard[290..299].iter().all(|&v| v > 0.0));
     assert!(heard[310..].iter().all(|&v| v == 0.0));
+    let pass = PlayerEventKind::EndOfMedia {
+        media_time_us: 12_500,
+        last: false,
+    };
     let end = PlayerEventKind::EndOfMedia {
         media_time_us: 12_500,
+        last: true,
     };
     let started = PlayerEventKind::Started { media_time_us: 0 };
     assert_eq!(
         kinds(&events),
         vec![
             started.clone(),
-            end.clone(),
+            pass.clone(),
             started.clone(),
-            end.clone(),
+            pass,
             started,
             end
         ]
@@ -251,7 +257,8 @@ fn players_resample_to_the_output_rate() {
     assert!(heard[4790] > 0.0);
     assert!(heard[4810..].iter().all(|&v| v == 0.0));
     assert!(kinds(&events).contains(&PlayerEventKind::EndOfMedia {
-        media_time_us: 100_000
+        media_time_us: 100_000,
+        last: true,
     }));
 }
 

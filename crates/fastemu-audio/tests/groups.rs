@@ -94,7 +94,8 @@ fn pausing_a_group_freezes_its_time() {
         vec![
             PlayerEventKind::Started { media_time_us: 0 },
             PlayerEventKind::EndOfMedia {
-                media_time_us: 100_000
+                media_time_us: 100_000,
+                last: true,
             }
         ]
     );

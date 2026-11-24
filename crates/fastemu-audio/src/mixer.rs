@@ -197,6 +197,7 @@ impl Mixer {
                     Reached::Loop => {
                         push(PlayerEventKind::EndOfMedia {
                             media_time_us: duration_us,
+                            last: false,
                         });
                         push(PlayerEventKind::Started { media_time_us: 0 });
                     }
@@ -206,6 +207,7 @@ impl Mixer {
                         }
                         push(PlayerEventKind::EndOfMedia {
                             media_time_us: duration_us,
+                            last: true,
                         });
                     }
                 }

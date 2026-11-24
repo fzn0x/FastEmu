@@ -35,8 +35,11 @@ pub enum PlayerEventKind {
     /// `STOPPED`: `stop` was called.
     Stopped { media_time_us: i64 },
     /// `END_OF_MEDIA`: the end was reached, after every loop or before
-    /// the next one.
-    EndOfMedia { media_time_us: i64 },
+    /// the next one. `last` is true when the player stopped there and
+    /// false when another pass of a loop follows, so a listener need not
+    /// guess from the player's state, which may have moved on by the time
+    /// the event arrives.
+    EndOfMedia { media_time_us: i64, last: bool },
     /// `VOLUME_CHANGED`: the level or mute changed.
     VolumeChanged { level: i32, muted: bool },
     /// `CLOSED`: the player, or its whole group, was closed.
