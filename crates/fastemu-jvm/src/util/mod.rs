@@ -1,8 +1,9 @@
 //! The CLDC 1.1 `java.util` classes, implemented in Rust: the
-//! collections and their `Enumeration`.
+//! collections and their `Enumeration`, and `Random`.
 
 mod hashtable;
 mod keys;
+mod random;
 mod vector;
 
 use crate::native::NativeClass;
@@ -17,5 +18,6 @@ pub(crate) fn classes() -> Vec<NativeClass> {
     ];
     all.extend(vector::classes());
     all.extend(hashtable::classes());
+    all.extend(random::classes());
     all
 }

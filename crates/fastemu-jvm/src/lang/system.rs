@@ -207,7 +207,9 @@ fn exit(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     Err(Throw::Stop)
 }
 
-fn epoch_millis() -> i64 {
+/// `System.currentTimeMillis()`: the clock every library class that
+/// reads the time (`Date`, `Random`, `Calendar`, `Timer`) shares.
+pub(crate) fn current_time_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64)
@@ -236,7 +238,7 @@ pub(crate) fn classes() -> Vec<NativeClass> {
                 Ok(Value::Void)
             })
             .static_method("currentTimeMillis", "()J", |_, _| {
-                Ok(Value::Long(epoch_millis()))
+                Ok(Value::Long(current_time_millis()))
             })
             .static_method("nanoTime", "()J", |_, _| Ok(Value::Long(process_nanos())))
             .static_method(

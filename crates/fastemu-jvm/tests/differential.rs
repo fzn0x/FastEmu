@@ -191,6 +191,7 @@ programs! {
     hello: "Hello", 8;
     inheritance: "Inheritance", 8;
     print_streams: "PrintStreams", 8;
+    random_sequences: "RandomSequences", 8;
     readers: "Readers", 8;
     recursion: "Recursion", 8;
     static_init: "StaticInit", 8;
