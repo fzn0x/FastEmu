@@ -78,8 +78,9 @@ the note that backs it.
 3. JAD attributes override manifest attributes for untrusted suites.
    ([1](notes/01-suite-loading.md#precedence))
 4. Resources: strip leading slashes, collapse `//`, turn `\` into `/`,
-   resolve relative names against the calling class's package, and fall
-   back to a case-insensitive match. ([1](notes/01-suite-loading.md#resource-lookup))
+   resolve relative names against the package of the class
+   `getResourceAsStream` is called on, and fall back to a
+   case-insensitive match. ([1](notes/01-suite-loading.md#resource-lookup))
 5. Resource streams are fully buffered: `available()` returns the whole
    remaining size and `read(byte[])` fills the buffer. ([1](notes/01-suite-loading.md#resource-streams))
 6. `Image.createImage(String)` throws `IOException` for a missing

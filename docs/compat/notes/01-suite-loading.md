@@ -278,7 +278,7 @@ What `Class.getResourceAsStream(name)` does in each emulator:
 | --- | --- | --- | --- |
 | `\` to `/` | yes ("Siemens file path") | yes | no |
 | Collapse `//` | yes | yes | no |
-| Name without leading `/` | prefixed with the calling class's package | tried at the root first, then prefixed with the main MIDlet class's package | prefixed with the calling class's package |
+| Name without leading `/` | prefixed with the package of the `Class` it is called on | tried at the root first, then prefixed with the main MIDlet class's package | prefixed with the package of the `Class` it is called on |
 | Leading `/` | stripped | stripped (up to two) | stripped |
 | Exact match | yes | yes | yes |
 | Case-insensitive fallback | yes | yes | no |
@@ -313,8 +313,9 @@ Notes:
   which helps users report missing files. [code]
 
 **For FastEmu:** normalize `\` and repeated `/`; resolve relative names
-against the calling class's package as Java does; strip leading slashes;
-exact match, then case-insensitive match; log misses with the original
+against the package of the `Class` object the method is called on, as
+Java does; strip leading slashes; exact match, then case-insensitive
+match; log misses with the original
 name at `LogLevel::Warn`. Keep freej2me-plus's "try the root first" as a
 fallback after the standard rule fails, since it rescues games that used
 paths relative to the root.
