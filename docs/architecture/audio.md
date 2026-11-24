@@ -238,12 +238,15 @@ with; changing the SoundFont affects players created afterwards.
 
 ## How the MIDP layer maps MMAPI
 
+[media.md](media.md) describes the MIDP side as built; this section is
+the engine's view of it.
+
 ### The app and the instance
 
 | Event                            | Engine call |
 | -------------------------------- | ----------- |
 | App start                        | `Engine::default()`, then `AudioOutput::open(&engine)` or `NullOutput::start(&engine)`; `engine.set_soundfont(...)` if the user chose one |
-| Instance launch                  | `let group = engine.create_group(); group.set_volume(settings.volume)`; read events with `group.subscribe()` on the instance's event thread |
+| Instance launch                  | `let group = engine.create_group(); group.set_volume(settings.volume)`; the MIDP media module sets the group's listener on first use and reads events on its own thread, so nothing else subscribes |
 | `Instance::set_volume(v)`        | `group.set_volume(v)` (0.0 also mutes) |
 | `Instance::pause` / `resume`     | `group.set_paused(true)` / `false`, besides `pauseApp` and `startApp` |
 | `Instance::stop`, crash, exit    | `group.close()` (or drop every clone) |
