@@ -121,7 +121,7 @@ done",
     );
     io_support::assert_output(&output, &expected);
 
-    let get = &server.requests_for("/hello")[0];
+    let get = server.request_for("/hello");
     assert_eq!(get.method, "GET");
     assert_eq!(get.target, "/hello?x=1");
     assert_eq!(
@@ -135,7 +135,7 @@ done",
         "{:?}",
         get.header("User-Agent")
     );
-    let post = &server.requests_for("/echo")[0];
+    let post = server.request_for("/echo");
     assert_eq!(post.method, "POST");
     assert_eq!(post.header("Content-Length"), Some("17"));
     assert_eq!(
@@ -144,6 +144,9 @@ done",
     );
     assert_eq!(post.header("X-Late"), None);
     assert_eq!(post.body, b"score=100&name=ab");
+    let upload = server.request_for("/upload");
+    assert_eq!(upload.method, "GET");
+    assert_eq!(upload.body, b"fire and forget");
 }
 
 #[test]

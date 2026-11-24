@@ -192,6 +192,10 @@ public class HttpTest {
         InputStream in = Connector.openInputStream(base + "/hello");
         System.out.println("connector " + readAll(in));
         in.close();
+        // The connection is closed already; closing the stream still sends.
+        OutputStream out = Connector.openOutputStream(base + "/upload");
+        out.write("fire and forget".getBytes());
+        out.close();
     }
 
     static void dataStream() throws IOException {

@@ -366,15 +366,28 @@ impl HttpServer {
         Self { port, requests }
     }
 
-    /// The requests received so far for `path`.
-    pub fn requests_for(&self, path: &str) -> Vec<Request> {
-        self.requests
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|r| r.path() == path)
-            .cloned()
-            .collect()
+    /// The first request for `path`, waiting a few seconds for it: the
+    /// server's thread may still be reading a request the program sent
+    /// just before it ended.
+    pub fn request_for(&self, path: &str) -> Request {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let found = self
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|r| r.path() == path)
+                .cloned();
+            if let Some(request) = found {
+                return request;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no request for {path}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 }
 
