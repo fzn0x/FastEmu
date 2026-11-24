@@ -1,4 +1,9 @@
+# One exact Rust release for everyone: CI, contributors and the release
+# builds. New stable releases add Clippy lints, and a workspace that denies
+# warnings would turn red on the day of a release for reasons unrelated to
+# the code. Move this forward on purpose, fixing the new lints in the same
+# change.
 [toolchain]
-channel = "stable"
+channel = "1.99.0"
 profile = "minimal"
 components = ["clippy", "rustfmt"]
