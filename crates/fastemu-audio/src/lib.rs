@@ -11,6 +11,8 @@ mod gain;
 #[allow(dead_code)]
 mod midi;
 #[allow(dead_code)]
+mod mp3;
+#[allow(dead_code)]
 mod nokia;
 #[allow(dead_code)]
 mod pcm;
