@@ -539,6 +539,33 @@ request from the initializing thread returns at once; other threads wait.
 An exception from `<clinit>` that is not an `Error` is wrapped in
 `ExceptionInInitializerError`; later uses throw `NoClassDefFoundError`.
 
+**Limits.** Names and hierarchies come from games and from files, and
+loading recurses once per class of a hierarchy. So they have limits, set
+in `class/table.rs`, as a real VM has. A class name over 255 bytes throws
+`NoClassDefFoundError`. An array of over 255 dimensions and a hierarchy
+of over 256 classes (`Object` and the class itself included) throw
+`ClassFormatError`. Real games stay far below all three. The longest
+class name of the test games has 57 bytes, and their chains of game
+classes have 5 classes at most.
+
+- Array classes are made in a loop, from the innermost dimension out.
+  The stack a name needs does not grow with its length.
+- A hierarchy is bounded twice, because a chain loads in two ways. A class
+  loaded before its superclass nests one load per class, and the load
+  stops at 256 nested classes. A class loaded after its whole chain nests
+  nothing, so `define` checks the length of its superclass chain. That
+  check also bounds initialization, which recurses once per superclass.
+  Loading and initialization are depth bounded for every load order.
+- Interfaces need no bound of their own. Each class keeps the flat list
+  of all its interfaces, and nothing recurses over it.
+- Field resolution searches each class once, in the order of JVMS
+  5.4.3.2, so it takes time linear in the size of the interface graph.
+  A graph of layers that each extend the two before is no harder than a
+  chain.
+- A name a game chose is cut to 100 characters in an error message, and
+  `Class.forName` refuses a string over the longest loadable name
+  without copying it.
+
 **Diagnostics.** Something a game needs that FastEmu lacks throws the
 usual error and is reported once to the diagnostics hook and the log, by
 exact internal name, so it says what to implement next:
@@ -718,6 +745,9 @@ What natives and games can rely on:
   reaches every implicit conversion.
 - `tests/old_bytecode.rs` runs `jsr`/`ret` and a version 45.3 class built
   with the small assembler in `tests/support`.
+- `tests/class_limits.rs` loads deep array names, long class chains in
+  both load orders and a 40 layer interface diamond, each under a
+  deadline, on a VM thread.
 - `tests/native_api.rs` covers this page's API: native classes extended
   by bytecode, threads, posted tasks, global roots, waiting, pause,
   resume and stop, diagnostics.
