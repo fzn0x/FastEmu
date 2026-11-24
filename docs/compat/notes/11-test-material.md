@@ -15,7 +15,7 @@ manual runs on a developer's own machine.
 | wie `resource.jar` | MIT | [wie-skvm/tests/data](https://github.com/dlunch/wie/tree/eb5b809d693ee4f0023f06acd0ad6393006578fc/wie-skvm/tests/data) | resource lookup |
 | Stick Fight, `StickFightMIDlet.jar` (157 KB) | MIT | [Dahmalahi/STICK-FIGHT-OFFICIEL-REPO releases](https://github.com/Dahmalahi/STICK-FIGHT-OFFICIEL-REPO/releases) | a small Canvas game |
 | 3D Moto 2.0, `3DMoto2.zip` (4.4 MB) | GPL-3.0 | [mrlordkaj/j2me-3dmoto releases](https://github.com/mrlordkaj/j2me-3dmoto/releases) | a full game |
-| JTube 2.90.1, three JARs (Nokia, Samsung, BlackBerry builds, 157 to 160 KB) | MIT | [shinovon/JTube releases](https://github.com/shinovon/JTube/releases) | a high-level UI app: `Form`, `List`, `Command`, images, threads; network off |
+| JTube 2.90.1, three JARs (generic, Samsung and BlackBerry builds, 157 to 160 KB) | MIT | [shinovon/JTube releases](https://github.com/shinovon/JTube/releases) | a high-level UI app: `Form`, `List`, `Command`, images, threads; network off |
 
 The licenses above are what the GitHub API reports for each repository;
 the content of the release archives was not inspected. [unverified]
@@ -48,9 +48,10 @@ it in a bug report.
   tests in `src/test/java` of its modules: 161 for `cldc-compact`, 21 for
   `meep-rms`, 7 for `midp-lcdui`, 2 for `media-api` (counted from the
   repository tree on 2026-11-24). Most target its own runtime, but the
-  CLDC tests check plain library behaviour and could be adapted. Its
-  RMS format is shared with freej2me-plus. [code via the GitHub tree;
-  test contents not read]
+  CLDC tests check plain library behaviour and could be adapted. The
+  counts come from the GitHub tree; the test contents were not read.
+  [unverified] freej2me-plus's README says its save format was "developed jointly with
+  SquirrelJME".
 - **J2ME Loader `GraphicsTest`** (Apache-2.0,
   [GraphicsTest.java](https://github.com/nikita36078/J2ME-Loader/blob/e270ed91e67b5cafc18c1991b92ba5249cf41c50/app/src/androidTest/java/javax/microedition/lcdui/GraphicsTest.java)):
   seven pixel-level checks for lines, images, `drawRGB`, `drawRegion` and
