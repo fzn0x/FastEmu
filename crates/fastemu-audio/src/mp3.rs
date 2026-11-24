@@ -213,6 +213,10 @@ impl Source for Mp3Source {
         self.taken = 0;
         self.pos = frame;
         self.skip = 0;
+        if frame == self.total {
+            // Nothing is left to play, so nothing needs decoding.
+            return;
+        }
         if frame > 0 {
             let target = SeekTo::Timestamp {
                 ts: Timestamp::new(frame as i64),
