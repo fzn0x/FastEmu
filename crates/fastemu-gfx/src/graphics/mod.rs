@@ -7,6 +7,7 @@
 //! surface the `Graphics` was made for; drawing is clipped to whatever
 //! surface is passed, so a mismatch cannot write out of bounds.
 
+mod curves;
 mod shapes;
 
 use crate::anchor::AnchorPolicy;

@@ -2,6 +2,7 @@
 //! algorithms for each kind of primitive. Coordinates here are absolute
 //! (already translated) and `i64`, so no Java argument can overflow them.
 
+pub(crate) mod ellipse;
 pub(crate) mod line;
 
 use crate::color::blend;
