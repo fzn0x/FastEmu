@@ -4,5 +4,12 @@
 pub mod error;
 pub mod format;
 
+// The decoders come before the mixer that plays them; until it lands in a
+// later commit, nothing outside the tests calls them.
+#[allow(dead_code)]
+mod pcm;
+#[allow(dead_code)]
+mod source;
+
 pub use error::AudioError;
 pub use format::{Format, SUPPORTED_CONTENT_TYPES};
