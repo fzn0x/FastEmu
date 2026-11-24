@@ -1,0 +1,55 @@
+# Checked by `cargo deny check` in CI (.github/workflows/ci.yml): known
+# vulnerabilities in dependencies, their licenses, and where they come from.
+# FastEmu is GPL-3.0-or-later, so everything it links must be under a license
+# that GPL-3.0 can include: permissive licenses, and file-level copyleft such
+# as MPL-2.0. Add a license here only after checking that it fits, and write
+# which crate needs it.
+#
+# Every exception says why it is safe, and where it goes away.
+
+[graph]
+all-features = true
+
+[advisories]
+# A yanked release is one its authors withdrew for a reason.
+yanked = "deny"
+ignore = []
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "0BSD",
+  "Unicode-3.0",
+  "CC0-1.0",
+  "BSL-1.0",
+  "Unlicense",
+  # Data license of the Mozilla root certificate list, if a crate bundles it.
+  "CDLA-Permissive-2.0",
+  # File-level copyleft: only changes to the crates' own files must be
+  # shared, and FastEmu changes none of them.
+  "MPL-2.0",
+  # FastEmu's own crates, and crates of GPL-3.0 projects that fit it.
+  "GPL-3.0-or-later",
+]
+
+[bans]
+multiple-versions = "allow"
+# The workspace's own crates refer to each other by path alone, which
+# cargo-deny counts as a wildcard in a crate that could be published.
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+# GPUI is not on crates.io: it comes from Zed's repository, pinned to a
+# commit in the workspace's Cargo.toml. List the repository here when the
+# apps' crates add it.
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
