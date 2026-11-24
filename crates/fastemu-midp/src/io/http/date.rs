@@ -27,7 +27,9 @@ pub(crate) fn parse(text: &str) -> Option<i64> {
         }
     }
     let (day, month, year, (h, m, s)) = (day?, month?, year?, time?);
-    if !(1..=31).contains(&day) {
+    // Years beyond four digits are not dates, and their milliseconds
+    // would overflow.
+    if !(1..=31).contains(&day) || !(0..=9999).contains(&year) {
         return None;
     }
     let days = days_from_civil(year, month, day);
@@ -101,5 +103,15 @@ mod tests {
         assert_eq!(parse("Sun, 06 Nov 1994 GMT"), None);
         assert_eq!(parse("Sun, 06 Nov 1994 25:00:00 GMT"), None);
         assert_eq!(parse("Sun, 40 Nov 1994 08:49:37 GMT"), None);
+    }
+
+    #[test]
+    fn years_a_server_cannot_mean_give_nothing() {
+        assert_eq!(parse("Sun, 06 Nov 1000000000 08:49:37 GMT"), None);
+        assert_eq!(parse("Sun, 06 Nov 9223372036854775807 08:49:37 GMT"), None);
+        assert_eq!(
+            parse("Fri, 31 Dec 9999 23:59:59 GMT"),
+            Some(253_402_300_799_000)
+        );
     }
 }
