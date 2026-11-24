@@ -124,10 +124,10 @@ game 3, `games/3/1` the second copy running beside it. The record stores
 are in its `rms` folder. Where the system names no Pictures folder,
 screenshots go to a `screenshots` folder beside `games`.
 
-A `library.json` or `settings.json` that cannot be read, such as a
-damaged one, is reported in the window, kept beside the new one as
-`settings.json.broken` (or `library.json.broken`), and the defaults are
-used.
+A damaged `library.json` or `settings.json` is reported in the window
+and set aside as `library.json.broken` or `settings.json.broken`, and
+the defaults are used. One that cannot be read at all is reported and
+left where it is.
 
 On Android the library, settings, saves and the app's copies of games are
 in the app's private storage, and screenshots in
