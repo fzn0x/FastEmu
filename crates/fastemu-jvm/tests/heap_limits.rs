@@ -222,6 +222,17 @@ fn kept_resource_streams_end_in_out_of_memory_error() {
 }
 
 #[test]
+fn a_native_that_builds_an_object_after_it_allocates_is_judged_as_it_returns() {
+    with_vm(HEAP, |vm| {
+        // Four streams of 64 KiB come to more than the heap. The count is
+        // judged when each call returns, not only when a request would
+        // pass twice the heap, which would let seven in.
+        let held = call(vm, "streamsHeld");
+        assert!((2..=4).contains(&held), "{held} streams held");
+    });
+}
+
+#[test]
 fn kept_char_arrays_end_in_out_of_memory_error() {
     // 8000 characters are 16000 bytes.
     fills_memory("chars", 16_000);
@@ -257,6 +268,30 @@ fn only_the_thread_whose_native_overshot_gets_the_error() {
             outcome, 0,
             "bit 1: the allocating thread missed an error; bit 2: the other thread got one; \
              bit 4: the other thread did not run"
+        );
+    });
+}
+
+#[test]
+fn a_thread_that_allocates_nothing_is_not_blamed_for_data_kept_over_the_limit() {
+    with_vm(HEAP, |vm| {
+        let outcome = call(vm, "keptBuffer");
+        assert_eq!(
+            outcome, 0,
+            "bit 1: the append missed the error; bit 2: the other thread got one; \
+             bit 4: the other thread did not run; bit 8: a call that allocates nothing threw"
+        );
+    });
+}
+
+#[test]
+fn a_thread_that_wakes_is_not_blamed_for_data_another_thread_keeps() {
+    with_vm(HEAP, |vm| {
+        let outcome = call(vm, "sleepingWhileAnotherKeeps");
+        assert_eq!(
+            outcome, 0,
+            "bit 1: the holder got no error; bit 2: the holder's sleep threw; \
+             bit 8: this thread's sleep or join threw"
         );
     });
 }

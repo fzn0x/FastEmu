@@ -44,6 +44,15 @@ pub struct Ctx<'vm> {
     pub(crate) state: MutexGuard<'vm, VmState>,
     pub(crate) thread: Box<ThreadStack>,
     pub(crate) tid: ThreadId,
+    /// What the heap counted when the interpreter started the native
+    /// method this thread runs now, with what other threads added or freed
+    /// while this one gave up the VM lock taken off. A native that returns
+    /// with the count above it has grown the heap itself, and only then is
+    /// it told when the live data no longer fits
+    /// ([`Ctx::safepoint_after_native`]).
+    pub(crate) baseline: usize,
+    /// What the heap counted when this thread last gave up the VM lock.
+    parked_used: usize,
 }
 
 impl<'vm> Ctx<'vm> {
@@ -59,25 +68,39 @@ impl<'vm> Ctx<'vm> {
             .get_mut(&tid)
             .expect("a thread enters after it is registered");
         std::mem::swap(&mut thread, &mut entry.stack);
+        let baseline = state.heap.used();
         Self {
             shared,
             state,
             thread,
             tid,
+            baseline,
+            parked_used: baseline,
+        }
+    }
+
+    fn swap_stack(&mut self) {
+        if let Some(entry) = self.state.threads.get_mut(&self.tid) {
+            std::mem::swap(&mut entry.stack, &mut self.thread);
         }
     }
 
     /// Moves this thread's stack into its table entry, where a collection
     /// on another thread finds its roots, before the lock is released.
     fn park_stack(&mut self) {
-        if let Some(entry) = self.state.threads.get_mut(&self.tid) {
-            std::mem::swap(&mut entry.stack, &mut self.thread);
-        }
+        self.parked_used = self.state.heap.used();
+        self.swap_stack();
     }
 
-    /// Takes the stack back after the lock is reacquired.
+    /// Takes the stack back after the lock is reacquired. What other
+    /// threads added or freed meanwhile is not this thread's doing, so the
+    /// baseline moves with it.
     fn unpark_stack(&mut self) {
-        self.park_stack();
+        self.swap_stack();
+        self.baseline = self
+            .baseline
+            .saturating_add(self.state.heap.used())
+            .saturating_sub(self.parked_used);
     }
 
     /// Releases the VM lock until the wait queue wakes this thread or
@@ -119,20 +142,26 @@ impl<'vm> Ctx<'vm> {
     /// The safepoint after a native method returned. It does what
     /// [`Ctx::safepoint`] does, and also throws `OutOfMemoryError` when a
     /// collection it had to run leaves more live data than the heap
-    /// holds.
+    /// holds, if the native grew the heap.
     ///
     /// A native cannot collect while it runs, since it may hold
     /// references the collector does not see, so what natives allocate
     /// (or grow, with [`Ctx::recount`]) is counted at once and judged
     /// here, after the collection has freed the garbage. Only the thread
-    /// that ran the native is told: the check follows its own call, with
-    /// the lock held since the native allocated, and a thread whose
-    /// native allocated nothing asks for no collection and gets no error.
+    /// that grew the heap is told: the heap must count more than it did
+    /// when the interpreter started the native, leaving out what other
+    /// threads added while this thread gave up the lock. A thread
+    /// whose native allocated nothing gets no error, even when another
+    /// thread's data keeps the heap over its limit and the collection
+    /// that thread asked for has not run yet. The decision is made before
+    /// the lock is handed over, so what another thread allocates after
+    /// this call is not blamed on it.
     pub(crate) fn safepoint_after_native(&mut self) -> JResult<()> {
         let mut over_limit = false;
         if self.state.heap.gc_requested() && !self.shared.is_stopping() {
+            let grew = self.state.heap.used() > self.baseline;
             self.collect();
-            over_limit = self.state.heap.used() > self.state.heap.limit();
+            over_limit = grew && self.state.heap.used() > self.state.heap.limit();
         }
         self.safepoint()?;
         if over_limit {

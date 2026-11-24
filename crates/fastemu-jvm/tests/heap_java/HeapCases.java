@@ -98,6 +98,25 @@ public class HeapCases {
         return -1;
     }
 
+    /**
+     * Resource streams of /big.bin (64 KiB), kept until one throws. Returns
+     * how many it held. Each stream's array is made, then the stream object
+     * is built around it by a second native, so the native that made the
+     * array has allocated before it calls another one.
+     */
+    static int streamsHeld() {
+        Vector keep = new Vector();
+        int i = 0;
+        try {
+            for (; i < 100; i++) {
+                keep.addElement(HeapCases.class.getResourceAsStream("/big.bin"));
+            }
+        } catch (OutOfMemoryError e) {
+            return i;
+        }
+        return -1;
+    }
+
     /** toCharArray of an 8000 character string, kept: 300 of them. */
     static int chars() {
         String s = new String(new char[8000]);
@@ -269,5 +288,133 @@ public class HeapCases {
             result |= 2;
         }
         return result;
+    }
+
+    /**
+     * This thread grows a buffer past the heap limit with natives and keeps
+     * it, so the live data stays over the limit after the error. The other
+     * thread allocates nothing. Returns 0 when this thread got the error
+     * from the append, no call that allocates nothing (length, sleep, join)
+     * threw in either thread, and a sum of 1 (no error from the append), 2
+     * (the other thread got one), 4 (the other thread did not run) and 8
+     * (a call of this thread that allocates nothing threw). The sizes fit
+     * the 256 KiB heap of the tests: the array and the buffer, 150000 and
+     * 147000 bytes, come to more than the heap.
+     */
+    static int keptBuffer() throws InterruptedException {
+        stop = false;
+        spins = 0;
+        spinnerFailed = false;
+        int result = 0;
+        Thread spinner = new Thread(new Spinner());
+        spinner.start();
+        if (!spinnerRuns()) {
+            result |= 4;
+        }
+        byte[] held = new byte[150000];
+        StringBuffer sb = new StringBuffer();
+        String piece = "01234567890123456789012345678901";
+        boolean caught = false;
+        try {
+            for (int i = 0; i < 200000; i++) {
+                sb.append(piece);
+            }
+        } catch (OutOfMemoryError e) {
+            caught = true;
+        }
+        if (!caught) {
+            result |= 1;
+        }
+        // The buffer is still held, and the heap is over its limit.
+        int kept = held.length;
+        try {
+            kept += sb.length();
+        } catch (OutOfMemoryError e) {
+            result |= 8;
+        }
+        for (int round = 0; round < 3; round++) {
+            try {
+                if (!spinnerRuns()) {
+                    result |= 4;
+                }
+            } catch (OutOfMemoryError e) {
+                result |= 8;
+            }
+        }
+        stop = true;
+        try {
+            spinner.join();
+        } catch (OutOfMemoryError e) {
+            result |= 8;
+        }
+        if (spinnerFailed) {
+            result |= 2;
+        }
+        return kept > 0 ? result : -1;
+    }
+
+    static volatile boolean holderGrown;
+    static volatile boolean holderDone;
+    static volatile int holderResult;
+    static volatile int holderKept;
+
+    /** Grows a buffer past the heap limit, keeps it, and waits. */
+    static class Holder implements Runnable {
+        public void run() {
+            byte[] held = new byte[150000];
+            StringBuffer sb = new StringBuffer();
+            String piece = "01234567890123456789012345678901";
+            try {
+                for (int i = 0; i < 200000; i++) {
+                    sb.append(piece);
+                }
+                holderResult |= 1;
+            } catch (OutOfMemoryError e) {
+                // The error is expected.
+            }
+            holderGrown = true;
+            try {
+                while (!holderDone) {
+                    Thread.sleep(1);
+                }
+            } catch (Throwable t) {
+                holderResult |= 2;
+            }
+            holderKept = held.length + sb.length();
+        }
+    }
+
+    /**
+     * Another thread grows a buffer past the heap limit and keeps it while
+     * this thread sleeps and wakes. Returns 0 when the holder got the error
+     * from its append and neither thread got one from a call that
+     * allocates nothing; a sum of 1 (the holder got no error), 2 (the
+     * holder's sleep threw) and 8 (this thread's sleep or join threw).
+     */
+    static int sleepingWhileAnotherKeeps() throws InterruptedException {
+        holderGrown = false;
+        holderDone = false;
+        holderResult = 0;
+        int result = 0;
+        Thread holder = new Thread(new Holder());
+        holder.start();
+        try {
+            for (int i = 0; i < 20000 && !holderGrown; i++) {
+                Thread.sleep(1);
+            }
+            // The holder keeps its data and sleeps; this thread does too.
+            for (int i = 0; i < 20; i++) {
+                Thread.sleep(1);
+            }
+        } catch (OutOfMemoryError e) {
+            result |= 8;
+        }
+        holderDone = true;
+        try {
+            holder.join();
+        } catch (OutOfMemoryError e) {
+            result |= 8;
+        }
+        return result | holderResult;
     }
 }

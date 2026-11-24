@@ -243,6 +243,7 @@ fn call(ctx: &mut Ctx<'_>, fi: usize, m: Arc<Method>, sp: &mut usize) -> Result<
                 .copied()
                 .filter(|v| !matches!(v, Value::Void))
                 .collect();
+            ctx.baseline = ctx.state.heap.used();
             let v = ctx.call_native(&m, &f, new_bp, &args)?;
             let s = &mut ctx.thread.slots;
             let mut top = new_bp;
