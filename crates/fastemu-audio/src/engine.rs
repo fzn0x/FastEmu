@@ -35,9 +35,9 @@ impl Default for EngineConfig {
 ///
 /// The engine does no work on its own: whoever owns the output calls
 /// [`Engine::render`] for each buffer, which mixes every playing player.
-/// With the `output` feature, [`AudioOutput`](crate::AudioOutput) does
-/// that from the audio device's thread; [`NullOutput`](crate::NullOutput)
-/// does it in real time without a device; tests call it directly.
+/// With the `output` feature, `AudioOutput` does that from the audio
+/// device's thread; [`NullOutput`](crate::NullOutput) does it in real
+/// time without a device; tests call it directly.
 #[derive(Clone)]
 pub struct Engine {
     pub(crate) shared: Arc<Shared>,
