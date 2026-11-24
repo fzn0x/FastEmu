@@ -8,7 +8,9 @@
 //! vendor; [`Vendor::of`] reads the vendor from the profile's id.
 //! `docs/architecture/vendors.md` lists what each vendor gets.
 
+mod clip;
 pub(crate) mod device;
+pub mod siemens;
 
 use fastemu_core::DeviceProfile;
 use fastemu_jvm::NativeClass;
@@ -65,10 +67,10 @@ impl Vendor {
 /// The classes of `vendor`'s own APIs. Nokia's are in [`crate::nokia`].
 pub fn classes(vendor: Vendor) -> Vec<NativeClass> {
     match vendor {
+        Vendor::Siemens => siemens::classes(),
         Vendor::Generic
         | Vendor::Nokia
         | Vendor::SonyEricsson
-        | Vendor::Siemens
         | Vendor::Samsung
         | Vendor::Motorola
         | Vendor::Lg => Vec::new(),

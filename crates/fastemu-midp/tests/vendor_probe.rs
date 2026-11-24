@@ -12,12 +12,16 @@ const NOKIA: &str = "com.nokia.mid.ui.FullCanvas com.nokia.mid.ui.DirectGraphics
                      com.nokia.mid.ui.DirectUtils com.nokia.mid.ui.DeviceControl \
                      com.nokia.mid.sound.Sound";
 
+const SIEMENS: &str = "com.siemens.mp.game.Light com.siemens.mp.game.Sprite \
+                       com.siemens.mp.ui.Image";
+
 /// What the probe finds on a profile of each maker, by the first word of
 /// the profile id.
 fn expected(id: &str) -> String {
     let maker = id.split('-').next().unwrap_or_default();
     let found = match maker {
         "generic" | "nokia" | "sonyericsson" => NOKIA,
+        "siemens" => SIEMENS,
         _ => "",
     };
     format!("found: {found}").trim_end().to_owned()
