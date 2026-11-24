@@ -195,7 +195,13 @@ fn print_with_prefix(ctx: &mut Ctx<'_>, exc: ObjRef, prefix: &str, level: LogLev
 
 /// What a thread prints when an exception ends it.
 pub(crate) fn report_uncaught(ctx: &mut Ctx<'_>, exc: ObjRef) {
-    let name = ctx.state.threads[&ctx.tid].name.clone();
+    let thread = ctx.state.threads[&ctx.tid].java_thread;
+    let name = ctx
+        .try_payload::<super::thread::ThreadData>(thread)
+        .map_or_else(
+            || ctx.state.threads[&ctx.tid].name.clone(),
+            |d| d.name.clone(),
+        );
     print_with_prefix(
         ctx,
         exc,
