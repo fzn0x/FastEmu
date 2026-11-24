@@ -2,9 +2,10 @@
 //! [`NativeClass`] descriptions into plain data.
 //!
 //! Every instance's virtual machine gets the CLDC library of `fastemu-jvm`
-//! and the classes of `fastemu_midp::classes`, the second replacing a
-//! library class of the same name, as `Vm::new` does. This module builds
-//! the same set without starting a machine.
+//! and the classes `fastemu_midp::classes` gives its device profile, the
+//! second replacing a library class of the same name, as `Vm::new` does.
+//! This module builds that set without starting a machine, for every
+//! built-in profile at once, so the vendor APIs are in it too.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -133,10 +134,21 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// The classes of the CLDC library and of the MIDP runtime.
+    /// The classes of the CLDC library and of the MIDP runtime on every
+    /// built-in device profile: all of the default profile's, then each
+    /// class another profile adds, such as a maker's vendor API.
     pub fn load() -> Self {
+        let default = fastemu_core::default_profile();
         let mut natives = fastemu_jvm::library();
-        natives.extend(fastemu_midp::classes());
+        natives.extend(fastemu_midp::classes(&default));
+        let mut seen: HashSet<String> = natives.iter().map(|n| n.name().to_owned()).collect();
+        for profile in fastemu_core::builtin_profiles() {
+            for class in fastemu_midp::classes(&profile) {
+                if seen.insert(class.name().to_owned()) {
+                    natives.push(class);
+                }
+            }
+        }
         Self::from_natives(&natives)
     }
 
