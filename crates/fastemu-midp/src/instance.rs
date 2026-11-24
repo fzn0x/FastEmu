@@ -6,8 +6,8 @@
 //! in order:
 //!
 //! - pause: `hideNotify` on the event thread, `pauseApp` on a lifecycle
-//!   thread (each waited for up to a second), then the VM and the sound
-//!   group pause;
+//!   thread once the lifecycle calls before it have returned (each waited
+//!   for up to a second), then the VM and the sound group pause;
 //! - resume: the VM and the sound group resume, `showNotify` and a full
 //!   repaint, then `startApp` on a lifecycle thread;
 //! - stop: `destroyApp(true)` on a lifecycle thread, waited for up to a
@@ -70,16 +70,21 @@ impl Drop for RaiseOnDrop {
     }
 }
 
-/// Starts a lifecycle thread running `which` and waits up to `timeout`
-/// for it. Returns whether it finished in time.
-fn run_lifecycle(vm: &Vm, which: Lifecycle, timeout: Duration) -> bool {
+/// Starts a lifecycle thread running `which` as call `turn` (see
+/// [`midlet::lifecycle`]) and waits up to `timeout` for it. Returns
+/// whether the thread started.
+fn run_lifecycle(vm: &Vm, which: Lifecycle, turn: u64, timeout: Duration) -> bool {
     let done = Arc::new(Done::default());
     let raise = RaiseOnDrop(Arc::clone(&done));
     let spawned = vm.spawn("MIDlet", move |ctx| {
         let _raise = raise;
-        midlet::lifecycle(ctx, which)
+        midlet::lifecycle(ctx, which, turn)
     });
-    spawned.is_ok() && done.wait(timeout)
+    if spawned.is_err() {
+        return false;
+    }
+    done.wait(timeout);
+    true
 }
 
 /// Runs `f` on the event thread and waits up to `timeout` for it.
@@ -106,6 +111,8 @@ struct Controller {
     rx: mpsc::Receiver<Control>,
     /// Whether the VM is paused.
     frozen: bool,
+    /// The turn the next lifecycle call takes; the launch took 0.
+    next_turn: u64,
 }
 
 impl Controller {
@@ -134,7 +141,7 @@ impl Controller {
         on_event_thread(&self.vm, LIFECYCLE_TIMEOUT, |ctx| {
             lcdui::event::set_visible(ctx, false)
         });
-        run_lifecycle(&self.vm, Lifecycle::Pause, LIFECYCLE_TIMEOUT);
+        self.call(Lifecycle::Pause, LIFECYCLE_TIMEOUT);
         self.vm.pause();
         if let Some(group) = &self.group {
             group.set_paused(true);
@@ -152,9 +159,15 @@ impl Controller {
         // while startApp is still on its way.
         self.host.set_status(InstanceStatus::Running);
         self.vm.post(|ctx| lcdui::event::set_visible(ctx, true));
-        let _ = self
-            .vm
-            .spawn("MIDlet", |ctx| midlet::lifecycle(ctx, Lifecycle::Resume));
+        self.call(Lifecycle::Resume, Duration::ZERO);
+    }
+
+    /// Starts `startApp` or `pauseApp` in its turn, after the calls before
+    /// it, and waits up to `timeout` for it.
+    fn call(&mut self, which: Lifecycle, timeout: Duration) {
+        if run_lifecycle(&self.vm, which, self.next_turn, timeout) {
+            self.next_turn += 1;
+        }
     }
 
     fn thaw(&mut self) {
@@ -173,7 +186,9 @@ impl Controller {
             return;
         }
         self.thaw();
-        run_lifecycle(&self.vm, Lifecycle::Destroy, LIFECYCLE_TIMEOUT);
+        // destroyApp takes no turn: it runs even beside a startApp that
+        // never returns.
+        run_lifecycle(&self.vm, Lifecycle::Destroy, 0, LIFECYCLE_TIMEOUT);
     }
 
     /// Ends every thread of the VM and the instance's sound.
@@ -226,6 +241,7 @@ impl MidpInstance {
             group: group.clone(),
             rx,
             frozen: false,
+            next_turn: 1,
         };
         std::thread::Builder::new()
             .name(format!("instance {} control", host.id()))

@@ -96,7 +96,11 @@ apps pass one with output, the headless runner and tests pass none.
 - **Lifecycle threads** run the constructor and `startApp` on one thread,
   and each later `startApp`, `pauseApp` or `destroyApp` on a fresh one, so
   a game that loops inside `startApp` still gets paints and keys
-  (`docs/compat/notes/02-events-threads.md`).
+  (`docs/compat/notes/02-events-threads.md`). The calls still run one at
+  a time, in the order the control thread started them, as on a phone's
+  single lifecycle thread: a later `startApp` or `pauseApp` waits until
+  the call before it has returned. Only `destroyApp` runs at once, beside
+  a `startApp` that never returns; the calls still waiting then give up.
 - **The control thread** is a host thread that owns the `Vm` and applies
   pause, resume, stop, `notifyDestroyed`, `resumeRequest` and crashes one
   at a time. `Instance` methods only send it a message.

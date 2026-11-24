@@ -276,6 +276,34 @@ fn stopping_a_paused_instance_still_destroys_the_midlet() {
 }
 
 #[test]
+fn lifecycle_calls_wait_for_a_start_app_still_running() {
+    let Some(jar) = suite("slow-start") else {
+        return;
+    };
+    let mut run = Running::launch(&jar, midlet::SLOW_START);
+    run.wait_log("start enter 1");
+    run.instance.pause();
+    run.wait_status(|s| *s == InstanceStatus::Paused);
+    run.instance.resume();
+    run.wait_log("start exit 2");
+    let lines = run.lines();
+    let at = |needle: &str| lines.iter().position(|l| l == needle);
+    assert!(
+        !lines.iter().any(|l| l.starts_with("overlap")),
+        "{}",
+        lines.join("\n")
+    );
+    assert!(
+        at("start exit 1") < at("pauseApp") && at("pauseApp") < at("start enter 2"),
+        "pauseApp and the second startApp follow the first:\n{}",
+        lines.join("\n")
+    );
+    run.instance.stop();
+    run.wait_status(|s| *s == InstanceStatus::Exited);
+    assert!(run.has("destroyApp true"), "{}", run.dump());
+}
+
+#[test]
 fn a_crash_in_start_app_ends_the_instance() {
     let Some(jar) = suite("crash") else { return };
     let mut run = Running::launch(&jar, midlet::CRASH);

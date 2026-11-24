@@ -5,11 +5,21 @@
 //! thread, so a game that never returns from `startApp` (it runs its game
 //! loop there) still gets painted and receives keys. The instance's
 //! control thread starts them; see [`crate::instance`].
+//!
+//! They run one at a time, in the order the control thread started them,
+//! as on a phone's single lifecycle thread: each call has a turn, and its
+//! thread waits until the call before it has returned. A `startApp` that
+//! is still loading therefore sees no `pauseApp` and no second `startApp`
+//! beside it. `destroyApp` alone does not wait, so a game that never
+//! returns from `startApp` can still be stopped; the calls still waiting
+//! then give up.
 
 use std::sync::Arc;
 
 use fastemu_core::{InstanceStatus, LogLevel, NetworkPolicy};
-use fastemu_jvm::{Ctx, GlobalRef, JResult, NativeClass, ObjRef, Throw, Value, classfile::access};
+use fastemu_jvm::{
+    Ctx, GlobalRef, JResult, NativeClass, ObjRef, Throw, Value, Wake, classfile::access,
+};
 
 use crate::env::env;
 use crate::host::Control;
@@ -37,6 +47,12 @@ struct MidletState {
     /// Set while the runtime runs the MIDlet's constructor, the only time
     /// `MIDlet()` may run.
     constructing: bool,
+    /// The turn of the lifecycle call that may run now; [`launch`] has
+    /// turn 0.
+    turn: u64,
+    /// Set when `destroyApp` starts, so calls waiting for their turn give
+    /// up.
+    destroying: bool,
 }
 
 fn midlet_state<'a>(ctx: &'a mut Ctx<'_>) -> &'a mut MidletState {
@@ -81,11 +97,44 @@ fn or_crash<T>(ctx: &mut Ctx<'_>, what: &str, result: JResult<T>) -> JResult<Opt
     }
 }
 
-/// The body of the first lifecycle thread: loads the MIDlet class named
-/// `class_name` (a binary name such as `com.acme.Game`), runs its
+/// Waits until lifecycle call `turn` may run. Returns `false` when the
+/// MIDlet is being destroyed instead.
+fn wait_for_turn(ctx: &mut Ctx<'_>, turn: u64) -> JResult<bool> {
+    loop {
+        let st = midlet_state(ctx);
+        if st.destroying {
+            return Ok(false);
+        }
+        if st.turn == turn {
+            return Ok(true);
+        }
+        match ctx.wait_until(None)? {
+            Wake::Paused => ctx.yield_now()?,
+            Wake::Interrupted => {
+                ctx.take_interrupt();
+            }
+            Wake::Notified | Wake::TimedOut => {}
+        }
+    }
+}
+
+/// Lets the next lifecycle call run.
+fn end_turn(ctx: &mut Ctx<'_>) {
+    midlet_state(ctx).turn += 1;
+    ctx.notify_waiters();
+}
+
+/// The body of the first lifecycle thread, turn 0: loads the MIDlet class
+/// named `class_name` (a binary name such as `com.acme.Game`), runs its
 /// constructor and then `startApp`. A missing class, a class that is not
 /// a MIDlet, or an exception from the constructor crashes the instance.
 pub fn launch(ctx: &mut Ctx<'_>, class_name: &str) -> JResult<()> {
+    let result = construct_and_start(ctx, class_name);
+    end_turn(ctx);
+    result
+}
+
+fn construct_and_start(ctx: &mut Ctx<'_>, class_name: &str) -> JResult<()> {
     let internal = class_name.replace('.', "/");
     let loaded = ctx.find_class(&internal);
     let what = format!("loading the MIDlet class {class_name}");
@@ -130,9 +179,26 @@ fn start_app(ctx: &mut Ctx<'_>, midlet: ObjRef) -> JResult<()> {
     }
 }
 
-/// The body of a later lifecycle thread. Without a MIDlet (its
-/// constructor failed or has not finished) it does nothing.
-pub fn lifecycle(ctx: &mut Ctx<'_>, which: Lifecycle) -> JResult<()> {
+/// The body of a later lifecycle thread. `turn` is the call's place in
+/// the order the control thread started lifecycle calls, counting
+/// [`launch`] as 0; the call waits until every earlier one has returned.
+/// `Lifecycle::Destroy` ignores it and runs at once. Without a MIDlet
+/// (its constructor failed) the call does nothing.
+pub fn lifecycle(ctx: &mut Ctx<'_>, which: Lifecycle, turn: u64) -> JResult<()> {
+    if which == Lifecycle::Destroy {
+        midlet_state(ctx).destroying = true;
+        ctx.notify_waiters();
+    } else if !wait_for_turn(ctx, turn)? {
+        return Ok(());
+    }
+    let result = run_lifecycle(ctx, which);
+    if which != Lifecycle::Destroy {
+        end_turn(ctx);
+    }
+    result
+}
+
+fn run_lifecycle(ctx: &mut Ctx<'_>, which: Lifecycle) -> JResult<()> {
     let Some(midlet) = midlet(ctx) else {
         return Ok(());
     };
