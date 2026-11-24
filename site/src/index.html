@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FastEmu: play J2ME games on modern computers and phones</title>
+<meta name="description" content="FastEmu is a free Java ME (J2ME) emulator written in Rust. It runs .jar and .jad games, many at once in one window, on Windows, Linux, macOS and Android.">
+<meta name="theme-color" content="#0a0a0a">
+<meta property="og:title" content="FastEmu">
+<meta property="og:description" content="Play J2ME games on modern computers and phones, many at once.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://fastemu.functionx.dev/">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/landing.css">
+<script>document.documentElement.classList.add('js')</script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/" aria-label="FastEmu home"><img src="/assets/logo-dark.svg" alt="FastEmu" width="130" height="29"></a>
+  <nav aria-label="Main">
+    <a href="/docs/">Docs</a>
+    <a href="https://github.com/fzn0x/FastEmu">GitHub</a>
+    <a class="btn btn-small" href="https://github.com/fzn0x/FastEmu/releases/latest">Download</a>
+  </nav>
+</header>
+
+<main>
+<section class="hero">
+  <h1>Play J2ME games on modern computers and phones, many at once.</h1>
+  <p class="lead">FastEmu is a free Java ME emulator written in Rust. It runs <code>.jar</code> and <code>.jad</code> games on Windows, Linux, macOS and Android.</p>
+  <div class="cta">
+    <a class="btn" href="https://github.com/fzn0x/FastEmu/releases/latest">Download</a>
+    <a class="btn btn-ghost" href="https://github.com/fzn0x/FastEmu">GitHub</a>
+  </div>
+</section>
+
+<section class="bento" aria-label="Features">
+
+  <!-- 1. Many games at once -->
+  <article class="card c-wide">
+    <div class="mock m-games" aria-hidden="true">
+      <div class="phones">
+        <div class="ph"><svg viewBox="0 0 48 64" class="s-blocks">
+          <rect x="0" y="56" width="40" height="8" fill="#3a3a3a"/><rect x="40" y="56" width="8" height="8" fill="#5eead4"/>
+          <rect x="8" y="48" width="16" height="8" fill="#2a2a2a"/>
+          <g class="fall" fill="#5eead4"><rect x="16" y="0" width="8" height="8"/><rect x="24" y="0" width="8" height="8"/><rect x="32" y="0" width="8" height="8"/><rect x="32" y="8" width="8" height="8"/></g></svg></div>
+        <div class="ph"><svg viewBox="0 0 48 64" class="s-pong">
+          <path d="M24 0V64" stroke="#2f2f2f" stroke-width="2" stroke-dasharray="4 4"/>
+          <rect class="pad pl" x="3" y="20" width="3" height="12" fill="#8a8a8a"/><rect class="pad pr" x="42" y="36" width="3" height="12" fill="#8a8a8a"/>
+          <rect class="ball" x="0" y="0" width="4" height="4" fill="#5eead4"/></svg></div>
+        <div class="ph"><svg viewBox="0 0 48 64" class="s-snake">
+          <rect class="apple" x="36" y="44" width="4" height="4" fill="#5eead4"/>
+          <g class="snake" fill="#bdbdbd"><rect x="4" y="8" width="4" height="4"/><rect x="8" y="8" width="4" height="4"/><rect x="12" y="8" width="4" height="4"/><rect x="16" y="8" width="4" height="4"/><rect x="20" y="8" width="4" height="4" fill="#fafafa"/></g></svg></div>
+        <div class="ph"><svg viewBox="0 0 48 64" class="s-runner">
+          <rect x="0" y="52" width="48" height="2" fill="#3a3a3a"/>
+          <rect class="hero-b" x="8" y="42" width="6" height="10" fill="#5eead4"/>
+          <rect class="obst" x="48" y="44" width="6" height="8" fill="#8a8a8a"/></svg></div>
+        <div class="ph"><svg viewBox="0 0 48 64" class="s-road">
+          <rect x="0" y="0" width="6" height="64" fill="#242424"/><rect x="42" y="0" width="6" height="64" fill="#242424"/>
+          <g class="dash" fill="#4a4a4a"><rect x="23" y="-32" width="2" height="8"/><rect x="23" y="-16" width="2" height="8"/><rect x="23" y="0" width="2" height="8"/><rect x="23" y="16" width="2" height="8"/><rect x="23" y="32" width="2" height="8"/><rect x="23" y="48" width="2" height="8"/></g>
+          <rect class="rival" x="10" y="0" width="10" height="14" fill="#8a8a8a"/>
+          <rect class="car" x="28" y="46" width="10" height="14" fill="#5eead4"/></svg></div>
+        <div class="ph"><svg viewBox="0 0 48 64" class="s-shoot">
+          <g class="foes" fill="#8a8a8a"><rect x="6" y="6" width="6" height="5"/><rect x="16" y="6" width="6" height="5"/><rect x="26" y="6" width="6" height="5"/><rect x="36" y="6" width="6" height="5"/></g>
+          <g class="ship"><path d="M24 50l5 10h-10z" fill="#5eead4"/><rect class="shot" x="23" y="46" width="2" height="5" fill="#fafafa"/></g></svg></div>
+      </div>
+    </div>
+    <h2>Many games at once in one window</h2>
+    <p>Every game gets its own tile. Keep a few running side by side, or pause the ones you are not watching.</p>
+  </article>
+
+  <!-- 2. Each game is its own phone -->
+  <article class="card c-narrow">
+    <div class="mock m-own" aria-hidden="true">
+      <div class="twin">
+        <div class="unit">
+          <div class="ph"><svg viewBox="0 0 48 64" class="s-blocks">
+            <rect x="0" y="56" width="40" height="8" fill="#3a3a3a"/><rect x="40" y="56" width="8" height="8" fill="#5eead4"/><rect x="8" y="48" width="16" height="8" fill="#2a2a2a"/>
+            <g class="fall" fill="#5eead4"><rect x="16" y="0" width="8" height="8"/><rect x="24" y="0" width="8" height="8"/><rect x="32" y="0" width="8" height="8"/><rect x="32" y="8" width="8" height="8"/></g></svg></div>
+          <ul class="rows">
+            <li><span>VM</span><b>copy 1</b></li>
+            <li><span>Saves</span><b>slot A</b></li>
+            <li><span>Sound</span><i class="eq"><u></u><u></u><u></u><u></u></i></li>
+          </ul>
+        </div>
+        <div class="unit late">
+          <div class="ph"><svg viewBox="0 0 48 64" class="s-blocks">
+            <rect x="0" y="56" width="40" height="8" fill="#3a3a3a"/><rect x="40" y="56" width="8" height="8" fill="#5eead4"/><rect x="8" y="48" width="16" height="8" fill="#2a2a2a"/>
+            <g class="fall" fill="#5eead4"><rect x="16" y="0" width="8" height="8"/><rect x="24" y="0" width="8" height="8"/><rect x="32" y="0" width="8" height="8"/><rect x="32" y="8" width="8" height="8"/></g></svg></div>
+          <ul class="rows">
+            <li><span>VM</span><b>copy 2</b></li>
+            <li><span>Saves</span><b>slot B</b></li>
+            <li><span>Sound</span><i class="eq"><u></u><u></u><u></u><u></u></i></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <h2>Each game is its own phone</h2>
+    <p>Each game has its own virtual machine, record stores and sound. Two copies of one game keep separate saves.</p>
+  </article>
+
+  <!-- 3. Platforms -->
+  <article class="card c-third">
+    <div class="mock m-os" aria-hidden="true">
+      <div class="tabs">
+        <span class="pill"></span>
+        <span class="tab">Windows</span><span class="tab">Linux</span><span class="tab">macOS</span><span class="tab">Android</span>
+      </div>
+      <div class="panels">
+        <div class="pn"><div class="win"><div class="bar"><em>FastEmu</em><s></s><s></s><s></s></div><div class="body"><u></u><u></u><u></u><u></u></div></div></div>
+        <div class="pn"><div class="win lx"><div class="bar"><b></b><em>FastEmu</em></div><div class="body"><u></u><u></u><u></u><u></u></div></div></div>
+        <div class="pn"><div class="win mac"><div class="bar"><s></s><s></s><s></s><em>FastEmu</em></div><div class="body"><u></u><u></u><u></u><u></u></div></div></div>
+        <div class="pn"><div class="droid"><div class="body"><u></u><u></u><u></u><u></u></div><div class="nav"><s></s></div></div></div>
+      </div>
+    </div>
+    <h2>Windows, Linux, macOS and Android</h2>
+    <p>One program for the desktop and one app for Android, with the same interface and the same settings.</p>
+  </article>
+
+  <!-- 4. MIDP and vendor APIs -->
+  <article class="card c-third">
+    <div class="mock m-api" aria-hidden="true">
+      <ul class="apis">
+        <li><span>CLDC 1.1</span><code>JSR 139</code><i></i></li>
+        <li><span>MIDP 2.0</span><code>JSR 118</code><i></i></li>
+        <li><span>Game API</span><code>lcdui.game</code><i></i></li>
+        <li><span>MMAPI sound</span><code>JSR 135</code><i></i></li>
+        <li><span>Nokia UI API</span><code>com.nokia.mid.ui</code><i></i></li>
+      </ul>
+    </div>
+    <h2>MIDP 2.0 and the vendor APIs</h2>
+    <p>Runs the CLDC 1.1 and MIDP 2.0 games of the 2000s, with MMAPI sound and the Nokia UI API.</p>
+  </article>
+
+  <!-- 5. Keypad or keyboard -->
+  <article class="card c-third">
+    <div class="mock m-keys" aria-hidden="true">
+      <div class="kbd">
+        <span class="cap k1"><i>&uarr;</i></span>
+        <span class="cap k2"><i>&rarr;</i></span>
+        <span class="cap k3 lit wide"><i>Enter</i></span>
+        <span class="cap k4"><i>5</i></span>
+      </div>
+      <div class="pad">
+        <div class="dpad">
+          <span class="d d-up k1"><b>&#9650;</b></span>
+          <span class="d d-left"><b>&#9664;</b></span>
+          <span class="d d-ok k3 lit"><b>OK</b></span>
+          <span class="d d-right k2"><b>&#9654;</b></span>
+          <span class="d d-down"><b>&#9660;</b></span>
+        </div>
+        <div class="keys">
+          <span class="key"><b>1</b></span><span class="key"><b>2</b></span><span class="key"><b>3</b></span>
+          <span class="key"><b>4</b></span><span class="key k4"><b>5</b></span><span class="key"><b>6</b></span>
+          <span class="key"><b>7</b></span><span class="key"><b>8</b></span><span class="key"><b>9</b></span>
+          <span class="key"><b>*</b></span><span class="key"><b>0</b></span><span class="key"><b>#</b></span>
+        </div>
+      </div>
+    </div>
+    <h2>Keypad or keyboard</h2>
+    <p>Play with the keyboard, a touch keypad or both. Soft keys and arrows follow the key codes of the phone profile you pick.</p>
+  </article>
+
+  <!-- 6. Headless runner -->
+  <article class="card c-full">
+    <div class="mock m-term" aria-hidden="true">
+      <div class="term">
+        <div class="chrome"><s></s><s></s><s></s><em>terminal</em></div>
+        <pre class="tbody"><span class="prompt">$ </span><span class="cmd" id="cmd">fastemu run snake.jar --frames 300 --screenshot snake.png</span><span class="caret"></span>
+<span class="out"><span class="ol">loaded snake.jar (Snake 1.2)</span>
+<span class="ol">profile generic-240x320, 1 instance</span>
+<span class="ol">ran 300 frames, 0 errors</span>
+<span class="ol ok">saved snake.png (240x320)</span></span></pre>
+      </div>
+    </div>
+    <h2>A headless runner for testing</h2>
+    <p>Run a game with no window for a set number of frames, save a screenshot and read the log. Use it in scripts and in CI.</p>
+  </article>
+
+</section>
+
+<section class="closing">
+  <h2>Free software, built in the open</h2>
+  <ul class="facts">
+    <li><b>Free and open source</b><span>GPL-3.0-or-later</span></li>
+    <li><b>Written in Rust</b><span>with GPUI for the interface</span></li>
+    <li><b>Runs .jar and .jad files</b><span>Java ME games and apps</span></li>
+    <li><b>Four systems</b><span>Windows, Linux, macOS and Android</span></li>
+  </ul>
+  <div class="cta">
+    <a class="btn" href="https://github.com/fzn0x/FastEmu/releases/latest">Download</a>
+    <a class="btn btn-ghost" href="/docs/getting-started/">Read the guide</a>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="foot">
+    <div>
+      <a class="brand" href="/" aria-label="FastEmu home"><img src="/assets/logo-dark.svg" alt="FastEmu" width="104" height="23"></a>
+      <p>Free software under the <a href="https://github.com/fzn0x/FastEmu/blob/main/LICENSE">GPL-3.0-or-later</a> license.</p>
+    </div>
+    <p class="credits">Thanks to <a href="https://github.com/barteo/microemu">MicroEmulator</a> and <a href="https://github.com/nikita36078/J2ME-Loader">J2ME Loader</a>, the emulators that kept these games playable for more than 10 years, and to <a href="https://zed.dev/">Zed</a> for GPUI and the Zed Android port.</p>
+    <nav aria-label="Footer"><a href="https://github.com/fzn0x/FastEmu">GitHub</a><a href="/docs/">Docs</a><a href="https://github.com/fzn0x/FastEmu/issues">Issues</a></nav>
+  </div>
+</footer>
+<script src="/landing.js"></script>
+</body>
+</html>
