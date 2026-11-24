@@ -185,5 +185,9 @@ the vendor classes behave as if the sound played.
   `lcdui.Image`, Samsung's extras, Motorola's game and FunLight packages,
   Sony Ericsson's Capuchin, LG's other `mmpp` classes, and the later Nokia
   UI classes (`TextEditor`, gestures, orientation).
+- A Samsung or an LG profile. No built-in profile has a `samsung` or
+  `lg` id, so only the tests, with ids of their own, reach those
+  makers' classes, and `cargo xtask coverage`, which reads the built-in
+  profiles, counts them as missing.
 - Telling the app about lights and vibration, which only reach the log.
 - Playing MMF clips.
