@@ -14,34 +14,44 @@ Limited Device Configuration: threads, `java.lang`, `java.util`,
 life cycle, `javax.microedition.lcdui` (forms and their items, lists,
 text boxes, alerts, tickers and custom canvases), record stores for
 saves, and the connections of `javax.microedition.io` (HTTP, HTTPS,
-sockets, datagrams and the push registry), which stay off until you
-allow a game network access.
+sockets and datagrams), which stay off until you allow a game network
+access. The push registry takes a game's requests but never starts a
+game by itself.
+
+**Messaging.** The Wireless Messaging API (JSR-120) is there so games
+that use it start, but no message is sent or received: a game that
+sends an SMS is told the send failed, and the attempt shows in its log.
 
 **Game API.** `javax.microedition.lcdui.game`: `Sprite`, `TiledLayer`,
 `LayerManager` and `GameCanvas`.
 
-**MMAPI sound.** The Mobile Media API (JSR 135) for sound: tone
-sequences, MIDI, WAV, MP3 and AMR playback, volume control.
+**MMAPI sound.** The Mobile Media API (JSR 135) for sound: tones and
+tone sequences, MIDI, WAV (PCM and ADPCM), MP3 and AMR playback, volume
+control.
 
 **Nokia UI API.** `com.nokia.mid.ui` for full-screen canvases,
 `DirectGraphics` and device control such as vibration and backlight
 calls, and `com.nokia.mid.sound` for the Nokia sound classes. Games
 see them on the Nokia, Sony Ericsson and generic profiles.
 
-**Other makers' APIs.** Siemens' game, colour game and image classes,
-and the device and sound classes of Samsung, Motorola and LG, each on
-its maker's profiles.
+**Other makers' APIs.** Siemens' game and colour game packages and its
+`ui.Image` class on the Siemens profile, and Motorola's backlight class
+on the Motorola profile. Samsung's sound clip, backlight and vibration
+classes and LG's backlight and vibration classes are in place too, but
+FastEmu has no Samsung or LG phone profile yet, so no game sees them.
 
 ## What does not work yet
 
-- **3D with JSR-184 (Mobile 3D Graphics).** Games that need it will
-  not run or will draw nothing.
-- **Bluetooth (JSR-82).** Calls fail as if the phone had no Bluetooth.
+- **3D with JSR-184 (Mobile 3D Graphics) or Mascot Capsule.** Games
+  that need it will not run or will draw nothing.
+- **Bluetooth (JSR-82).** Its classes are missing, as on a phone
+  without Bluetooth: a game that checks for them first carries on
+  without, and one that calls them fails with an error in its log.
 - **File connections (JSR-75).** `file://` connections fail. Games keep
   their saves in record stores, which do work.
 - **Rarer vendor APIs.** Siemens' phone, file and media classes,
-  Motorola's game and lights packages, Sony Ericsson's 3D (Capuchin)
-  and LG's MMPP classes are missing. A game that needs one may fail
+  Motorola's game and lights packages, Sony Ericsson's Capuchin and
+  LG's other MMPP classes are missing. A game that needs one may fail
   when it uses it.
 - **Native libraries and games that need a particular phone's
   firmware.** These cannot run.
@@ -84,21 +94,24 @@ cargo xtask compat path/to/games --seconds 20
 
 ## Why a game may misbehave
 
-Most problems come from one of three things:
+Most problems come from one of four things:
 
 1. **Wrong device profile.** The game expects another screen size or
    other key codes. See [Settings](/docs/settings/).
-2. **Wrong encoding.** Text shows as wrong characters. Change the
+2. **No touch screen.** A game played by touch gets no taps on a phone
+   without one. Turn on **Touch screen** in its settings.
+3. **Wrong encoding.** Text shows as wrong characters. Change the
    encoding in the settings.
-3. **A missing API.** The log names the class or method.
+4. **A missing API.** The log names the class or method.
 
 ## Reporting a game
 
-If a game does not run, open an issue at
-[github.com/fzn0x/FastEmu/issues](https://github.com/fzn0x/FastEmu/issues).
+If a game does not run, open a
+[game report](https://github.com/fzn0x/FastEmu/issues/new?template=game_report.yml).
 Please include:
 
-- the game's name, vendor and version, from the library;
+- the game's name, vendor and version, from the library, and the size
+  of its JAR;
 - your system and the FastEmu version;
 - the device profile and settings you used;
 - the log of the game, copied from the log panel;
