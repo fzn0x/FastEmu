@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=FastEmu
+GenericName=Java ME emulator
+Comment=Play Java ME games, many at once in one window
+Exec=fastemu %F
+Icon=dev.functionx.fastemu
+Terminal=false
+Categories=Game;Emulator;
+MimeType=application/java-archive;application/x-java-archive;text/vnd.sun.j2me.app-descriptor;
+Keywords=J2ME;Java;MIDP;MIDlet;phone;game;
+StartupWMClass=dev.functionx.fastemu
