@@ -50,7 +50,7 @@ FastEmu has no Samsung or LG phone profile yet, so no game sees them.
 - **File connections (JSR-75).** `file://` connections fail. Games keep
   their saves in record stores, which do work.
 - **Rarer vendor APIs.** Siemens' phone, file and media classes,
-  Motorola's game and lights packages, Sony Ericsson's Capuchin and
+  Motorola's game and FunLight packages, Sony Ericsson's Capuchin and
   LG's other MMPP classes are missing. A game that needs one may fail
   when it uses it.
 - **Native libraries and games that need a particular phone's
