@@ -231,6 +231,132 @@ fn last_index_of(ctx: &mut Ctx<'_>, vector: ObjRef, o: Option<ObjRef>, from: i32
     Ok(-1)
 }
 
+// Java's own Vector and Stack methods call these overridable methods of
+// theirs (Stack.pop calls size, peek and removeElementAt). Each runs a
+// game's override when the vector has one, as on Java, and the library's
+// code in Rust when it has none, holding the monitor the synchronized
+// method would.
+
+/// Runs `f` holding the monitor of `obj`, as a `synchronized` method.
+fn locked<T>(
+    ctx: &mut Ctx<'_>,
+    obj: ObjRef,
+    f: impl FnOnce(&mut Ctx<'_>) -> JResult<T>,
+) -> JResult<T> {
+    ctx.monitor_enter(obj)?;
+    let result = f(ctx);
+    ctx.monitor_exit(obj)?;
+    result
+}
+
+/// `size()`.
+fn size(ctx: &mut Ctx<'_>, vector: ObjRef) -> JResult<i32> {
+    if let Some(n) = ctx.call_if_overridden(vector, VECTOR, "size", "()I", &[])? {
+        return Ok(n.int());
+    }
+    let f = fields(ctx)?;
+    Ok(ctx.get_field(vector, f.count).int())
+}
+
+/// `elementAt(index)`.
+fn element_at_call(ctx: &mut Ctx<'_>, vector: ObjRef, index: i32) -> JResult<Value> {
+    let desc = "(I)Ljava/lang/Object;";
+    let args = [Value::Int(index)];
+    if let Some(e) = ctx.call_if_overridden(vector, VECTOR, "elementAt", desc, &args)? {
+        return Ok(e);
+    }
+    locked(ctx, vector, |ctx| {
+        Ok(value(element_at(ctx, vector, index)?))
+    })
+}
+
+/// `removeElementAt(index)`.
+fn remove_at_call(ctx: &mut Ctx<'_>, vector: ObjRef, index: i32) -> JResult<()> {
+    let args = [Value::Int(index)];
+    if ctx
+        .call_if_overridden(vector, VECTOR, "removeElementAt", "(I)V", &args)?
+        .is_some()
+    {
+        return Ok(());
+    }
+    locked(ctx, vector, |ctx| remove_at(ctx, vector, index))
+}
+
+/// `addElement(e)`.
+fn add_call(ctx: &mut Ctx<'_>, vector: ObjRef, e: Value) -> JResult<()> {
+    let desc = "(Ljava/lang/Object;)V";
+    if ctx
+        .call_if_overridden(vector, VECTOR, "addElement", desc, &[e])?
+        .is_some()
+    {
+        return Ok(());
+    }
+    locked(ctx, vector, |ctx| add(ctx, vector, e.obj()))
+}
+
+/// `indexOf(o, from)`.
+fn index_from_call(ctx: &mut Ctx<'_>, vector: ObjRef, o: Value, from: i32) -> JResult<i32> {
+    let desc = "(Ljava/lang/Object;I)I";
+    let args = [o, Value::Int(from)];
+    if let Some(i) = ctx.call_if_overridden(vector, VECTOR, "indexOf", desc, &args)? {
+        return Ok(i.int());
+    }
+    locked(ctx, vector, |ctx| index_of(ctx, vector, o.obj(), from))
+}
+
+/// `indexOf(o)`, which is `indexOf(o, 0)`.
+fn index_of_call(ctx: &mut Ctx<'_>, vector: ObjRef, o: Value) -> JResult<i32> {
+    let desc = "(Ljava/lang/Object;)I";
+    if let Some(i) = ctx.call_if_overridden(vector, VECTOR, "indexOf", desc, &[o])? {
+        return Ok(i.int());
+    }
+    index_from_call(ctx, vector, o, 0)
+}
+
+/// `lastIndexOf(o, from)`.
+fn last_index_from_call(ctx: &mut Ctx<'_>, vector: ObjRef, o: Value, from: i32) -> JResult<i32> {
+    let desc = "(Ljava/lang/Object;I)I";
+    let args = [o, Value::Int(from)];
+    if let Some(i) = ctx.call_if_overridden(vector, VECTOR, "lastIndexOf", desc, &args)? {
+        return Ok(i.int());
+    }
+    locked(ctx, vector, |ctx| last_index_of(ctx, vector, o.obj(), from))
+}
+
+/// `lastIndexOf(o)`, which is `lastIndexOf(o, elementCount - 1)`.
+fn last_index_of_call(ctx: &mut Ctx<'_>, vector: ObjRef, o: Value) -> JResult<i32> {
+    let desc = "(Ljava/lang/Object;)I";
+    if let Some(i) = ctx.call_if_overridden(vector, VECTOR, "lastIndexOf", desc, &[o])? {
+        return Ok(i.int());
+    }
+    locked(ctx, vector, |ctx| last_index_of_body(ctx, vector, o))
+}
+
+/// The body of `lastIndexOf(o)`.
+fn last_index_of_body(ctx: &mut Ctx<'_>, vector: ObjRef, o: Value) -> JResult<i32> {
+    let f = fields(ctx)?;
+    let count = ctx.get_field(vector, f.count).int();
+    last_index_from_call(ctx, vector, o, count.wrapping_sub(1))
+}
+
+/// `Stack.peek()`.
+fn peek_call(ctx: &mut Ctx<'_>, stack: ObjRef) -> JResult<Value> {
+    let desc = "()Ljava/lang/Object;";
+    if let Some(top) = ctx.call_if_overridden(stack, STACK, "peek", desc, &[])? {
+        return Ok(top);
+    }
+    locked(ctx, stack, |ctx| peek_body(ctx, stack))
+}
+
+/// The body of `Stack.peek()`.
+fn peek_body(ctx: &mut Ctx<'_>, stack: ObjRef) -> JResult<Value> {
+    let len = size(ctx, stack)?;
+    if len == 0 {
+        return Err(ctx.new_exception("java/util/EmptyStackException", None));
+    }
+    element_at_call(ctx, stack, len.wrapping_sub(1))
+}
+
 fn init(ctx: &mut Ctx<'_>, vector: ObjRef, capacity: i32, increment: i32) -> JResult<Value> {
     if capacity < 0 {
         let message = format!("Illegal Capacity: {capacity}");
@@ -345,16 +471,10 @@ fn vector_class() -> NativeClass {
             Ok(e.into())
         })
         .method("contains", "(Ljava/lang/Object;)Z", |ctx, a| {
-            ctx.monitor_enter(this(a))?;
-            let found = index_of(ctx, this(a), a[1].obj(), 0);
-            ctx.monitor_exit(this(a))?;
-            Ok(Value::from(found? >= 0))
+            Ok(Value::from(index_from_call(ctx, this(a), a[1], 0)? >= 0))
         })
         .method("indexOf", "(Ljava/lang/Object;)I", |ctx, a| {
-            ctx.monitor_enter(this(a))?;
-            let found = index_of(ctx, this(a), a[1].obj(), 0);
-            ctx.monitor_exit(this(a))?;
-            Ok(Value::Int(found?))
+            Ok(Value::Int(index_from_call(ctx, this(a), a[1], 0)?))
         });
     let class = sync(class, "copyInto", "([Ljava/lang/Object;)V", |ctx, a| {
         let f = fields(ctx)?;
@@ -416,14 +536,7 @@ fn vector_class() -> NativeClass {
         Ok(Value::Int(index_of(ctx, this(a), a[1].obj(), a[2].int())?))
     });
     let class = sync(class, "lastIndexOf", "(Ljava/lang/Object;)I", |ctx, a| {
-        let f = fields(ctx)?;
-        let count = ctx.get_field(this(a), f.count).int();
-        Ok(Value::Int(last_index_of(
-            ctx,
-            this(a),
-            a[1].obj(),
-            count.wrapping_sub(1),
-        )?))
+        Ok(Value::Int(last_index_of_body(ctx, this(a), a[1])?))
     });
     let class = sync(class, "lastIndexOf", "(Ljava/lang/Object;I)I", |ctx, a| {
         Ok(Value::Int(last_index_of(
@@ -502,11 +615,11 @@ fn vector_class() -> NativeClass {
         Ok(Value::Void)
     });
     let class = sync(class, "removeElement", "(Ljava/lang/Object;)Z", |ctx, a| {
-        let i = index_of(ctx, this(a), a[1].obj(), 0)?;
+        let i = index_of_call(ctx, this(a), a[1])?;
         if i < 0 {
             return Ok(Value::from(false));
         }
-        remove_at(ctx, this(a), i)?;
+        remove_at_call(ctx, this(a), i)?;
         Ok(Value::from(true))
     });
     let class = sync(class, "removeAllElements", "()V", |ctx, a| {
@@ -555,40 +668,28 @@ fn stack_class() -> NativeClass {
             "push",
             "(Ljava/lang/Object;)Ljava/lang/Object;",
             |ctx, a| {
-                ctx.monitor_enter(this(a))?;
-                let added = add(ctx, this(a), a[1].obj());
-                ctx.monitor_exit(this(a))?;
-                added?;
+                add_call(ctx, this(a), a[1])?;
                 Ok(a[1])
             },
         )
         .method("empty", "()Z", |ctx, a| {
-            let f = fields(ctx)?;
-            Ok(Value::from(ctx.get_field(this(a), f.count).int() == 0))
+            Ok(Value::from(size(ctx, this(a))? == 0))
         });
     let class = sync(class, "pop", "()Ljava/lang/Object;", |ctx, a| {
-        let f = fields(ctx)?;
-        let len = ctx.get_field(this(a), f.count).int();
-        if len == 0 {
-            return Err(ctx.new_exception("java/util/EmptyStackException", None));
-        }
-        let top = element_at(ctx, this(a), len.wrapping_sub(1))?;
-        remove_at(ctx, this(a), len.wrapping_sub(1))?;
-        Ok(value(top))
+        let len = size(ctx, this(a))?;
+        let top = peek_call(ctx, this(a))?;
+        remove_at_call(ctx, this(a), len.wrapping_sub(1))?;
+        Ok(top)
     });
     let class = sync(class, "peek", "()Ljava/lang/Object;", |ctx, a| {
-        let f = fields(ctx)?;
-        let len = ctx.get_field(this(a), f.count).int();
-        if len == 0 {
-            return Err(ctx.new_exception("java/util/EmptyStackException", None));
-        }
-        Ok(value(element_at(ctx, this(a), len.wrapping_sub(1))?))
+        peek_body(ctx, this(a))
     });
     sync(class, "search", "(Ljava/lang/Object;)I", |ctx, a| {
-        let f = fields(ctx)?;
-        let len = ctx.get_field(this(a), f.count).int();
-        let i = last_index_of(ctx, this(a), a[1].obj(), len.wrapping_sub(1))?;
-        Ok(Value::Int(if i >= 0 { len.wrapping_sub(i) } else { -1 }))
+        let i = last_index_of_call(ctx, this(a), a[1])?;
+        if i < 0 {
+            return Ok(Value::Int(-1));
+        }
+        Ok(Value::Int(size(ctx, this(a))?.wrapping_sub(i)))
     })
 }
 

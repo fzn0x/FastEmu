@@ -164,10 +164,89 @@ public class Vectors {
         }
     }
 
+    // A game's Stack that logs the methods Java's Stack and Vector call
+    // on themselves, so each call shows whether it went through the
+    // override.
+    static class Logged extends Stack {
+        final StringBuffer log = new StringBuffer();
+
+        public synchronized void addElement(Object o) {
+            log.append("add ");
+            super.addElement(o);
+        }
+
+        public synchronized void removeElementAt(int i) {
+            log.append("removeAt").append(i).append(' ');
+            super.removeElementAt(i);
+        }
+
+        public synchronized Object elementAt(int i) {
+            log.append("at").append(i).append(' ');
+            return super.elementAt(i);
+        }
+
+        public synchronized int size() {
+            log.append("size ");
+            return super.size();
+        }
+
+        public synchronized int indexOf(Object o, int from) {
+            log.append("indexOf").append(from).append(' ');
+            return super.indexOf(o, from);
+        }
+
+        public synchronized int lastIndexOf(Object o, int from) {
+            log.append("lastIndexOf").append(from).append(' ');
+            return super.lastIndexOf(o, from);
+        }
+
+        String take() {
+            String s = log.toString().trim();
+            log.setLength(0);
+            return s;
+        }
+    }
+
+    // One that changes what an element is, and lies about its size.
+    static class Shifted extends Stack {
+        public synchronized Object elementAt(int i) {
+            return "<" + super.elementAt(i) + ">";
+        }
+
+        public synchronized int size() {
+            return super.size() - 1;
+        }
+    }
+
+    static void overrides() {
+        Logged s = new Logged();
+        s.push("a");
+        s.push("b");
+        s.push("c");
+        System.out.println("push: " + s.take());
+        System.out.println("peek " + s.peek() + ": " + s.take());
+        System.out.println("pop " + s.pop() + ": " + s.take());
+        System.out.println("empty " + s.empty() + ": " + s.take());
+        System.out.println("search " + s.search("a") + ": " + s.take());
+        System.out.println("contains " + s.contains("b") + ": " + s.take());
+        System.out.println("indexOf " + s.indexOf("b") + ": " + s.take());
+        System.out.println("lastIndexOf " + s.lastIndexOf("b") + ": " + s.take());
+        System.out.println("removeElement " + s.removeElement("a") + ": " + s.take() + " " + s);
+        System.out.println("removeElement " + s.removeElement("z") + ": " + s.take());
+
+        Shifted t = new Shifted();
+        t.push("x");
+        t.push("y");
+        t.push("z");
+        System.out.println("shifted peek " + t.peek() + " pop " + t.pop() + " search " + t.search("x")
+            + " empty " + t.empty() + " " + t);
+    }
+
     public static void main(String[] args) {
         vectors();
         vectorErrors();
         enumerations();
         stacks();
+        overrides();
     }
 }
