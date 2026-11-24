@@ -104,15 +104,16 @@ class MainActivity : GameActivity() {
         if (intent?.action != Intent.ACTION_VIEW) return
         val uri = intent.data ?: return
         thread(name = "fastemu_open") {
-            val copy = GameFiles.copyIn(this, uri) ?: return@thread
+            val copy = GameFiles.copyIn(this, listOf(uri)).firstOrNull() ?: return@thread
             NativeBridge.nativeOpenUrl(Uri.fromFile(copy).toString())
         }
     }
 
     /**
-     * Shows Android's document picker for a game. Picking a `.jad` and its
-     * `.jar` together opens the descriptor with its JAR beside it. Called
-     * from Rust; the answer goes back through [NativeBridge.nativeSuitePicked].
+     * Shows Android's document picker for games. Picking a `.jad` and its
+     * `.jar` together keeps them side by side, so the descriptor finds its
+     * JAR. Called from Rust; the answer goes back through
+     * [NativeBridge.nativeSuitePicked].
      */
     @Suppress("unused")
     fun pickSuite(request: Long) {
@@ -136,11 +137,10 @@ class MainActivity : GameActivity() {
             return
         }
         thread(name = "fastemu_copy") {
-            val copies = uris.mapNotNull { GameFiles.copyIn(this, it) }
-            // A descriptor names its JAR, so it is what opens when both came.
-            val suite = copies.firstOrNull { it.extension.equals("jad", ignoreCase = true) }
-                ?: copies.firstOrNull()
-            NativeBridge.nativeSuitePicked(request, suite?.absolutePath)
+            val copies = GameFiles.copyIn(this, uris)
+            // The library keeps a descriptor over its JAR when both come.
+            val paths = copies.joinToString("\n") { it.absolutePath }
+            NativeBridge.nativeSuitePicked(request, paths.ifEmpty { null })
         }
     }
 

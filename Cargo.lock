@@ -2026,11 +2026,12 @@ name = "fastemu-android"
 version = "0.1.0"
 dependencies = [
  "android_logger",
- "fastemu-core",
+ "fastemu-audio",
+ "fastemu-midp",
+ "fastemu-ui",
  "futures",
  "gpui",
  "gpui_android",
- "image",
  "jni 0.21.1",
  "log",
 ]

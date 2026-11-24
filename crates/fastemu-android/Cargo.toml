@@ -12,20 +12,19 @@ homepage.workspace = true
 [lib]
 crate-type = ["cdylib", "lib"]
 
-[dependencies]
-# The virtual machine isn't ready; the app runs the mock launcher's games.
-fastemu-core = { workspace = true, features = ["mock"] }
-futures = "0.3"
-log = "0.4"
-
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.15"
+# Sound through AAudio with cpal; android-activity sets up the
+# ndk-context cpal reads.
+fastemu-audio = { workspace = true, features = ["output"] }
+fastemu-midp.workspace = true
+fastemu-ui.workspace = true
+futures = "0.3"
 # The same GPUI as gpui_android and the desktop app.
 gpui = { git = "https://github.com/Dylanmurzello/zed-android-port", rev = "746f088ee8d6b8b273354826757dd09e74565854", default-features = false }
 gpui_android = { path = "../gpui_android" }
-# GPUI's images are `image` frames; the version GPUI builds with.
-image = { version = "0.25", default-features = false }
 jni = "0.21"
+log = "0.4"
 
 [lints]
 workspace = true

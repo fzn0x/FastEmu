@@ -19,9 +19,9 @@ object NativeBridge {
     external fun nativeOpenUrl(url: String)
 
     /**
-     * The answer to [MainActivity.pickSuite]: the path of the picked game's
-     * copy, or null when the user cancelled or the copy failed.
+     * The answer to [MainActivity.pickSuite]: the paths of the picked files'
+     * copies, one per line, or null when the user cancelled or no copy worked.
      */
     @JvmStatic
-    external fun nativeSuitePicked(request: Long, path: String?)
+    external fun nativeSuitePicked(request: Long, paths: String?)
 }

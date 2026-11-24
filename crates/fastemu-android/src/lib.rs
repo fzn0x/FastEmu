@@ -1,15 +1,11 @@
 //! The FastEmu Android app's native library: the GameActivity entry point
-//! that runs FastEmu's GPUI views.
+//! that runs FastEmu's GPUI views (`fastemu-ui`) on `gpui_android`, with
+//! the real launcher and sound.
 //!
-//! The modules here hold what the app decides without Android or GPUI, so
-//! they build and test on any host: which phone key a hardware key presses,
-//! the on-screen keypad, where and how large the phone's screen is drawn,
-//! and the game the app runs.
+//! `files` holds what needs neither Android nor GPUI, so it builds and
+//! tests on any host.
 
-pub mod keymap;
-pub mod keypad;
-pub mod screen;
-pub mod session;
+pub mod files;
 
 #[cfg(target_os = "android")]
 mod android;

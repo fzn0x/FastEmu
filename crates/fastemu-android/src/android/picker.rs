@@ -4,7 +4,7 @@
 //! app ([`gpui_android::path_prompts`]). The Activity shows the system
 //! picker for `.jar` and `.jad` files, copies what the user picks into the
 //! app's storage (the picker gives content URIs, not paths), and reports the
-//! copy's path through `NativeBridge.nativeSuitePicked`.
+//! copies' paths, one per line, through `NativeBridge.nativeSuitePicked`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -60,9 +60,9 @@ fn show(prompt: PathPrompt) {
     }
 }
 
-/// `NativeBridge.nativeSuitePicked(request, path)`: the copy of the picked
-/// game, or `null` when the user cancelled or the copy failed. Called on the
-/// Activity's copying thread.
+/// `NativeBridge.nativeSuitePicked(request, paths)`: the copies of the
+/// picked files, one path per line, or `null` when the user cancelled or
+/// no copy worked. Called on the Activity's copying thread.
 // JNI finds a native method by its unmangled name.
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
@@ -70,15 +70,15 @@ pub extern "system" fn Java_io_github_fzn0x_fastemu_NativeBridge_nativeSuitePick
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     request: jlong,
-    path: JString<'local>,
+    paths: JString<'local>,
 ) {
-    let path = if path.is_null() {
+    let paths = if paths.is_null() {
         None
     } else {
-        match env.get_string(&path) {
-            Ok(path) => Some(PathBuf::from(String::from(path))),
+        match env.get_string(&paths) {
+            Ok(paths) => Some(crate::files::picked_paths(&String::from(paths))),
             Err(error) => {
-                log::error!("picker: could not read the picked path: {error}");
+                log::error!("picker: could not read the picked paths: {error}");
                 None
             }
         }
@@ -86,9 +86,9 @@ pub extern "system" fn Java_io_github_fzn0x_fastemu_NativeBridge_nativeSuitePick
     let answer = pending().remove(&request);
     match answer {
         Some(answer) => {
-            log::info!("picker: request {request} picked {path:?}");
+            log::info!("picker: request {request} picked {paths:?}");
             // The prompt's caller may have stopped waiting.
-            answer.send(path.map(|path| vec![path])).ok();
+            answer.send(paths.filter(|p| !p.is_empty())).ok();
         }
         None => log::warn!("picker: an answer to unknown request {request}"),
     }
