@@ -91,11 +91,18 @@ impl Tiles {
         let (px, py) = (i64::from(self.position.0), i64::from(self.position.1));
         let (w, h) = (i64::from(self.width), i64::from(self.height));
         let tile = i64::from(TILE);
-        let mut row = py.div_euclid(tile);
+        // Whole tiles above or left of the target are skipped, not
+        // stepped over one by one.
+        let skip = |start: i64| (-start).max(0) / tile;
         let mut top = i64::from(y) - py.rem_euclid(tile);
+        let mut row = py.div_euclid(tile) + skip(top);
+        top += skip(top) * tile;
+        let first_left = i64::from(x) - px.rem_euclid(tile);
+        let first_column = px.div_euclid(tile) + skip(first_left);
+        let first_left = first_left + skip(first_left) * tile;
         while top < bottom {
-            let mut column = px.div_euclid(tile);
-            let mut left = i64::from(x) - px.rem_euclid(tile);
+            let mut column = first_column;
+            let mut left = first_left;
             while left < right {
                 let cell = (row.rem_euclid(h) * w + column.rem_euclid(w)) as usize;
                 let index = map.get(cell).map_or(0, |&b| b as u8 as usize);
