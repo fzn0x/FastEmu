@@ -404,11 +404,22 @@ fn port_value(ctx: &mut Ctx<'_>, port: io::Result<u16>) -> JResult<Value> {
 }
 
 /// A listening socket, shared with the threads waiting in
-/// `acceptAndOpen`.
+/// `acceptAndOpen`. `close` drops the listener, so the port is free for
+/// the game to listen on again at once rather than when the collector
+/// frees the connection object.
 struct ServerShared {
-    listener: TcpListener,
+    listener: Mutex<Option<TcpListener>>,
     options: Options,
-    closed: AtomicBool,
+}
+
+impl ServerShared {
+    /// The address the listener is bound to.
+    fn local_addr(&self) -> io::Result<std::net::SocketAddr> {
+        match &*lock(&self.listener) {
+            Some(listener) => listener.local_addr(),
+            None => Err(io::ErrorKind::NotConnected.into()),
+        }
+    }
 }
 
 /// The payload of a server socket connection object.
@@ -429,9 +440,8 @@ fn open_server(ctx: &mut Ctx<'_>, port: u16, options: Options) -> JResult<ObjRef
     let class = ctx.find_class(SERVER_IMPL)?;
     let conn = ctx.new_object(class)?;
     let shared = ServerShared {
-        listener,
+        listener: Mutex::new(Some(listener)),
         options,
-        closed: AtomicBool::new(false),
     };
     ctx.set_payload(conn, ServerPayload(Some(Arc::new(shared))));
     Ok(conn)
@@ -442,7 +452,7 @@ fn server(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<Arc<ServerShared>> {
         Some(s) => Arc::clone(s),
         None => return throw_io(ctx, "the connection was not opened with Connector.open"),
     };
-    if shared.closed.load(Ordering::Acquire) {
+    if lock(&shared.listener).is_none() {
         return throw_io(ctx, "connection is closed");
     }
     Ok(shared)
@@ -453,10 +463,13 @@ fn accept(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<ObjRef> {
     let shared = server(ctx, conn)?;
     let deadline = net::deadline(shared.options.timeouts.then_some(IO_TIMEOUT));
     let socket = net::block_on(ctx, deadline, || {
-        if shared.closed.load(Ordering::Acquire) {
-            return Err(io::Error::other("connection is closed"));
-        }
-        match shared.listener.accept() {
+        // The listener does not block, so `close` waits for this lock
+        // only as long as one accept call takes.
+        let accepted = match &*lock(&shared.listener) {
+            Some(listener) => listener.accept(),
+            None => return Err(io::Error::other("connection is closed")),
+        };
+        match accepted {
             Ok((socket, _)) => Ok(Some(socket)),
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 std::thread::sleep(ACCEPT_POLL);
@@ -484,7 +497,7 @@ fn server_class() -> NativeClass {
         .payload::<ServerPayload>()
         .method("close", "()V", |ctx, a| {
             if let Some(shared) = &ctx.payload::<ServerPayload>(this(a))?.0 {
-                shared.closed.store(true, Ordering::Release);
+                lock(&shared.listener).take();
             }
             Ok(Value::Void)
         })
@@ -495,12 +508,12 @@ fn server_class() -> NativeClass {
         )
         .method("getLocalAddress", "()Ljava/lang/String;", |ctx, a| {
             let shared = server(ctx, this(a))?;
-            let address = shared.listener.local_addr();
+            let address = shared.local_addr();
             address_value(ctx, address.map(|a| report_address(a.ip())))
         })
         .method("getLocalPort", "()I", |ctx, a| {
             let shared = server(ctx, this(a))?;
-            let address = shared.listener.local_addr();
+            let address = shared.local_addr();
             port_value(ctx, address.map(|a| a.port()))
         })
 }
@@ -526,4 +539,43 @@ pub(crate) fn classes() -> Vec<NativeClass> {
         secure_class(),
         server_class(),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use fastemu_core::NetworkPolicy;
+    use fastemu_jvm::{MemorySource, Vm, VmConfig};
+
+    use super::*;
+    use crate::env::InstanceEnv;
+    use crate::io::connector::READ_WRITE;
+
+    #[test]
+    fn a_closed_server_socket_frees_its_port() {
+        let vm = Vm::new(
+            VmConfig::default(),
+            Arc::new(MemorySource::new()),
+            crate::classes(),
+        );
+        vm.attach("test", |ctx| {
+            let mut env = InstanceEnv::for_tests("unused");
+            env.settings.network = NetworkPolicy::Allow;
+            ctx.set_extension(env);
+            let options = Options {
+                mode: READ_WRITE,
+                timeouts: false,
+            };
+            let first = open(ctx, "//:0", "socket://:0", options).unwrap();
+            let port = ctx
+                .call_interface(first, "getLocalPort", "()I", &[])
+                .unwrap()
+                .int();
+            ctx.call_interface(first, "close", "()V", &[]).unwrap();
+            let rest = format!("//:{port}");
+            let again = open(ctx, &rest, &format!("socket:{rest}"), options);
+            assert!(again.is_ok(), "port {port} is still taken");
+        });
+    }
 }
