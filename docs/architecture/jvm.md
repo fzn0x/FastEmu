@@ -282,10 +282,13 @@ the collector cannot see, so it cannot collect in the middle:
 3. *Judged after the native returns.* The invoke instruction collects
    when the heap asked for it, and if the live data still does not fit in
    the limit it throws `OutOfMemoryError` (message `Java heap space`)
-   into the thread that ran the native, as on a phone. A thread whose
-   native allocated nothing asks for no collection and gets no error, so
-   one game thread cannot blame another. Natives called from other natives
-   are judged when the outermost one returns.
+   into the thread whose native grew the count, as on a phone. A native
+   grew it when the heap counts more as it returns than it did when the
+   interpreter called it, not counting what other threads added while
+   this one gave up the lock. So a native that allocated nothing gets no
+   error, even while another thread's data keeps the heap over its limit.
+   What a native allocated before it called other natives from Rust
+   still counts as its own.
 
 A game that fills memory through natives alone (`s = s.concat(s)`,
 appending to a `StringBuffer`, keeping exceptions, resource streams or
@@ -871,6 +874,9 @@ What natives and games can rely on:
   256 KiB heap. Each fills memory through natives (`String.concat`,
   `StringBuffer.append`, kept exceptions, resource streams, arrays,
   interned strings, thread names) and must end in `OutOfMemoryError`
-  within a few times the heap, in the thread that ran the native.
+  within a few times the heap, in the thread that ran the native. Three
+  cases with two threads keep data over the limit and check that a
+  thread that allocates nothing, or only sleeps and wakes, never gets
+  the error.
 - `tests/bench.rs` is the benchmark: a plain loop, static calls and
   `StringBuffer.append`.
