@@ -747,9 +747,9 @@ What natives and games can rely on:
   reaches every implicit conversion.
 - `tests/old_bytecode.rs` runs `jsr`/`ret` and a version 45.3 class built
   with the small assembler in `tests/support`.
-- `tests/class_limits.rs` loads deep array names, long class chains in
-  both load orders and a 40 layer interface diamond, each under a
-  deadline, on a VM thread.
+- `tests/class_limits.rs` loads deep array names, long chains of classes
+  and of interfaces in both load orders and a 40 layer interface diamond,
+  each under a deadline, on a VM thread.
 - `tests/native_api.rs` covers this page's API: native classes extended
   by bytecode, threads, posted tasks, global roots, waiting, pause,
   resume and stop, diagnostics.
