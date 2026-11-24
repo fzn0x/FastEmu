@@ -19,6 +19,8 @@ mod gc;
 mod heap;
 mod init;
 mod interp;
+#[cfg(test)]
+mod inventory;
 mod io;
 mod lang;
 mod monitor;
