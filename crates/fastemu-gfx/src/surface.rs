@@ -230,9 +230,10 @@ impl Surface {
     }
 
     /// The pixels as a [`Frame`] with the given serial, for presenting the
-    /// screen to an app.
+    /// screen to an app. The pixels are copied once, straight into the
+    /// frame's shared buffer.
     pub fn to_frame(&self, serial: u64) -> Frame {
-        Frame::new(self.width, self.height, self.pixels.clone().into(), serial)
+        Frame::new(self.width, self.height, self.pixels[..].into(), serial)
     }
 
     /// `Image.getRGB(rgbData, offset, scanlength, x, y, width, height)`:
