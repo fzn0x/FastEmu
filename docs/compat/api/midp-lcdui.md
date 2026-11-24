@@ -96,7 +96,7 @@ Games show one for errors and "Game over" messages, often before any `Canvas`.
 
 | T | Field | Type | Value | Flags | Since | Notes |
 |---|---|---|---|---|---|---|
-| 2 | `FOREVER` | `I` | `-2` (`0xfffffffe`) | static | 1.0 | `setTimeout(FOREVER)` keeps the alert until the user dismisses it. |
+| 2 | `FOREVER` | `I` | `-2` | static | 1.0 | `setTimeout(FOREVER)` keeps the alert until the user dismisses it. |
 | 3 | `DISMISS_COMMAND` | `Ljavax/microedition/lcdui/Command;` | (not a constant) | static | 2.0 |  |
 
 | T | Constructor | Descriptor | Flags | Since | Throws | Notes |
