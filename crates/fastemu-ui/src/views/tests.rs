@@ -283,6 +283,31 @@ fn launching_starts_a_game_in_its_own_slot(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_game_keeps_its_save_folder_across_starts(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    h.view.update_in(h.cx, |v, window, cx| {
+        let id = v.tiles[0].id;
+        v.close_tile(id, window, cx);
+    });
+    h.launch_first();
+    let (first, again) = (h.launcher.request(0), h.launcher.request(1));
+    assert_eq!(first.data_dir, again.data_dir, "the first copy's saves");
+    let data = h.dir.path().join("data");
+    assert!(
+        first.data_dir.starts_with(&data),
+        "under the app's data folder"
+    );
+
+    // The next time the app opens, the entry and its folder are the same.
+    let dir = h.dir;
+    let mut reopened = open_in(cx, dir);
+    reopened.launch_first();
+    assert_eq!(reopened.launcher.request(0).data_dir, first.data_dir);
+}
+
+#[gpui::test]
 fn keys_reach_the_focused_game_once_per_stroke(cx: &mut TestAppContext) {
     let mut h = open(cx);
     h.add(&["snake.jar"]);
