@@ -1,0 +1,46 @@
+name: Linux packages
+description: >-
+  Installs the system packages the Linux jobs need. The emulator crates need
+  the ALSA headers for audio output. The GPUI apps need a C toolchain, the
+  font, keyboard, Wayland, X11 and Vulkan headers, and a few libraries the
+  Zed editor's own script/linux installs. A failed download is tried again.
+
+inputs:
+  gui:
+    description: Also install what the GPUI apps need, not only the emulator crates.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GUI: ${{ inputs.gui }}
+      run: |
+        set -euo pipefail
+        packages=(build-essential pkg-config libasound2-dev)
+        if [ "$GUI" = true ]; then
+          packages+=(
+            clang cmake lld
+            libfontconfig-dev
+            libglib2.0-dev
+            libssl-dev
+            libvulkan-dev
+            libwayland-dev
+            libx11-xcb-dev
+            libxcb1-dev
+            libxkbcommon-dev
+            libxkbcommon-x11-dev
+            libzstd-dev
+            mesa-vulkan-drivers
+          )
+        fi
+        for attempt in 1 2 3 4; do
+          if sudo apt-get update && sudo apt-get install -y --no-install-recommends "${packages[@]}"; then
+            exit 0
+          fi
+          echo "::warning::apt-get failed (attempt $attempt): trying again"
+          sleep $((attempt * 20))
+        done
+        echo "::error::the Linux packages could not be installed"
+        exit 1
