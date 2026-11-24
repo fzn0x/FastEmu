@@ -4,6 +4,7 @@
 //! sounds better.
 
 pub(crate) mod builtin;
+pub(crate) mod sequencer;
 pub(crate) mod smf;
 pub(crate) mod soundfont;
 
