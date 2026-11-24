@@ -554,6 +554,8 @@ mod tests {
     fn a_pause_does_not_make_a_fixed_rate_timer_catch_up() {
         let source = Arc::new(MemorySource::new());
         let vm = Vm::new(VmConfig::default(), source, vec![tardy()]);
+        let clock = vm.clock();
+        let start = clock.elapsed();
         let timer = vm.attach("test", |ctx| {
             let timer = ctx.construct(TIMER, "()V", &[]).unwrap();
             let task = ctx.construct("test/Tardy", "()V", &[]).unwrap();
@@ -563,32 +565,59 @@ mod tests {
                 .unwrap();
             ctx.new_global(timer)
         });
+        // Run n is due 10n ms of run time after the task was scheduled, at
+        // `start` or later. So by the run time `t` this many runs at most
+        // can have come, however late the timer's thread runs them. The
+        // bounds below count from it rather than from how long the test's
+        // sleeps took, which a busy machine stretches.
+        let due_by = |t: Duration| {
+            let runs = (t.as_millis() - start.as_millis()) / 10 + 1;
+            i32::try_from(runs).unwrap_or(i32::MAX)
+        };
         std::thread::sleep(Duration::from_millis(60));
         vm.pause();
-        std::thread::sleep(Duration::from_millis(20));
-        let (paused_at, _) = tardiness(&vm);
+        let paused_at = clock.elapsed();
+        let pause_began = Instant::now();
         std::thread::sleep(Duration::from_millis(300));
-        assert_eq!(tardiness(&vm).0, paused_at, "no runs while paused");
+        // `pause` returns at once: a timer thread behind its rate may still
+        // run the runs already due, but none due after the pause.
+        let (in_pause, _) = tardiness(&vm);
+        assert!(
+            in_pause <= due_by(paused_at),
+            "no runs while paused: {in_pause} by a run time of {paused_at:?}"
+        );
+        let pause = pause_began.elapsed();
         let resumed_at = Instant::now();
         vm.resume();
         std::thread::sleep(Duration::from_millis(25));
-        let (resumed, worst) = tardiness(&vm);
+        let (resumed, _) = tardiness(&vm);
         let window = resumed_at.elapsed();
-        // On the wall clock, the 30 runs the pause missed would come at once,
-        // each some 300 ms late. Allow the runs the window holds at one per
-        // 10 ms, plus a few: a sleep can last far longer than asked on a
-        // busy machine (CI's macOS runners).
-        let allowed = i32::try_from(window.as_millis() / 10).unwrap_or(i32::MAX) + 4;
+        // The run time went on for at most `window` after the resume. On
+        // the wall clock, the 30 runs the pause missed would come at once.
         assert!(
-            resumed - paused_at <= allowed,
-            "{paused_at} then {resumed} in {window:?}"
+            resumed <= due_by(paused_at + window),
+            "{resumed} runs by a run time of {paused_at:?}, then {window:?}"
         );
-        assert!(worst < 100, "a run seemed {worst} ms late");
-        std::thread::sleep(Duration::from_millis(100));
-        let (later, _) = tardiness(&vm);
+        // The rate goes on: wait for a few more runs, however late the
+        // timer's thread gets to them.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let (mut later, mut worst) = (resumed, 0);
+        while later - resumed < 4 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+            (later, worst) = tardiness(&vm);
+        }
         assert!(
             later - resumed >= 4,
             "the rate goes on: {resumed} then {later}"
+        );
+        // A run is late only by how late its thread woke. Counted on the
+        // wall clock, the runs after the resume would seem as late as the
+        // pause was long. Half the pause, 150 ms or more, leaves room for
+        // a thread descheduled for 100 ms.
+        let limit = i64::try_from(pause.as_millis() / 2).unwrap_or(i64::MAX);
+        assert!(
+            worst < limit,
+            "a run seemed {worst} ms late after a {pause:?} pause"
         );
         vm.attach("cancel", |ctx| {
             let timer = timer.get(ctx);
