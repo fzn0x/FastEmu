@@ -116,14 +116,25 @@ struct MsState {
     sample2: i32,
 }
 
+/// The largest step size kept. Damaged data can triple the step with
+/// every code; capping it (as FFmpeg does) keeps the products below
+/// inside `i32`.
+const MS_MAX_DELTA: i32 = i32::MAX / 768;
+
 impl MsState {
     fn decode(&mut self, code: u8) -> i16 {
         let signed = i32::from(code as i8) << 28 >> 28;
-        let predicted = (self.sample1 * self.coef1 + self.sample2 * self.coef2) >> 8;
-        let sample = (predicted + signed * self.delta).clamp(-32768, 32767);
+        // Coefficients listed in the file reach +-32768, so the two
+        // products can sum past `i32`.
+        let predicted = (i64::from(self.sample1) * i64::from(self.coef1)
+            + i64::from(self.sample2) * i64::from(self.coef2))
+            >> 8;
+        let sample =
+            (predicted + i64::from(signed) * i64::from(self.delta)).clamp(-32768, 32767) as i32;
         self.sample2 = self.sample1;
         self.sample1 = sample;
-        self.delta = ((MS_ADAPTATION[usize::from(code & 0x0F)] * self.delta) >> 8).max(16);
+        self.delta =
+            ((MS_ADAPTATION[usize::from(code & 0x0F)] * self.delta) >> 8).clamp(16, MS_MAX_DELTA);
         sample as i16
     }
 }
@@ -254,6 +265,17 @@ pub(crate) mod tests {
         let decoded = decode_ms(&block, 1, 8, None, &MS_STANDARD_COEFFICIENTS);
         // sample2, sample1, then 100 + 1 * 16, then 116 - 16 (delta stays 16).
         assert_eq!(decoded, vec![50, 100, 116, 100]);
+    }
+
+    #[test]
+    fn ms_adpcm_survives_damaged_blocks() {
+        // Code 8 triples the step every sample: without a cap it leaves
+        // i32 within a few dozen codes. Extreme listed coefficients and
+        // samples overflow the prediction too.
+        let mut block = vec![0, 0xFF, 0x7F, 0x00, 0x80, 0x00, 0x80];
+        block.extend_from_slice(&[0x88; 120]);
+        let decoded = decode_ms(&block, 1, block.len(), None, &[(-32768, -32768)]);
+        assert_eq!(decoded.len(), 2 + 240);
     }
 
     #[test]
