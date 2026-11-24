@@ -7,6 +7,7 @@
 //! describes how they fit the runtime.
 
 mod layer;
+mod manager;
 pub mod model;
 mod sprite;
 mod tiled;
@@ -15,5 +16,10 @@ use fastemu_jvm::NativeClass;
 
 /// The classes of this module.
 pub fn classes() -> Vec<NativeClass> {
-    vec![layer::class(), sprite::class(), tiled::class()]
+    vec![
+        layer::class(),
+        sprite::class(),
+        tiled::class(),
+        manager::class(),
+    ]
 }
