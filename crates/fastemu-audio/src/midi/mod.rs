@@ -5,6 +5,7 @@
 
 pub(crate) mod builtin;
 pub(crate) mod smf;
+pub(crate) mod soundfont;
 
 /// A General MIDI synthesizer the sequencer drives.
 pub(crate) trait Synth: Send {

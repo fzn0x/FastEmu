@@ -23,3 +23,4 @@ mod wav;
 
 pub use error::AudioError;
 pub use format::{Format, SUPPORTED_CONTENT_TYPES};
+pub use midi::soundfont::SoundFont;
