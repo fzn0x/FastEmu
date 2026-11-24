@@ -75,8 +75,10 @@ jobs:
 
   # Clippy and the tests of the emulator crates, on every system. The
   # virtual machine's differential tests run real Java programs against
-  # a JDK, so it must be there: FASTEMU_REQUIRE_JAVA makes a missing JDK
-  # fail them instead of skipping them.
+  # a JDK, and the conformance MIDlets of fastemu-midp compile with its
+  # javac against stubs of the runtime's classes, so it must be there:
+  # FASTEMU_REQUIRE_JAVA makes a missing JDK fail them instead of
+  # skipping them.
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -101,6 +103,12 @@ jobs:
       - name: Clippy
         shell: bash
         run: cargo clippy $EMULATOR_CRATES --all-targets --locked -- -D warnings
+      # The stub jar the conformance MIDlets compile against, built on its
+      # own so its warnings (what the runtime's classes refer to but do not
+      # have yet) show in the log.
+      - name: Stubs
+        shell: bash
+        run: cargo xtask stubs
       - name: Test
         shell: bash
         run: cargo test $EMULATOR_CRATES --locked
