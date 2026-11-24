@@ -350,6 +350,8 @@ fn enumerations_filter_sort_and_follow_changes() {
         closed has next false count 6
         closed RecordStoreNotOpenException
         enumerate closed RecordStoreNotOpenException
+        update each 1,2,3
+        update sorted 1,2,3
         ",
     );
 }

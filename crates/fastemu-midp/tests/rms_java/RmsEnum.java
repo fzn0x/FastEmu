@@ -140,5 +140,30 @@ public class RmsEnum extends RmsTest {
         } catch (RecordStoreNotOpenException x) {
             say("enumerate closed " + name(x));
         }
+
+        // A walk that rewrites each record it reaches, as games do when
+        // they update every save slot, must move on, not see it again.
+        RecordStore up = RecordStore.openRecordStore("updates", true);
+        for (int i = 0; i < 3; i++) {
+            up.addRecord(new byte[] {(byte) i}, 0, 1);
+        }
+        say("update each " + rewriteAll(up, up.enumerateRecords(null, null, true)));
+        say("update sorted " + rewriteAll(up, up.enumerateRecords(null, ascending, true)));
+        up.closeRecordStore();
+    }
+
+    /** Sets each record the walk reaches to its id; the ids it saw. */
+    static String rewriteAll(RecordStore rs, RecordEnumeration e) throws Exception {
+        StringBuffer out = new StringBuffer();
+        for (int guard = 0; e.hasNextElement() && guard < 10; guard++) {
+            int id = e.nextRecordId();
+            rs.setRecord(id, new byte[] {(byte) id}, 0, 1);
+            if (out.length() > 0) {
+                out.append(',');
+            }
+            out.append(id);
+        }
+        e.destroy();
+        return out.toString();
     }
 }

@@ -107,6 +107,23 @@ impl Order {
         };
     }
 
+    /// The id the cursor is on, if it is on one.
+    fn current(&self) -> Option<i32> {
+        match self.cursor {
+            Cursor::At(i) => self.ids.get(i).copied(),
+            Cursor::Reset | Cursor::Gap(_) => None,
+        }
+    }
+
+    /// Puts the cursor back on `id` after the record moved, if it is still
+    /// here. A walk that changes the record it is on then moves on to the
+    /// next one instead of meeting the changed record again.
+    fn settle_on(&mut self, id: i32) {
+        if let Some(at) = self.ids.iter().position(|&x| x == id) {
+            self.cursor = Cursor::At(at);
+        }
+    }
+
     /// Removes `id`, keeping the cursor on the same id, or between its
     /// neighbours when it was on `id`. Returns whether `id` was there.
     fn remove(&mut self, id: i32) -> bool {
@@ -224,8 +241,13 @@ pub(crate) fn class() -> NativeClass {
         .method_with("recordChanged", LISTENER_DESC, SYNCHRONIZED, |ctx, a| {
             let this = ctx.non_null(a[0])?;
             let id = a[2].int();
-            ctx.payload_mut::<EnumState>(this)?.order.remove(id);
+            let order = &mut ctx.payload_mut::<EnumState>(this)?.order;
+            let was_current = order.current() == Some(id);
+            order.remove(id);
             add_if_matching(ctx, this, id)?;
+            if was_current {
+                ctx.payload_mut::<EnumState>(this)?.order.settle_on(id);
+            }
             Ok(Value::Void)
         })
         .method_with("recordDeleted", LISTENER_DESC, SYNCHRONIZED, |ctx, a| {
@@ -553,6 +575,22 @@ mod tests {
         let mut o = order(&[1, 2, 3, 4]);
         o.cursor = Cursor::Gap(2);
         o.remove(1);
+        assert_eq!(o.next(), Some(3));
+    }
+
+    #[test]
+    fn a_changed_current_record_keeps_the_cursor() {
+        let mut o = order(&[1, 2, 3]);
+        assert_eq!(o.next(), Some(1));
+        assert_eq!(o.current(), Some(1));
+        // A change removes the record and puts it back where it belongs.
+        o.remove(1);
+        o.insert(0, 1);
+        o.settle_on(1);
+        assert_eq!(o.next(), Some(2));
+        // A record the filter no longer takes leaves the cursor in its gap.
+        o.remove(2);
+        o.settle_on(2);
         assert_eq!(o.next(), Some(3));
     }
 
