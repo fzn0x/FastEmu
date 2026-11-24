@@ -208,6 +208,14 @@ impl Session {
         self.text_override.unwrap_or(self.wants_text)
     }
 
+    /// Goes back to pressing keys until the game opens or closes a text
+    /// box, or the user switches typing on again.
+    pub fn stop_typing(&mut self) {
+        if self.typing_text() {
+            self.toggle_typing();
+        }
+    }
+
     /// Switches between typing text and pressing keys, for as long as the
     /// game keeps its text box open or closed. Held keys are let go.
     pub fn toggle_typing(&mut self) {

@@ -431,13 +431,21 @@ fn the_platform_text_entry_types_into_the_game(cx: &mut TestAppContext) {
     h.redraw();
     assert_eq!(*lock(&asked), ["CHAT"], "asked once per text box");
     assert_eq!(game.events(), vec![InputEvent::Text("hello".into())]);
+    assert!(
+        !h.read(|v| v.tiles[0].session.typing_text()),
+        "the answer hands the game back to keys"
+    );
     h.view
         .update(h.cx, |v, _| v.tiles[0].session.toggle_typing());
     h.redraw();
-    h.view
-        .update(h.cx, |v, _| v.tiles[0].session.toggle_typing());
-    h.redraw();
-    assert_eq!(lock(&asked).len(), 2, "the text button asks again");
+    assert_eq!(lock(&asked).len(), 2, "one press of Text asks again");
+    assert_eq!(
+        game.events(),
+        vec![
+            InputEvent::Text("hello".into()),
+            InputEvent::Text("hello".into())
+        ]
+    );
 }
 
 #[gpui::test]

@@ -150,8 +150,9 @@ such as the arrows, F1 and F2, Enter and Backspace, still press their phone
 keys.
 
 On Android, when a game shows a text box, a dialog opens with the system
-keyboard. Type and choose **OK** to send the text to the game. The **Text**
-button opens the dialog again.
+keyboard. Type and choose **OK** to send the text to the game. Once the
+dialog closes, with **OK** or **Cancel**, keys press phone keys again, and
+the **Text** button opens the dialog again.
 
 ## The on-screen keypad and touch
 

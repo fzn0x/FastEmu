@@ -316,6 +316,8 @@ impl FastEmuView {
 
     /// Shows the platform's text entry when the focused game starts taking
     /// text, once each time it does, and types the answer into the game.
+    /// Once the entry is answered or cancelled, the game goes back to
+    /// keys, so the Text button opens the entry again with one press.
     fn ask_for_text(&mut self, cx: &mut Context<'_, Self>) {
         let Some(entry) = self.text_entry.clone() else {
             return;
@@ -332,12 +334,22 @@ impl FastEmuView {
             tile.text_asked = true;
             let answer = entry(&tile.session.title);
             let instance = Arc::clone(&tile.session.instance);
-            cx.spawn(async move |_, _| {
+            let tile_id = tile.id;
+            cx.spawn(async move |this, cx| {
                 if let Ok(Some(text)) = answer.await
                     && !text.is_empty()
                 {
                     instance.send(InputEvent::Text(text));
                 }
+                // The view may be gone, or the tile closed or restarted.
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(tile) = this.tiles.iter_mut().find(|t| t.id == tile_id)
+                        && tile.session.instance.id() == instance.id()
+                    {
+                        tile.session.stop_typing();
+                        cx.notify();
+                    }
+                });
             })
             .detach();
         }
