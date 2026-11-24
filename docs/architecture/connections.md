@@ -1,0 +1,270 @@
+# Connections
+
+Games open every network and messaging connection through the Generic
+Connection Framework: `javax.microedition.io.Connector.open(name)`, where
+the scheme of the name picks the protocol. FastEmu implements the
+framework in `crates/fastemu-midp/src/io` and the Wireless Messaging API
+(JSR-120) in `crates/fastemu-midp/src/wma`, as native classes on the
+virtual machine (see [jvm.md](jvm.md) for the rules native code follows).
+
+Games used the network for score upload, ads, licence checks,
+downloadable content and a few multiplayer modes. Most of the servers are
+gone, so the first job is to fail the way a phone without signal failed:
+an `IOException` the game catches, never a crash or a hang. The second is
+to make real connections work for the games and servers that still do.
+
+## What a name opens
+
+| Name | Returns | Network policy | Notes |
+| --- | --- | --- | --- |
+| `http://host[:port]/file?query#ref` | `HttpConnection` | checked | HTTP/1.1, lazy connect |
+| `https://...` | `HttpsConnection` | checked | the same over TLS |
+| `socket://host:port` | `SocketConnection` | checked | TCP client |
+| `socket://:port`, `socket://:` | `ServerSocketConnection` | checked | TCP server on every interface |
+| `ssl://host:port` | `SecureConnection` | checked | TCP client over TLS |
+| `datagram://host:port` | `UDPDatagramConnection` | checked | UDP, sends to that address |
+| `datagram://:port`, `datagram://:` | `UDPDatagramConnection` | checked | UDP, receives from anyone |
+| `sms://+number[:port]` | `MessageConnection` | not checked | client: sends only |
+| `sms://:port`, `cbs://:port` | `MessageConnection` | not checked | server: receives |
+| `comm:...` | throws `ConnectionNotFoundException` | | this phone has no serial ports |
+| anything else (`file:`, `btspp:`, ...) | throws `ConnectionNotFoundException` | | "the requested protocol does not exist" |
+
+`Connector.open` also throws `IllegalArgumentException` for a `null`
+name ("Null URL", as the reference implementation says), a name without
+a scheme, a mode other than `READ`, `WRITE` or `READ_WRITE`, and a name
+its protocol cannot parse (a socket without a port, an SMS address that
+is not a number). `Connector.openInputStream` and the other three stream
+helpers open the connection, take one stream and close the connection;
+the stream keeps it alive.
+
+The mode is enforced: a connection opened `READ` refuses
+`openOutputStream` and one opened `WRITE` refuses `openInputStream`,
+both with `IOException`. Each connection hands out at most one input and
+one output stream, as the reference implementation did.
+
+## The network policy
+
+`InstanceEnv.settings.network` (`fastemu_core::NetworkPolicy`) decides.
+With `Deny`, the default, every open of a network scheme throws
+`IOException("network access is off for this game")` from
+`Connector.open` itself, before any name lookup. A VM without an
+`InstanceEnv` has no network either. With `Allow`, connections are real
+`std::net` sockets.
+
+Messaging is not network access: `sms://` and `cbs://` open under either
+policy, as a phone without signal still opened them, and their sends
+fail anyway (see below).
+
+## Blocking without freezing the VM
+
+A Java thread runs only while it holds its VM's lock, so native code that
+blocks with the lock held freezes every thread of the game. All socket
+work therefore runs through `io::net`:
+
+- Every socket gets read and write timeouts of one slice, 100 ms.
+- `net::block_on(ctx, deadline, attempt)` runs one bounded attempt (one
+  system call) inside `Ctx::without_lock`, and between attempts, with
+  the lock held, checks three things: a stopping VM unwinds with
+  `Throw::Stop`; an interrupted thread (`Thread.interrupt`) gets
+  `InterruptedIOException("interrupted")`; a passed deadline gives
+  `InterruptedIOException("timed out")`.
+- Name lookups and connects cannot be bounded that way, so
+  `net::off_thread` runs them on a helper thread and waits for its answer
+  in slices. A VM that stops meanwhile leaves the helper to finish on its
+  own; its result is dropped.
+
+Deadlines: resolving and connecting may take 30 s. A read or write waits
+at most 30 s when the game opened the connection with `timeouts` set,
+and for as long as it takes otherwise (the VM's stop still ends it).
+HTTP waits at most 60 s for a response head whatever the flag says, as a
+phone's network gave up on a silent server too.
+
+I/O errors become `IOException` with short fixed messages ("connection
+refused", "connection reset by the peer"), not the host's own text,
+which differs between systems and names the host. A name without
+addresses throws `ConnectionNotFoundException("cannot find host ...")`.
+
+## HTTP
+
+`io::http` speaks HTTP/1.1 with the three states of the MIDP javadoc.
+
+- **Setup**: `setRequestMethod` (GET, POST or HEAD, case-sensitive; any
+  other throws `IOException`) and `setRequestProperty` (which replaces a
+  header of the same name, ignoring case) work. Opening the output stream
+  makes later changes ignored, as the javadoc says.
+- **Connected**: the request goes out when the game first needs the
+  response (any response getter, `openInputStream`) or closes the output
+  stream. After that `setRequestMethod`, `setRequestProperty` and
+  `openOutputStream` throw `IOException("the request was already sent")`.
+  The response head is read when a getter first needs it.
+- **Closed**: after `close`, every method that needs the server throws
+  `IOException("connection is closed")`; `getURL`, `getHost` and the other
+  getters of the name keep working. Streams opened before `close` keep
+  working, and the socket closes when the last of them closes.
+
+The javadoc names `IOException` for every state error; none throws
+`IllegalStateException`.
+
+A failure to connect or to read the response is remembered: every later
+call that needs the response throws the same exception again.
+`getType`, `getEncoding` and `getLength` declare no `IOException`, so a
+failed connection makes them return `null` and -1 instead.
+
+The request carries `Host` (unless the game set one: some reach a
+virtual host through an address), the game's headers in the order it set
+them, `User-Agent` (the platform, then `Profile/MIDP-2.0
+Configuration/CLDC-1.1`, unless the game set one), `Content-Length` for
+a body or a POST, and `Connection: close`, so every response ends with
+the connection and there is no keep-alive state. Bytes HTTP does not
+allow in the request target (spaces, controls, text beyond ASCII) are
+percent-encoded, so a game that put a space in a query string still
+sends a valid request. Redirects are not followed: phones handed 3xx
+codes to the game.
+
+The output stream collects the body in memory and sends it, with its
+length, when the stream closes or the response is first needed.
+`flush` sends nothing: a body has to be complete for its
+`Content-Length`, and the emulators these games were tested on buffered
+the same way. A stream that outlives its connection still sends when it
+closes, which keeps fire-and-forget score uploads working.
+
+The response: a status line that is not HTTP makes `getResponseCode`
+-1, `getResponseMessage` `null`, and the whole reply the body (an
+HTTP/0.9 server). Interim `1xx` responses are skipped. Headers keep the
+server's spelling and order for `getHeaderField(int)` and
+`getHeaderFieldKey(int)` (index 0 is the first header, not the status
+line); a name lookup ignores case and the last of repeated headers wins.
+Dates parse in the three forms RFC 2616 lists. The body is framed by RFC
+7230: none for HEAD, 1xx, 204 and 304; chunked; `Content-Length`; or up
+to the close. A body cut short throws `IOException`.
+
+`read(byte[])` on a response body fills the buffer up to the end of the
+body. Games often size one read by `getLength()`, which a phone's
+buffered HTTP stack answered in full. `available()` counts the body bytes
+already received.
+
+## Sockets
+
+`io::socket` implements `SocketConnection` over a `TcpStream`, shared by
+the connection and its streams.
+
+- `read(byte[])` returns what has arrived, at least one byte: socket
+  protocols send a request and wait for the reply, so a read must not
+  wait to fill its buffer.
+- `available()` is real, because games poll it every frame to read only
+  what arrived. std::net has no `FIONREAD`, so the socket peeks with
+  blocking switched off for a moment; a read or write another thread
+  starts meanwhile sees `WouldBlock`, which every caller treats as "try
+  again".
+- The five options go through socket2: `DELAY` 0 turns Nagle's algorithm
+  off (the javadoc's "small buffer writing delay"), `LINGER` is seconds,
+  `KEEPALIVE` is 0 or 1, `RCVBUF` and `SNDBUF` are the kernel's buffer
+  sizes. A negative value or an unknown option throws
+  `IllegalArgumentException`; `getSocketOption` returns -1 when the
+  system cannot tell.
+- `getLocalAddress` of a server bound to every interface reports the
+  address the host would use to reach the network, as a phone reported
+  its own IP.
+
+`ServerSocketConnection.acceptAndOpen` polls a non-blocking listener
+every 50 ms, so a stop or a `close` from another thread ends the wait.
+
+## Datagrams
+
+`io::datagram` implements `UDPDatagramConnection` over a `UdpSocket`.
+A client (`datagram://host:port`) resolves the address once and sends
+there unless a datagram names another; a server (`datagram://:port`)
+receives from anyone and its datagrams carry their own addresses.
+`getMaximumLength` is 65507 (the largest UDP payload over IPv4) and
+`getNominalLength` 1472 (one Ethernet frame).
+
+A `Datagram` has a buffer, an offset, a length, a read/write pointer and
+an address (`datagram://host:port`). Following the reference
+implementation: `reset` zeroes the offset, length and pointer; writes go
+at the pointer and set the length to it, and writing past the buffer
+throws `IOException`; reads stop at the length with `EOFException`;
+`receive` puts the datagram at the offset, truncated to the room there
+(a full-size buffer is used underneath, since Windows reports a datagram
+larger than the buffer as an error), sets the length and the sender's
+address, and leaves the pointer alone. `send` and `receive` go through
+the `Datagram` interface, so a game's own `Datagram` class works too.
+
+`Datagram` extends `java.io.DataInput` and `DataOutput`, which the CLDC
+library provides; `DatagramImpl` implements every method of both on its
+buffer.
+
+## TLS
+
+`io::tls` runs `https://` and `ssl://` on rustls with the RustCrypto
+provider. It is pure Rust, so it builds for every desktop target and for
+`aarch64-linux-android` without a C toolchain. It speaks TLS 1.2 and 1.3
+and checks the server's certificate against Mozilla's roots
+(webpki-roots). The SSL 3.0 and TLS 1.0 servers of the phones' era are
+gone; the servers games still reach speak TLS 1.2 or later.
+
+The handshake completes right after the connect, so a bad certificate
+fails as `IOException("TLS handshake with host failed: ...")`.
+`SecurityInfo` reports the protocol name `TLS`, the version numbers the
+javadoc asks for ("3.3" for TLS 1.2, "3.4" for TLS 1.3; "3.1" would be
+TLS 1.0) and the cipher suite's RFC name. `getServerCertificate` returns
+`null` until `javax.microedition.pki` exists.
+
+A launcher can add roots for one instance with the
+`fastemu_midp::io::tls::TrustedCertificates` extension (DER
+certificates), for a game server with a private authority. The tests
+use it with their own authority in `tests/io_data/tls`.
+
+## Messaging (WMA)
+
+`wma` implements `MessageConnection`, `TextMessage`, `BinaryMessage` and
+`MessageListener`. FastEmu never sends a message and none ever arrives:
+
+- `send` checks the message as JSR-120 asks (`NullPointerException` for
+  `null`, `IllegalArgumentException` without an address or when it needs
+  more than three segments), logs the attempt at `LogLevel::Warn` so the
+  user can see that a game tried to send an SMS (often a paid one), and
+  throws `IOException("sending messages is not supported")`, as a phone
+  without service did. It never pretends a message was sent.
+- `receive` on a client connection throws `IOException`; on a server it
+  waits until the connection closes and then throws
+  `InterruptedIOException`, as the javadoc says.
+- `setMessageListener` keeps the listener (in a Java field, where the
+  collector sees it) and never calls it. A client connection refuses it
+  with `IOException`.
+- `numberOfSegments` counts as a GSM phone did: GSM 7-bit text when every
+  character is in the GSM 03.38 alphabet (160 characters alone, 152 per
+  segment of a longer message, less with a port), UCS-2 otherwise (70 and
+  66), binary as octets (140 and 133); 0 beyond three segments.
+- A server port can be open once per VM; a second open throws
+  `IOException` until the first closes. `cbs://` connections only
+  receive.
+- `getTimestamp` is `null`: no message was ever received.
+
+## PushRegistry
+
+A phone could start a MIDlet for an inbound message or connection, or at
+a set time. FastEmu starts games only when the user does, so
+`registerConnection` checks its arguments (a connection string, a
+filter, a MIDlet the suite lists) and logs the request, and nothing is
+kept: `listConnections` is empty, `getMIDlet` and `getFilter` are
+`null`, `unregisterConnection` is `false`, and `registerAlarm` returns 0,
+no alarm having been set before.
+
+## Testing
+
+- Unit tests sit beside the code: name parsing, the HTTP wire format and
+  body decoding fed in every split, dates, datagram addresses and strict
+  modified UTF-8, segment counts, the interfaces' constants.
+- `tests/io_*.rs` and `tests/wma_messages.rs` run Java programs from
+  `tests/io_java` on the VM against peers on 127.0.0.1: a scripted HTTP
+  server (GET, POST, HEAD, fixed, chunked and open-ended bodies, a reply
+  that is not HTTP, the state errors, a refused connection), a server
+  that never answers (interrupt and stop), TCP and UDP echo peers, TLS
+  servers with a test authority, and the `Deny` policy. The programs
+  compile with `javac --release 8` against stubs of the javax.microedition
+  classes in `tests/io_java/stubs`; without a JDK the tests print why and
+  pass, unless `FASTEMU_REQUIRE_JAVA=1` is set.
+- Until the CLDC library has `java.io.DataInput` and `DataOutput`, the
+  tests add stand-ins for both, so `Datagram` loads; the
+  `openDataInputStream` case runs once `java.io.DataInputStream` exists
+  and is skipped with a note before.
