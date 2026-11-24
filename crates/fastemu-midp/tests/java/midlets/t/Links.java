@@ -10,7 +10,6 @@ import javax.microedition.midlet.MIDlet;
 public class Links extends MIDlet {
     protected void startApp() {
         Display.getDisplay(this).setCurrent(new LinksCanvas(this));
-        System.out.println("links ready");
     }
 
     protected void pauseApp() {}
@@ -37,6 +36,12 @@ class LinksCanvas extends Canvas {
     }
 
     protected void paint(Graphics g) {}
+
+    // Keys reach the canvas only once it is shown, which comes after
+    // startApp returns; the test presses them after this line.
+    protected void showNotify() {
+        System.out.println("links ready");
+    }
 
     protected void keyPressed(int code) {
         switch (code) {
