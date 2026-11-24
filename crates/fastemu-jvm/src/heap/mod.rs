@@ -5,6 +5,10 @@
 //! asks for a collection when the heap fills up; the interpreter runs the
 //! collection at its next safepoint, where every reference a thread holds
 //! is in a root the collector can see.
+//!
+//! Each object remembers the size it was last counted at, so a payload
+//! that changes size after allocation can be counted again with
+//! [`Heap::recount`] and a collection can tell what it freed.
 
 mod payload;
 
@@ -83,16 +87,37 @@ impl Body {
 /// One object on the heap.
 pub(crate) struct HeapObject {
     pub(crate) class: ClassId,
+    /// The size this object is counted at in [`Heap::used`]: what
+    /// [`HeapObject::size`] returned when the object was placed on the
+    /// heap, last recounted or last measured by a collection. It fits in
+    /// the padding after `class`. A size past `u32::MAX` counts as
+    /// `u32::MAX`.
+    counted: u32,
     pub(crate) body: Body,
     pub(crate) payload: Option<Box<dyn Payload>>,
 }
 
 impl HeapObject {
+    /// An object not yet counted; [`Heap::alloc`] counts it.
+    pub(crate) fn new(class: ClassId, body: Body, payload: Option<Box<dyn Payload>>) -> Self {
+        Self {
+            class,
+            counted: 0,
+            body,
+            payload,
+        }
+    }
+
     /// The bytes this object counts against the heap limit, close to what
     /// a phone's virtual machine would use for it.
     fn size(&self) -> usize {
         let payload = self.payload.as_ref().map_or(0, |p| p.heap_bytes());
         (8 + self.body.bytes() + payload).next_multiple_of(8)
+    }
+
+    /// [`HeapObject::size`] as stored in `counted`.
+    fn measure(&self) -> u32 {
+        u32::try_from(self.size()).unwrap_or(u32::MAX)
     }
 
     pub(crate) fn payload<T: Payload>(&self) -> Option<&T> {
@@ -191,8 +216,9 @@ impl Heap {
 
     /// Places `obj` on the heap. Never collects; asks for a collection
     /// when the heap is filling up.
-    pub(crate) fn alloc(&mut self, obj: HeapObject) -> ObjRef {
-        self.used += obj.size();
+    pub(crate) fn alloc(&mut self, mut obj: HeapObject) -> ObjRef {
+        obj.counted = obj.measure();
+        self.used += obj.counted as usize;
         self.live += 1;
         if self.used > self.threshold {
             self.gc_requested = true;
@@ -209,22 +235,32 @@ impl Heap {
         }
     }
 
-    /// Replaces the payload of `r` and counts the change in its size, so
-    /// a payload set after allocation asks for a collection as an
-    /// allocation of its size would. Until the next collection measures
-    /// every object again, the count is an estimate: a payload that grew
-    /// since it was counted is taken off at its new size.
-    pub(crate) fn set_payload(&mut self, r: ObjRef, payload: Box<dyn Payload>) {
-        let (before, after) = {
-            let obj = self.get_mut(r);
-            let before = obj.size();
-            obj.payload = Some(payload);
-            (before, obj.size())
-        };
-        self.used = self.used.saturating_add(after).saturating_sub(before);
+    /// Counts the change in the size of `r` since it was last counted, as
+    /// an allocation of the difference would be: `used` follows, and a
+    /// heap past its threshold asks for a collection.
+    ///
+    /// A payload that grows or shrinks after allocation (a buffer, a stack
+    /// trace, a thread's name) calls this once its size has changed, so
+    /// the heap does not learn of it only at the next collection.
+    pub(crate) fn recount(&mut self, r: ObjRef) {
+        let obj = self.get_mut(r);
+        let after = obj.measure();
+        let before = std::mem::replace(&mut obj.counted, after);
+        self.used = self
+            .used
+            .saturating_add(after as usize)
+            .saturating_sub(before as usize);
         if self.used > self.threshold {
             self.gc_requested = true;
         }
+    }
+
+    /// Replaces the payload of `r` and counts the change in its size, so
+    /// a payload set after allocation asks for a collection as an
+    /// allocation of its size would.
+    pub(crate) fn set_payload(&mut self, r: ObjRef, payload: Box<dyn Payload>) {
+        self.get_mut(r).payload = Some(payload);
+        self.recount(r);
     }
 
     /// The object `r` names.
@@ -346,7 +382,8 @@ impl Heap {
                 self.free.push(index as u32);
                 freed += 1;
             } else {
-                used += obj.size();
+                obj.counted = obj.measure();
+                used += obj.counted as usize;
                 live += 1;
             }
         }
@@ -385,11 +422,7 @@ mod tests {
     use super::*;
 
     fn instance(fields: Vec<Value>) -> HeapObject {
-        HeapObject {
-            class: ClassId(0),
-            body: Body::Fields(fields.into()),
-            payload: None,
-        }
+        HeapObject::new(ClassId(0), Body::Fields(fields.into()), None)
     }
 
     struct Holder(Option<ObjRef>);
@@ -420,11 +453,11 @@ mod tests {
     fn payloads_trace_their_references_and_count_bytes() {
         let mut heap = Heap::new(1 << 20);
         let target = heap.alloc(instance(Vec::new()));
-        let holder = heap.alloc(HeapObject {
-            class: ClassId(0),
-            body: Body::Fields(Box::new([])),
-            payload: Some(Box::new(Holder(Some(target)))),
-        });
+        let holder = heap.alloc(HeapObject::new(
+            ClassId(0),
+            Body::Fields(Box::new([])),
+            Some(Box::new(Holder(Some(target)))),
+        ));
         heap.collect(|t| t.mark(holder), &mut HashMap::new());
         assert!(heap.contains(target));
         assert!(heap.used() >= 100);
@@ -463,16 +496,134 @@ mod tests {
         let mut heap = Heap::new(64 * 1024);
         assert!(!heap.gc_requested());
         while !heap.gc_requested() {
-            heap.alloc(HeapObject {
-                class: ClassId(0),
-                body: Body::Ints(vec![0; 256].into()),
-                payload: None,
-            });
+            heap.alloc(HeapObject::new(
+                ClassId(0),
+                Body::Ints(vec![0; 256].into()),
+                None,
+            ));
         }
         assert!(heap.would_exceed(64 * 1024));
         heap.collect(|_| {}, &mut HashMap::new());
         assert_eq!(heap.used(), 0);
         assert!(!heap.gc_requested());
+    }
+
+    /// A payload whose size a test changes after the object is placed.
+    struct Sized(usize);
+
+    impl Payload for Sized {
+        fn heap_bytes(&self) -> usize {
+            self.0
+        }
+    }
+
+    fn sized(heap: &mut Heap, bytes: usize) -> ObjRef {
+        heap.alloc(HeapObject::new(
+            ClassId(0),
+            Body::Fields(Box::new([])),
+            Some(Box::new(Sized(bytes))),
+        ))
+    }
+
+    /// Changes the size of `r`'s payload the way a native does before it
+    /// calls `recount`: the heap is not told.
+    fn resize(heap: &mut Heap, r: ObjRef, bytes: usize) {
+        heap.get_mut(r)
+            .payload_mut::<Sized>()
+            .expect("a Sized payload")
+            .0 = bytes;
+    }
+
+    #[test]
+    fn recount_counts_a_payload_that_grew() {
+        let mut heap = Heap::new(1 << 20);
+        let r = sized(&mut heap, 1000);
+        assert_eq!(heap.used(), 1008);
+        resize(&mut heap, r, 5000);
+        assert_eq!(heap.used(), 1008, "nothing counts the growth until asked");
+        heap.recount(r);
+        assert_eq!(heap.used(), 5008);
+        heap.recount(r);
+        assert_eq!(heap.used(), 5008, "a second recount adds nothing");
+    }
+
+    #[test]
+    fn recount_takes_off_a_payload_that_shrank() {
+        let mut heap = Heap::new(1 << 20);
+        let keep = sized(&mut heap, 2000);
+        let r = sized(&mut heap, 5000);
+        resize(&mut heap, r, 100);
+        heap.recount(r);
+        assert_eq!(heap.used(), 2008 + 112);
+        assert!(heap.contains(keep));
+    }
+
+    #[test]
+    fn recount_past_the_threshold_requests_a_collection() {
+        let mut heap = Heap::new(64 * 1024);
+        let r = sized(&mut heap, 100);
+        resize(&mut heap, r, 60_000);
+        assert!(!heap.gc_requested(), "growth is not seen before recount");
+        heap.recount(r);
+        assert!(heap.gc_requested());
+        assert!(heap.used() > 60_000);
+    }
+
+    #[test]
+    fn recount_below_the_threshold_asks_for_nothing() {
+        let mut heap = Heap::new(64 * 1024);
+        let r = sized(&mut heap, 100);
+        resize(&mut heap, r, 4000);
+        heap.recount(r);
+        assert!(!heap.gc_requested());
+    }
+
+    #[test]
+    fn set_payload_replaces_the_size_the_object_was_counted_at() {
+        let mut heap = Heap::new(1 << 20);
+        let r = sized(&mut heap, 1000);
+        // The payload grew in place and nobody recounted it, so the heap
+        // still has the object at 1008 bytes.
+        resize(&mut heap, r, 5000);
+        heap.set_payload(r, Box::new(Sized(2000)));
+        assert_eq!(heap.used(), 2008, "taken off at 1008, not at 5008");
+    }
+
+    #[test]
+    fn a_collection_measures_every_live_object_again() {
+        let mut heap = Heap::new(1 << 20);
+        let live = sized(&mut heap, 1000);
+        let dead = sized(&mut heap, 1000);
+        resize(&mut heap, live, 5000);
+        resize(&mut heap, dead, 5000);
+        assert_eq!(heap.used(), 2016);
+        heap.collect(|t| t.mark(live), &mut HashMap::new());
+        assert_eq!(heap.used(), 5008, "the live payload at its new size");
+        heap.recount(live);
+        assert_eq!(heap.used(), 5008, "the collection already counted it");
+        resize(&mut heap, live, 100);
+        heap.recount(live);
+        assert_eq!(heap.used(), 112);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn a_size_past_four_gigabytes_counts_as_the_most_that_fits() {
+        let mut heap = Heap::new(1 << 20);
+        let r = sized(&mut heap, 1 << 40);
+        assert_eq!(heap.used(), u32::MAX as usize);
+        resize(&mut heap, r, 100);
+        heap.recount(r);
+        assert_eq!(heap.used(), 112);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn the_counted_size_fits_in_the_padding() {
+        assert_eq!(
+            std::mem::size_of::<HeapObject>(),
+            std::mem::size_of::<(Body, Option<Box<dyn Payload>>, u64)>()
+        );
     }
 
     #[test]

@@ -74,11 +74,11 @@ impl VmState {
     /// payload, without running a constructor.
     pub(crate) fn alloc_instance(&mut self, class: ClassId) -> ObjRef {
         let c = self.classes.get(class);
-        let obj = HeapObject {
+        let obj = HeapObject::new(
             class,
-            body: Body::Fields(c.template.clone()),
-            payload: c.payload.as_ref().map(|make| make()),
-        };
+            Body::Fields(c.template.clone()),
+            c.payload.as_ref().map(|make| make()),
+        );
         self.heap.alloc(obj)
     }
 
@@ -103,11 +103,7 @@ impl VmState {
     }
 
     pub(crate) fn alloc_body(&mut self, class: ClassId, body: Body) -> ObjRef {
-        self.heap.alloc(HeapObject {
-            class,
-            body,
-            payload: None,
-        })
+        self.heap.alloc(HeapObject::new(class, body, None))
     }
 
     /// Reports a diagnostic once and logs it.
@@ -481,6 +477,21 @@ impl Ctx<'_> {
     /// collection closer.
     pub fn set_payload<T: Payload>(&mut self, obj: ObjRef, payload: T) {
         self.state.heap.set_payload(obj, Box::new(payload));
+    }
+
+    /// Counts the change in the size of `obj`'s payload since the heap
+    /// last counted it, through [`Payload::heap_bytes`]. Call it after
+    /// changing the payload with [`Ctx::payload_mut`] in a way that
+    /// changes `heap_bytes`: a buffer that grew, a list that took an
+    /// item, a name that was set. Without it the heap learns of the
+    /// change only at the next collection, and a loop that changes
+    /// payloads and allocates nothing else never reaches that.
+    ///
+    /// It is cheap, a few additions, so call it where the size changed,
+    /// not on every call; a payload that grows by doubling calls it once
+    /// per doubling.
+    pub fn recount(&mut self, obj: ObjRef) {
+        self.state.heap.recount(obj);
     }
 
     /// A system property, as `System.getProperty` reads it.

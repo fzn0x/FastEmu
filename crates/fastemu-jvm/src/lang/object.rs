@@ -99,10 +99,6 @@ fn clone(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         Body::Fields(f) => Body::Fields(f.clone()),
         other => other.duplicate(),
     };
-    let copy = ctx.state.heap.alloc(HeapObject {
-        class,
-        body,
-        payload: None,
-    });
+    let copy = ctx.state.heap.alloc(HeapObject::new(class, body, None));
     Ok(ctx.root(copy).into())
 }
