@@ -29,6 +29,23 @@ val cargoBuild by tasks.registering(Exec::class) {
 }
 tasks.named("preBuild") { dependsOn(cargoBuild) }
 
+// The app's version is the workspace's, from [workspace.package] in the root
+// Cargo.toml, so the APK of a release says the release's version. The
+// version code grows with it: 0.2.1 is 2001, 1.0.0 is 1000000.
+val workspaceVersion: String = run {
+    val manifest = workspaceDir.resolve("Cargo.toml").readText()
+    val section = manifest.substringAfter("[workspace.package]").substringBefore("\n[")
+    Regex("""(?m)^version\s*=\s*"([^"]+)"""").find(section)?.groupValues?.get(1)
+        ?: error("Cargo.toml has no version in [workspace.package]")
+}
+val workspaceVersionCode: Int = run {
+    val parts = workspaceVersion.substringBefore('-').split('.').map(String::toInt)
+    require(parts.size == 3 && parts[1] < 1000 && parts[2] < 1000) {
+        "the version $workspaceVersion is not X.Y.Z with Y and Z below 1000"
+    }
+    parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2]
+}
+
 android {
     namespace = "io.github.fzn0x.fastemu"
     compileSdk = 35
@@ -40,8 +57,8 @@ android {
         applicationId = "io.github.fzn0x.fastemu"
         minSdk = minSdkVersion
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = workspaceVersionCode
+        versionName = workspaceVersion
         ndk {
             abiFilters += abis
         }
