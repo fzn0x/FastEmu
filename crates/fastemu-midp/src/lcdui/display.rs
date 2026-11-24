@@ -101,6 +101,8 @@ fn paint_screen(ctx: &mut Ctx<'_>, screen: ObjRef) -> JResult<()> {
         return Ok(());
     };
     let content = displayable::layout(ctx, screen)?.content;
+    let prepared = handler.prepare(ctx, screen, content.width, content.height);
+    report(ctx, "preparing a screen", prepared)?;
     let buffer = canvas::buffer(ctx, screen)?;
     let (fonts, theme) = {
         let st = state(ctx);

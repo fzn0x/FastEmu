@@ -8,8 +8,9 @@
 //! [`ScreenState`]. The runtime then:
 //!
 //! - lays the screen out below its title and ticker and above the soft key
-//!   bar, and calls [`ScreenHandler::paint`] with a surface of the content
-//!   area's size whenever the screen is repainted;
+//!   bar, and calls [`ScreenHandler::prepare`] and then
+//!   [`ScreenHandler::paint`] with a surface of the content area's size
+//!   whenever the screen is repainted;
 //! - sends it the keys, pointer events and text the soft keys and the
 //!   options menu do not take;
 //! - fires its commands through [`ScreenHandler::command`] first, so a
@@ -86,6 +87,15 @@ pub struct ScreenTarget<'a> {
 /// How a high-level screen behaves. Implementations are `static`s; their
 /// per-object state is the [`ScreenState`] in the object's payload.
 pub trait ScreenHandler: Send + Sync + 'static {
+    /// Runs before each [`ScreenHandler::paint`], before the screen's
+    /// buffer is locked, with the content area's size: the place to lay
+    /// the content out and to call Java for it (a `CustomItem`'s sizes
+    /// and `paint`), which `paint` must not do.
+    fn prepare(&self, ctx: &mut Ctx<'_>, screen: ObjRef, width: i32, height: i32) -> JResult<()> {
+        let _ = (ctx, screen, width, height);
+        Ok(())
+    }
+
     /// Paints the content area. Only the target is drawn: titles, tickers,
     /// soft keys and menus are the runtime's.
     fn paint(
