@@ -180,7 +180,7 @@ function checkLinks() {
     // own URL, as a browser would, so they are checked too. Absolute links
     // to the site itself are checked like root-relative ones.
     const page = new URL(file.replace(/(^|\/)index\.html$/, '$1'), `${SITE}/`);
-    for (const [, href] of html.matchAll(/(?:href|src)="([^"]+)"/g)) {
+    for (const [, href] of html.matchAll(/(?:href|src|data-play)="([^"]+)"/g)) {
       const url = new URL(href.replaceAll('&amp;', '&'), page);
       if (url.origin !== SITE) continue;
       const hash = decodeURIComponent(url.hash.slice(1));
@@ -212,6 +212,8 @@ function build() {
     cpSync(join(root, 'assets', f), join(out, 'assets', f));
   }
   cpSync(join(root, 'assets', 'icon.svg'), join(out, 'favicon.svg'));
+  // Frames of real games for the landing page's cards, and their licenses.
+  cpSync(join(here, 'src', 'games'), join(out, 'assets', 'games'), { recursive: true });
 
   // Guides.
   const guides = GUIDES.map(renderGuide);

@@ -44,9 +44,19 @@
     return;
   }
 
+  // Game tiles: the recording plays while its card is on screen, and the
+  // still frame comes back when it leaves, so only visible tiles animate.
+  const play = (card, on) => {
+    card.querySelectorAll('img[data-play]').forEach((img) => {
+      if (!img.dataset.still) img.dataset.still = img.getAttribute('src');
+      img.src = on ? img.dataset.play : img.dataset.still;
+    });
+  };
+
   const io = new IntersectionObserver((entries) => {
     entries.forEach((e) => {
       e.target.classList.toggle('on', e.isIntersecting);
+      play(e.target, e.isIntersecting);
       if (term && e.target.contains(document.getElementById('cmd'))) {
         if (e.isIntersecting) term.start(); else term.stop();
       }

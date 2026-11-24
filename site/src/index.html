@@ -36,47 +36,29 @@
 
 <section class="bento" aria-label="Features">
 
-  <!-- 1. Many games at once -->
+  <!-- 1. Many games at once: frames of real games, recorded with fastemu run -->
   <article class="card c-wide">
     <div class="mock m-games" aria-hidden="true">
       <div class="phones">
-        <div class="ph"><svg viewBox="0 0 48 64" class="s-blocks">
-          <rect x="0" y="56" width="40" height="8" fill="#3a3a3a"/><rect x="40" y="56" width="8" height="8" fill="#2dd4bf"/>
-          <rect x="8" y="48" width="16" height="8" fill="#2a2a2a"/>
-          <g class="fall" fill="#2dd4bf"><rect x="16" y="0" width="8" height="8"/><rect x="24" y="0" width="8" height="8"/><rect x="32" y="0" width="8" height="8"/><rect x="32" y="8" width="8" height="8"/></g></svg></div>
-        <div class="ph"><svg viewBox="0 0 48 64" class="s-pong">
-          <path d="M24 0V64" stroke="#2f2f2f" stroke-width="2" stroke-dasharray="4 4"/>
-          <rect class="pad pl" x="3" y="20" width="3" height="12" fill="#8a8a8a"/><rect class="pad pr" x="42" y="36" width="3" height="12" fill="#8a8a8a"/>
-          <rect class="ball" x="0" y="0" width="4" height="4" fill="#2dd4bf"/></svg></div>
-        <div class="ph"><svg viewBox="0 0 48 64" class="s-snake">
-          <rect class="apple" x="36" y="44" width="4" height="4" fill="#2dd4bf"/>
-          <g class="snake" fill="#bdbdbd"><rect x="4" y="8" width="4" height="4"/><rect x="8" y="8" width="4" height="4"/><rect x="12" y="8" width="4" height="4"/><rect x="16" y="8" width="4" height="4"/><rect x="20" y="8" width="4" height="4" fill="#fafafa"/></g></svg></div>
-        <div class="ph"><svg viewBox="0 0 48 64" class="s-runner">
-          <rect x="0" y="52" width="48" height="2" fill="#3a3a3a"/>
-          <rect class="hero-b" x="8" y="42" width="6" height="10" fill="#2dd4bf"/>
-          <rect class="obst" x="48" y="44" width="6" height="8" fill="#8a8a8a"/></svg></div>
-        <div class="ph"><svg viewBox="0 0 48 64" class="s-road">
-          <rect x="0" y="0" width="6" height="64" fill="#242424"/><rect x="42" y="0" width="6" height="64" fill="#242424"/>
-          <g class="dash" fill="#4a4a4a"><rect x="23" y="-32" width="2" height="8"/><rect x="23" y="-16" width="2" height="8"/><rect x="23" y="0" width="2" height="8"/><rect x="23" y="16" width="2" height="8"/><rect x="23" y="32" width="2" height="8"/><rect x="23" y="48" width="2" height="8"/></g>
-          <rect class="rival" x="10" y="0" width="10" height="14" fill="#8a8a8a"/>
-          <rect class="car" x="28" y="46" width="10" height="14" fill="#2dd4bf"/></svg></div>
-        <div class="ph"><svg viewBox="0 0 48 64" class="s-shoot">
-          <g class="foes" fill="#8a8a8a"><rect x="6" y="6" width="6" height="5"/><rect x="16" y="6" width="6" height="5"/><rect x="26" y="6" width="6" height="5"/><rect x="36" y="6" width="6" height="5"/></g>
-          <g class="ship"><path d="M24 50l5 10h-10z" fill="#2dd4bf"/><rect class="shot" x="23" y="46" width="2" height="5" fill="#fafafa"/></g></svg></div>
+        <div class="ph"><img class="game" src="/assets/games/stick-fight.webp" data-play="/assets/games/stick-fight-play.webp" alt="" width="240" height="320"></div>
+        <div class="ph"><img class="game" src="/assets/games/shooter.webp" data-play="/assets/games/shooter-play.webp" alt="" width="240" height="320"></div>
+        <div class="ph"><img class="game" src="/assets/games/bombman.webp" data-play="/assets/games/bombman-play.webp" alt="" width="240" height="320"></div>
+        <div class="ph"><img class="game" src="/assets/games/traffic-dash.webp" data-play="/assets/games/traffic-dash-play.webp" alt="" width="240" height="320"></div>
+        <div class="ph"><img class="game" src="/assets/games/tower-guard.webp" data-play="/assets/games/tower-guard-play.webp" alt="" width="240" height="320"></div>
+        <div class="ph"><img class="game" src="/assets/games/star-defender.webp" data-play="/assets/games/star-defender-play.webp" alt="" width="240" height="320"></div>
       </div>
     </div>
     <h2>Many games at once in one window</h2>
     <p>Every game gets its own tile. Keep a few running side by side, or pause the ones you are not watching.</p>
+    <p class="frames-note">Recorded in FastEmu: Stick Fight, Shooter, BombMan, Traffic Dash, Tower Guard and Star Defender.</p>
   </article>
 
-  <!-- 2. Each game is its own phone -->
+  <!-- 2. Each game is its own phone: two copies of one game -->
   <article class="card c-narrow">
     <div class="mock m-own" aria-hidden="true">
       <div class="twin">
         <div class="unit">
-          <div class="ph"><svg viewBox="0 0 48 64" class="s-blocks">
-            <rect x="0" y="56" width="40" height="8" fill="#3a3a3a"/><rect x="40" y="56" width="8" height="8" fill="#2dd4bf"/><rect x="8" y="48" width="16" height="8" fill="#2a2a2a"/>
-            <g class="fall" fill="#2dd4bf"><rect x="16" y="0" width="8" height="8"/><rect x="24" y="0" width="8" height="8"/><rect x="32" y="0" width="8" height="8"/><rect x="32" y="8" width="8" height="8"/></g></svg></div>
+          <div class="ph"><img class="game" src="/assets/games/block-fall-a.webp" data-play="/assets/games/block-fall-a-play.webp" alt="" width="240" height="320"></div>
           <ul class="rows">
             <li><span>VM</span><b>copy 1</b></li>
             <li><span>Saves</span><b>slot A</b></li>
@@ -84,9 +66,7 @@
           </ul>
         </div>
         <div class="unit late">
-          <div class="ph"><svg viewBox="0 0 48 64" class="s-blocks">
-            <rect x="0" y="56" width="40" height="8" fill="#3a3a3a"/><rect x="40" y="56" width="8" height="8" fill="#2dd4bf"/><rect x="8" y="48" width="16" height="8" fill="#2a2a2a"/>
-            <g class="fall" fill="#2dd4bf"><rect x="16" y="0" width="8" height="8"/><rect x="24" y="0" width="8" height="8"/><rect x="32" y="0" width="8" height="8"/><rect x="32" y="8" width="8" height="8"/></g></svg></div>
+          <div class="ph"><img class="game" src="/assets/games/block-fall-b.webp" data-play="/assets/games/block-fall-b-play.webp" alt="" width="240" height="320"></div>
           <ul class="rows">
             <li><span>VM</span><b>copy 2</b></li>
             <li><span>Saves</span><b>slot B</b></li>
@@ -97,6 +77,7 @@
     </div>
     <h2>Each game is its own phone</h2>
     <p>Each game has its own virtual machine, record stores and sound. Two copies of one game keep separate saves.</p>
+    <p class="frames-note">Two copies of Block Fall, recorded in FastEmu.</p>
   </article>
 
   <!-- 3. Platforms -->
@@ -200,7 +181,10 @@
       <a class="brand" href="/" aria-label="FastEmu home"><img src="/assets/logo-dark.svg" alt="FastEmu" width="104" height="23"></a>
       <p>Free software under the <a href="https://github.com/fzn0x/FastEmu/blob/main/LICENSE">GPL-3.0-or-later</a> license.</p>
     </div>
-    <p class="credits">Thanks to <a href="https://github.com/barteo/microemu">MicroEmulator</a> and <a href="https://github.com/nikita36078/J2ME-Loader">J2ME Loader</a>, the emulators that kept these games playable for more than 10 years, to <a href="https://zed.dev/">Zed</a> for GPUI, and to the <a href="https://github.com/Dylanmurzello/zed-android-port">Zed Android port</a> that brings GPUI to Android.</p>
+    <div class="credits">
+      <p>Thanks to <a href="https://github.com/barteo/microemu">MicroEmulator</a> and <a href="https://github.com/nikita36078/J2ME-Loader">J2ME Loader</a>, the emulators that kept these games playable for more than 10 years, to <a href="https://zed.dev/">Zed</a> for GPUI, and to the <a href="https://github.com/Dylanmurzello/zed-android-port">Zed Android port</a> that brings GPUI to Android.</p>
+      <p>The game frames above come from free games, recorded in FastEmu: <a href="https://github.com/Dahmalahi/STICK-FIGHT-OFFICIEL-REPO">Stick Fight</a> by Dash Animation V2, <a href="https://github.com/RehanSaeed/Shooter">Shooter</a> by Muhammad Rehan Saeed, <a href="https://github.com/yaricom/bombman-RL-AI-J2ME">BombMan</a> by Iaroslav Omelianenko, and Traffic Dash, Tower Guard, Star Defender and Block Fall from <a href="https://github.com/agneay/j2me-100-games">J2ME 100 Games</a> by Agneay B Nair and contributors. All are under the MIT License (<a href="/assets/games/LICENSES.txt">license texts</a>).</p>
+    </div>
     <nav aria-label="Footer"><a href="https://github.com/fzn0x/FastEmu">GitHub</a><a href="/docs/">Docs</a><a href="https://github.com/fzn0x/FastEmu/issues">Issues</a></nav>
   </div>
 </footer>
