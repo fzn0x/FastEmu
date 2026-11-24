@@ -275,6 +275,7 @@ fn without_an_engine_players_keep_time_in_silence() {
         "MediaSilent",
         None,
         r"
+        forgotten players ended: 3
         type: audio/x-wav
         duration: 200000
         state after start: 400

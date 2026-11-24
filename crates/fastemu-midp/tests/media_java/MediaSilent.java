@@ -8,7 +8,24 @@ import javax.microedition.media.control.VolumeControl;
  * report the real lengths and times, on the wall clock, in silence.
  */
 public class MediaSilent extends MediaUtil {
+    /** Starts players and forgets them; the frame goes when it returns. */
+    static void startAndForget(int count, MediaRecorder r) throws Exception {
+        for (int i = 0; i < count; i++) {
+            Player p = player("/beep.wav", "audio/x-wav");
+            p.addPlayerListener(r);
+            p.start();
+        }
+    }
+
     public static void main(String[] args) throws Exception {
+        // Silent players the game started and dropped still end, and
+        // their listeners hear it.
+        MediaRecorder forgotten = new MediaRecorder();
+        startAndForget(3, forgotten);
+        System.gc();
+        forgotten.waitFor(6, 5000);
+        say("forgotten players ended", forgotten.count("endOfMedia"));
+
         Player p = player("/beep.wav", "audio/x-wav");
         MediaRecorder r = new MediaRecorder();
         p.addPlayerListener(r);
