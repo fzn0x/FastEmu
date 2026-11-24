@@ -73,7 +73,7 @@ with the debug key like the debug build.
 
 | Output | Path | Size |
 | --- | --- | --- |
-| Debug APK | `android/app/build/outputs/apk/debug/app-debug.apk` | 33.5 MB from a clean build |
+| Debug APK | `android/app/build/outputs/apk/debug/app-debug.apk` | 33.6 MB from a clean build |
 | Release APK | `android/app/build/outputs/apk/release/app-release.apk` | 27.2 MB |
 | arm64-v8a library | `android/app/src/main/jniLibs/arm64-v8a/libfastemu_android.so` | 12.3 MB (5.3 MB gzipped) |
 | x86_64 library | `android/app/src/main/jniLibs/x86_64/libfastemu_android.so` | 13.9 MB (5.7 MB gzipped) |
