@@ -78,7 +78,7 @@ dependencies {
     // android-activity 0.6 carries GameActivity's 4.4 native code, which
     // works with the 4.0 Java side; the Zed Android port found that 4.4's
     // Java side attaches input listeners that leak captured mouse events.
-    implementation("androidx.games:games-activity:4.0.0")
-    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.games:games-activity:4.4.2")
+    implementation("androidx.appcompat:appcompat:1.8.0")
     implementation("androidx.core:core-ktx:1.13.1")
 }
