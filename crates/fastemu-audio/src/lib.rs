@@ -9,6 +9,8 @@ pub mod format;
 #[allow(dead_code)]
 mod gain;
 #[allow(dead_code)]
+mod midi;
+#[allow(dead_code)]
 mod nokia;
 #[allow(dead_code)]
 mod pcm;
