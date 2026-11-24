@@ -28,36 +28,83 @@ descriptor that sits next to a `.jar`. FastEmu reads either one.
 ## Run your first game
 
 1. Start FastEmu.
-2. Drag a `.jar` onto the window, or choose **Add game** and pick the
-   file. On Android, choose **Add game** and pick it from storage.
-3. The game appears in the library. Open it to start it.
+2. Drag a `.jar` onto the window, or choose **+** at the top of the
+   library and pick the file. On Android, choose **+** and pick it from
+   storage. You can also start FastEmu with the file:
+   `fastemu snake.jar` adds it to the library and starts it.
+3. The game appears in the library. Click it to start it. Click it again
+   to start a second copy beside the first.
 
 The game runs in its own phone. Its screen size, key codes and saves
-come from a device profile. The default is a 240x320 phone with
-Nokia key codes, which suits most games. See [Settings](/docs/settings/)
-to change it.
+come from a phone profile. The default is a 240x320 phone with Nokia key
+codes, which suits most games. See [Settings](/docs/settings/) to change
+it.
 
 ## Play
 
-On a keyboard, the arrow keys move, Enter is the fire key and the
-number row and number pad press the phone keys. Soft keys are on `Q`
-and `E`. On a touch screen, an on-screen keypad appears. The full list
-is in [Playing](/docs/playing/).
+On a keyboard, the arrow keys move, Enter or Space is the fire key, the
+number row and the number pad press the phone's number keys, and F1 and F2
+are the soft keys. Each game also has a phone keypad under its screen, for
+the mouse or a finger. The keyboard plays the game with the highlighted
+border; click another game to play it. The full list is in
+[Playing](/docs/playing/).
 
 ## Run without a window
 
-The same program can run a game with no window, which is useful for
-tests:
+The same program runs a game with no window, for tests, scripts and
+pictures of a game:
 
 ```
-fastemu run snake.jar --frames 300 --screenshot snake.png
+fastemu run snake.jar --frames 300 --keys "wait:1500 5" --screenshot snake.png
 ```
 
-It runs 300 frames, saves the last one as a PNG and prints a short
-report. It exits with an error code if the game crashes.
+It runs the game for 300 frames of its screen (five seconds, at 60 frames a
+second), presses 5 after a second and a half, saves the last picture as a
+PNG and prints what the game logged. It exits with 1 if the game crashes or
+shows nothing. The options:
+
+| Option | What it does |
+| --- | --- |
+| `--midlet N` | Starts the suite's Nth MIDlet (default 1) |
+| `--profile ID` | Runs on the phone profile ID, such as `nokia-s40-128x160` (default `generic-240x320`) |
+| `--touch` | Gives the phone a touch screen, whatever the profile |
+| `--frames N` | Stops after N frames of the screen, 60 a second, counted from the game's first picture (default 300) |
+| `--seconds S` | Stops after S seconds instead |
+| `--screenshot PATH` | Saves the last picture as a PNG |
+| `--record DIR` | Saves the pictures the game draws in DIR as `frame-000001.png`, `frame-000002.png` and on |
+| `--every N` | With `--record`, saves every Nth picture the game draws (default 1) |
+| `--keys SCRIPT` | Presses keys and touches the screen while the game runs |
+| `--encoding NAME` | The game's text encoding (default `ISO-8859-1`) |
+| `--data DIR` | Keeps the game's record stores in DIR, so a later run continues from them (default: a temporary folder, deleted after the run) |
+
+The key script is a list of steps separated by spaces or commas, run in
+order from the game's first picture:
+
+| Step | What it does |
+| --- | --- |
+| `5`, `fire`, `softleft` | Taps the key for a tenth of a second |
+| `down:300` | Holds the key for 300 milliseconds |
+| `wait:500` or `500` | Waits 500 milliseconds |
+| `tap@120x160` | Touches the screen at pixel 120, 160 and lets go a tenth of a second later |
+| `tap@120x160:400` | Touches it for 400 milliseconds |
+| `press@40x40`, `drag@80x40`, `release@80x40` | Puts a finger down, moves it, lifts it |
+
+Key names are `0` to `9`, `star`, `pound`, `up`, `down`, `left`, `right`,
+`fire`, `softleft`, `softright`, `clear`, `send` and `end`. Touch steps
+reach a game only on a touch screen: the `generic-360x640` profile, or
+`--touch`. When `SCRIPT` names a file, the steps are read from it, with
+`#` starting a comment.
+
+For example, to record a touch game at a few pictures a second:
+
+```
+fastemu run puzzle.jar --profile generic-320x240 --touch --seconds 20 \
+  --keys "wait:2000 tap@160x120" --record frames --every 10
+```
 
 ## Next
 
 - [Playing](/docs/playing/): the library, several games at once, layouts.
+- [Settings](/docs/settings/): phone profiles, key codes and where saves live.
 - [Compatibility](/docs/compatibility/): what runs and what does not yet.
 - [FAQ](/docs/faq/): common questions.
