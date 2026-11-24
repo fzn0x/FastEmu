@@ -85,6 +85,33 @@ pub fn relayout(ctx: &mut Ctx<'_>, obj: ObjRef) {
     ctx.notify_waiters();
 }
 
+/// Whether `obj` is an `Alert`.
+fn is_alert(ctx: &mut Ctx<'_>, obj: ObjRef) -> bool {
+    ctx.find_class(ALERT)
+        .is_ok_and(|alert| ctx.is_instance(obj, alert))
+}
+
+/// `Display.setCurrent(next)`. An `Alert` shown this way returns to what
+/// was shown before it (or what that alert would have returned to).
+fn show(ctx: &mut Ctx<'_>, next: ObjRef) -> JResult<()> {
+    if is_alert(ctx, next) {
+        let shown = {
+            let st = state(ctx);
+            st.requested.clone().or_else(|| st.current.clone())
+        };
+        let shown = state::get(ctx, shown.as_ref());
+        if shown != Some(next) {
+            let after = match shown {
+                Some(s) if is_alert(ctx, s) => data(ctx, s)?.after_alert(),
+                other => other,
+            };
+            data_mut(ctx, next)?.set_after_alert(after);
+        }
+    }
+    set_current(ctx, next);
+    Ok(())
+}
+
 /// Paints `dirty` of the shown displayable and presents a frame. The
 /// caller holds the callback lock.
 pub(crate) fn paint(ctx: &mut Ctx<'_>, obj: ObjRef, dirty: Rect) -> JResult<()> {
@@ -264,7 +291,7 @@ pub fn class() -> NativeClass {
             |ctx, a| {
                 // null keeps the current screen.
                 if let Some(next) = a[1].obj() {
-                    set_current(ctx, next);
+                    show(ctx, next)?;
                 }
                 Ok(Value::Void)
             },

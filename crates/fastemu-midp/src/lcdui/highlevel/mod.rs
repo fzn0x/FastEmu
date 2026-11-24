@@ -6,6 +6,7 @@
 //! the runtime draws the title, the ticker line and the soft keys around
 //! it. `docs/architecture/midp.md` describes how they behave.
 
+pub mod alert;
 pub mod choice;
 pub mod draw;
 pub mod form;
@@ -28,6 +29,8 @@ pub fn classes() -> Vec<NativeClass> {
     let mut classes = vec![
         choice::interface(),
         ticker::class(),
+        alert::class(),
+        alert::type_class(),
         list::class(),
         textbox::class(),
         form::class(),
