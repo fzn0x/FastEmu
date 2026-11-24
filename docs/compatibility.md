@@ -21,9 +21,9 @@ Push-free parts of `javax.microedition.io`.
 **MMAPI sound.** The Mobile Media API (JSR 135) for sound: tone
 sequences, MIDI and WAV playback, volume control.
 
-**Nokia UI API.** `com.nokia.mid.ui` for full-screen canvases, device
-control such as vibration and backlight calls, and the Nokia sound
-classes.
+**Nokia UI API.** `com.nokia.mid.ui` for full-screen canvases and
+device control such as vibration and backlight calls, and
+`com.nokia.mid.sound` for the Nokia sound classes.
 
 ## What does not work yet
 
