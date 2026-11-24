@@ -71,19 +71,15 @@ fn any_pixel(area: Area, mut test: impl FnMut(i64, i64) -> bool) -> bool {
 }
 
 /// `collidesWith(Sprite, pixelLevel)`: both sprites must be visible.
-pub fn sprites(
-    a: &Footprint,
-    a_image: &Surface,
-    b: &Footprint,
-    b_image: &Surface,
-    pixel_level: bool,
-) -> bool {
+/// `pixels` holds the two sprites' images for a pixel-level test and is
+/// `None` for a test of the collision rectangles alone.
+pub fn sprites(a: &Footprint, b: &Footprint, pixels: Option<(&Surface, &Surface)>) -> bool {
     if !(a.visible && b.visible && a.collision.overlaps(&b.collision)) {
         return false;
     }
-    if !pixel_level {
+    let Some((a_image, b_image)) = pixels else {
         return true;
-    }
+    };
     let area = a.pixel_area().intersect(b.pixel_area());
     any_pixel(area, |x, y| {
         a.is_opaque_at(a_image, x, y) && b.is_opaque_at(b_image, x, y)
@@ -93,25 +89,23 @@ pub fn sprites(
 /// `collidesWith(TiledLayer, pixelLevel)`: both must be visible. By
 /// rectangle any cell that is not 0 collides, even an animated tile that
 /// shows nothing now; pixel by pixel only the opaque pixels of the tiles
-/// cells show.
+/// the cells show. `pixels` holds the sprite's image and the layer's.
 pub fn sprite_and_tiles(
     a: &Footprint,
-    a_image: &Surface,
     t: &TiledLayer,
-    t_image: &Surface,
-    pixel_level: bool,
+    pixels: Option<(&Surface, &Surface)>,
 ) -> bool {
     let layer = t.bounds();
     if !(a.visible && t.base.visible && a.collision.overlaps(&layer)) {
         return false;
     }
-    if !pixel_level {
+    let Some((a_image, t_image)) = pixels else {
         let area = a.collision.intersect(layer);
         let (columns, rows) = t.cells_in(area);
         return rows
             .flat_map(|row| columns.clone().map(move |column| (column, row)))
             .any(|(column, row)| t.cell_value(column, row) != 0);
-    }
+    };
     let area = a.pixel_area().intersect(layer);
     let (cw, ch) = (i64::from(t.cell_width()), i64::from(t.cell_height()));
     any_pixel(area, |x, y| {
@@ -126,23 +120,23 @@ pub fn sprite_and_tiles(
 }
 
 /// `collidesWith(Image, x, y, pixelLevel)`: the image's top left corner
-/// at `(x, y)`; only the sprite need be visible.
+/// at `(x, y)`; only the sprite need be visible. `pixels` holds the
+/// sprite's image for a pixel-level test.
 pub fn sprite_and_image(
     a: &Footprint,
-    a_image: &Surface,
     image: &Surface,
     x: i32,
     y: i32,
-    pixel_level: bool,
+    pixels: Option<&Surface>,
 ) -> bool {
     let (x, y) = (i64::from(x), i64::from(y));
     let other = Area::new(x, y, image.width().into(), image.height().into());
-    if !a.visible || !a.collision.overlaps(&other) {
+    if !(a.visible && a.collision.overlaps(&other)) {
         return false;
     }
-    if !pixel_level {
+    let Some(a_image) = pixels else {
         return true;
-    }
+    };
     let area = a.pixel_area().intersect(other);
     any_pixel(area, |px, py| {
         a.is_opaque_at(a_image, px, py) && is_opaque(pixel_at(image, px - x, py - y))
@@ -195,12 +189,12 @@ mod tests {
         let img = image(&["##", "##"]);
         let a = sprite_at(&img, 0, 0);
         let mut b = sprite_at(&img, 1, 1);
-        assert!(sprites(&a.footprint(), &img, &b.footprint(), &img, false));
+        assert!(sprites(&a.footprint(), &b.footprint(), None));
         b.base.x = 2;
-        assert!(!sprites(&a.footprint(), &img, &b.footprint(), &img, false));
+        assert!(!sprites(&a.footprint(), &b.footprint(), None));
         b.base.x = 1;
         b.base.visible = false;
-        assert!(!sprites(&a.footprint(), &img, &b.footprint(), &img, false));
+        assert!(!sprites(&a.footprint(), &b.footprint(), None));
     }
 
     #[test]
@@ -210,15 +204,15 @@ mod tests {
         let a = sprite_at(&img, 0, 0);
         let mut b = sprite_at(&img, 1, 0);
         // b's (0, 0) lands on a's (1, 0), which is only half opaque.
-        assert!(sprites(&a.footprint(), &img, &b.footprint(), &img, false));
-        assert!(!sprites(&a.footprint(), &img, &b.footprint(), &img, true));
+        assert!(sprites(&a.footprint(), &b.footprint(), None));
+        assert!(!sprites(&a.footprint(), &b.footprint(), Some((&img, &img))));
         b.base.y = -1;
         // b's (0, 1) lands on a's (1, 0): neither is opaque. b's (1, 1)
         // would be on a's (2, 0), outside a.
-        assert!(!sprites(&a.footprint(), &img, &b.footprint(), &img, true));
+        assert!(!sprites(&a.footprint(), &b.footprint(), Some((&img, &img))));
         b.base.x = 0;
         b.base.y = 0;
-        assert!(sprites(&a.footprint(), &img, &b.footprint(), &img, true));
+        assert!(sprites(&a.footprint(), &b.footprint(), Some((&img, &img))));
     }
 
     #[test]
@@ -232,7 +226,7 @@ mod tests {
         let hits = |a: &Sprite| -> Vec<(i32, i32)> {
             (0..3)
                 .flat_map(|y| (0..3).map(move |x| (x, y)))
-                .filter(|&(x, y)| sprite_and_image(&a.footprint(), &l, &dot, x, y, true))
+                .filter(|&(x, y)| sprite_and_image(&a.footprint(), &dot, x, y, Some(&l)))
                 .collect()
         };
         assert_eq!(hits(&a), [(0, 0), (0, 1), (0, 2), (1, 2), (2, 2)]);
@@ -262,26 +256,26 @@ mod tests {
         a.define_collision_rectangle(1, 1, 5, 5).unwrap();
         let fp = a.footprint();
         assert!(
-            !sprite_and_image(&fp, &img, &dot, 0, 0, true),
+            !sprite_and_image(&fp, &dot, 0, 0, Some(&img)),
             "outside the rectangle"
         );
-        assert!(sprite_and_image(&fp, &img, &dot, 2, 2, true));
+        assert!(sprite_and_image(&fp, &dot, 2, 2, Some(&img)));
         assert!(
-            sprite_and_image(&fp, &img, &dot, 4, 4, false),
+            sprite_and_image(&fp, &dot, 4, 4, None),
             "the rectangle reaches it"
         );
         assert!(
-            !sprite_and_image(&fp, &img, &dot, 4, 4, true),
+            !sprite_and_image(&fp, &dot, 4, 4, Some(&img)),
             "outside the frame"
         );
         a.define_collision_rectangle(1, 1, 0, 0).unwrap();
         let big = image(&["###", "###", "###"]);
         let fp = a.footprint();
         assert!(
-            sprite_and_image(&fp, &img, &big, 0, 0, false),
+            sprite_and_image(&fp, &big, 0, 0, None),
             "an empty rectangle inside"
         );
-        assert!(!sprite_and_image(&fp, &img, &big, 0, 0, true));
+        assert!(!sprite_and_image(&fp, &big, 0, 0, Some(&img)));
     }
 
     #[test]
@@ -299,7 +293,7 @@ mod tests {
         let dot = image(&["#"]);
         let hits = |t: &TiledLayer, x: i32, y: i32, pixel: bool| {
             let s = sprite_at(&dot, x, y);
-            sprite_and_tiles(&s.footprint(), &dot, t, &tiles, pixel)
+            sprite_and_tiles(&s.footprint(), t, pixel.then_some((&dot, &tiles)))
         };
         assert!(hits(&t, 10, 20, true), "tile 1's opaque pixel");
         assert!(hits(&t, 11, 21, false), "inside a set cell");
@@ -326,13 +320,13 @@ mod tests {
         let ring = image(&["###", "#.#", "###"]);
         let mut s = sprite_at(&ring, -1, -1);
         s.define_collision_rectangle(1, 1, 1, 1).unwrap();
-        assert!(sprite_and_tiles(&s.footprint(), &ring, &t, &tiles, false));
+        assert!(sprite_and_tiles(&s.footprint(), &t, None));
         assert!(
-            !sprite_and_tiles(&s.footprint(), &ring, &t, &tiles, true),
+            !sprite_and_tiles(&s.footprint(), &t, Some((&ring, &tiles))),
             "the hole"
         );
         s.define_collision_rectangle(0, 0, 3, 3).unwrap();
-        assert!(sprite_and_tiles(&s.footprint(), &ring, &t, &tiles, true));
+        assert!(sprite_and_tiles(&s.footprint(), &t, Some((&ring, &tiles))));
     }
 
     #[test]

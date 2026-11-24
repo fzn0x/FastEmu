@@ -109,6 +109,11 @@ impl Sprite {
         self.base.y = (i64::from(y) - dy) as i32;
     }
 
+    /// The memory a custom frame sequence takes.
+    pub fn heap_bytes(&self) -> usize {
+        self.sequence.as_ref().map_or(0, |s| s.len() * 4)
+    }
+
     /// The transform, `TRANS_NONE` at first.
     pub fn transform(&self) -> Transform {
         self.transform
