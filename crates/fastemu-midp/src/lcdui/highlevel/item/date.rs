@@ -346,6 +346,10 @@ pub(super) fn key(ctx: &mut Ctx<'_>, item: ObjRef, event: KeyEvent) -> JResult<H
     let codes = crate::env::env(ctx).profile.key_codes;
     let s = state_mut(ctx, item)?;
     if let Ok(digit @ b'0'..=b'9') = u8::try_from(event.code) {
+        if event.phase == KeyPhase::Repeated {
+            // A held digit types once; its repeats are not traversal.
+            return Ok(Handled::Yes);
+        }
         return Ok(if s.digit(digit - b'0', now()) {
             Handled::Changed
         } else {

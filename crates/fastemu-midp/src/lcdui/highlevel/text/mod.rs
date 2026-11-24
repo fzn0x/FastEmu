@@ -210,8 +210,12 @@ pub(crate) fn key(ctx: &Ctx<'_>, editor: &mut TextEditor, event: KeyEvent) -> Ke
         return KeyUse::Ignored;
     };
     let typed = matches!(u8::try_from(unit), Ok(b'0'..=b'9' | b'*' | b'#'));
-    if !typed || event.phase == KeyPhase::Repeated || !editor.editable() {
+    if !typed || !editor.editable() {
         return KeyUse::Ignored;
+    }
+    if event.phase == KeyPhase::Repeated {
+        // A held key types once; its repeats are not traversal either.
+        return KeyUse::Moved;
     }
     let before = editor.text().to_vec();
     if !editor.key(unit, Instant::now()) {

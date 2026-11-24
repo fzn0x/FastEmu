@@ -8,7 +8,7 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use fastemu_core::{Frame, InputEvent, Instance, Key, builtin_profiles};
+use fastemu_core::{Frame, InputEvent, Instance, Key, KeyAction, builtin_profiles};
 use screens_support::{midlet, suite};
 use support::{Running, TIMEOUT, rgb};
 
@@ -163,6 +163,12 @@ fn screens_form_traverses_and_tells_its_listener() {
     assert_eq!(rgb(&frame, 2, 2), BAR, "the title bar");
     run.instance.send(InputEvent::Text("Ann".into()));
     run.wait_log("changed Name Ann");
+    // A held 8 types one letter; its repeats do not move the focus down.
+    run.key(Key::Num8, KeyAction::Press);
+    std::thread::sleep(Duration::from_millis(700));
+    run.key(Key::Num8, KeyAction::Release);
+    run.wait_log("changed Name Annt");
+    assert!(run.instance.wants_text(), "the text field kept the focus");
     run.tap(Key::Down);
     wait_until(&mut run, "the choice group's focus", |r| {
         !r.instance.wants_text()
