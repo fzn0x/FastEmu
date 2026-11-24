@@ -168,6 +168,8 @@ the connection and its streams.
 
 `ServerSocketConnection.acceptAndOpen` polls a non-blocking listener
 every 50 ms, so a stop or a `close` from another thread ends the wait.
+`close` drops the listener, so the game can listen on the same port
+again at once.
 
 ## Datagrams
 
@@ -176,7 +178,9 @@ A client (`datagram://host:port`) resolves the address once and sends
 there unless a datagram names another; a server (`datagram://:port`)
 receives from anyone and its datagrams carry their own addresses.
 `getMaximumLength` is 65507 (the largest UDP payload over IPv4) and
-`getNominalLength` 1472 (one Ethernet frame).
+`getNominalLength` 1472 (one Ethernet frame). `close` drops the socket,
+which frees its port at once; a `receive` waiting on another thread
+ends within one read slice.
 
 A `Datagram` has a buffer, an offset, a length, a read/write pointer and
 an address (`datagram://host:port`). Following the reference
