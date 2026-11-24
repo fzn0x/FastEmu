@@ -48,6 +48,20 @@ fn init(ctx: &mut Ctx<'_>, a: &[Value], offset: i32, len: Option<i32>) -> JResul
     Ok(Value::Void)
 }
 
+/// Checks that `n` bytes from `pos` lie in `buf` and returns `pos`. The
+/// fields are protected, so a subclass (or the constructor's offset) can
+/// point them anywhere; Java then throws `ArrayIndexOutOfBoundsException`.
+fn source_range(ctx: &mut Ctx<'_>, buf: ObjRef, pos: i32, n: usize) -> JResult<usize> {
+    let len = ctx.array_len(buf)?;
+    match usize::try_from(pos) {
+        Ok(at) if at.checked_add(n).is_some_and(|end| end <= len) => Ok(at),
+        _ => {
+            let message = format!("Index {pos} out of bounds for length {len}");
+            throw(ctx, "java/lang/ArrayIndexOutOfBoundsException", &message)
+        }
+    }
+}
+
 pub(crate) fn classes() -> Vec<NativeClass> {
     vec![
         NativeClass::new("java/io/InputStream")
@@ -126,11 +140,8 @@ pub(crate) fn classes() -> Vec<NativeClass> {
                 let Some(buf) = ctx.get_field(obj, f.buf).obj() else {
                     return Ok(Value::Int(-1));
                 };
-                let b = ctx
-                    .array::<i8>(buf)?
-                    .get(pos as usize)
-                    .copied()
-                    .unwrap_or(0);
+                let at = source_range(ctx, buf, pos, 1)?;
+                let b = ctx.array::<i8>(buf)?[at];
                 ctx.set_field(obj, f.pos, Value::Int(pos + 1));
                 Ok(Value::Int(i32::from(b as u8)))
             })
@@ -158,7 +169,8 @@ pub(crate) fn classes() -> Vec<NativeClass> {
                 let Some(buf) = ctx.get_field(obj, f.buf).obj() else {
                     return Ok(Value::Int(-1));
                 };
-                let src: Vec<i8> = ctx.array::<i8>(buf)?[pos as usize..pos as usize + n].to_vec();
+                let at = source_range(ctx, buf, pos, n)?;
+                let src: Vec<i8> = ctx.array::<i8>(buf)?[at..at + n].to_vec();
                 ctx.array_mut::<i8>(dst)?[off..off + n].copy_from_slice(&src);
                 ctx.set_field(obj, f.pos, Value::Int(pos + n as i32));
                 Ok(Value::Int(n as i32))
@@ -196,4 +208,56 @@ pub(crate) fn classes() -> Vec<NativeClass> {
             })
             .method("close", "()V", |_, _| Ok(Value::Void)),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ctx::Throw;
+    use crate::value::Value;
+    use crate::{ArrayType, MemorySource, Vm, VmConfig};
+
+    fn outcome(ctx: &mut crate::Ctx<'_>, result: crate::JResult<Value>) -> String {
+        match result {
+            Ok(v) => format!("{v:?}"),
+            Err(Throw::Exception(e)) => ctx.describe_exception(e),
+            Err(Throw::Stop) => "stopped".to_owned(),
+        }
+    }
+
+    /// What `read()` and `read(byte[], 0, 4)` give on a stream over ten
+    /// bytes that starts at `offset`.
+    fn reads(offset: i32) -> (String, String) {
+        let vm = Vm::new(
+            VmConfig::default(),
+            std::sync::Arc::new(MemorySource::new()),
+            Vec::new(),
+        );
+        vm.attach("test", |ctx| {
+            let buf = ctx.new_array(ArrayType::Byte, 10).unwrap();
+            let args = [buf.into(), Value::Int(offset), Value::Int(10)];
+            let stream = ctx
+                .construct("java/io/ByteArrayInputStream", "([BII)V", &args)
+                .unwrap();
+            let dst = ctx.new_array(ArrayType::Byte, 4).unwrap();
+            let one = ctx.call_virtual(stream, "read", "()I", &[]);
+            let one = outcome(ctx, one);
+            let args = [dst.into(), Value::Int(0), Value::Int(4)];
+            let many = ctx.call_virtual(stream, "read", "([BII)I", &args);
+            (one, outcome(ctx, many))
+        })
+    }
+
+    #[test]
+    fn a_negative_position_throws_instead_of_reading() {
+        let (one, many) = reads(-5);
+        assert!(
+            one.starts_with("java.lang.ArrayIndexOutOfBoundsException"),
+            "{one}"
+        );
+        assert!(
+            many.starts_with("java.lang.ArrayIndexOutOfBoundsException"),
+            "{many}"
+        );
+        assert_eq!(reads(2), ("Int(0)".to_owned(), "Int(4)".to_owned()));
+    }
 }
