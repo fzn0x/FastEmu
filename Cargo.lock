@@ -1604,6 +1604,11 @@ dependencies = [
 [[package]]
 name = "fastemu-android"
 version = "0.1.0"
+dependencies = [
+ "fastemu-core",
+ "futures",
+ "log",
+]
 
 [[package]]
 name = "fastemu-audio"
