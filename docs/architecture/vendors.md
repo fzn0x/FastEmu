@@ -41,9 +41,10 @@ it), and a game that finds `FullCanvas` assumes those codes. So Nokia's
 API goes with Nokia's key codes: Nokia, Sony Ericsson and the generic
 profiles, which use `KeyCodes::NOKIA`. Siemens and Motorola have key codes
 of their own and do not get it. No source in `docs/compat/notes` shows
-Samsung or LG phones with it, so they do not get it either; a test checks
-that every built-in profile with Nokia's key codes, and only those, has
-the API. Sony Ericsson's own Capuchin (Flash) API is rare in games and not
+Samsung or LG phones with it, so they do not get it either, though the
+Samsung profile has Nokia's key codes, as Samsung phones copied them. A
+test checks that every built-in profile with the API has Nokia's key
+codes. Sony Ericsson's own Capuchin (Flash) API is rare in games and not
 offered.
 
 ## Nokia
@@ -185,9 +186,5 @@ the vendor classes behave as if the sound played.
   `lcdui.Image`, Samsung's extras, Motorola's game and FunLight packages,
   Sony Ericsson's Capuchin, LG's other `mmpp` classes, and the later Nokia
   UI classes (`TextEditor`, gestures, orientation).
-- A Samsung or an LG profile. No built-in profile has a `samsung` or
-  `lg` id, so only the tests, with ids of their own, reach those
-  makers' classes, and `cargo xtask coverage`, which reads the built-in
-  profiles, counts them as missing.
 - Telling the app about lights and vibration, which only reach the log.
 - Playing MMF clips.

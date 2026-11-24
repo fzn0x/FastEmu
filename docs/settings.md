@@ -54,6 +54,8 @@ FastEmu ships these profiles:
 | Sony Ericsson 176x220 | `sonyericsson-176x220` | 176x220 | no | Nokia |
 | Siemens 132x176 | `siemens-132x176` | 132x176 | no | Siemens |
 | Motorola 176x220 | `motorola-176x220` | 176x220 | no | Motorola |
+| Samsung 176x220 | `samsung-176x220` | 176x220 | no | Nokia |
+| LG 176x220 | `lg-176x220` | 176x220 | no | LG |
 
 If a game looks too small or too large, try a profile that matches the
 screen size it was made for. The game's name or its download page often
@@ -68,20 +70,20 @@ screen there.
 
 MIDP fixes the codes of the number keys but leaves the soft keys, arrow
 keys and fire key to the phone maker. Games test for the codes of their
-target phone. FastEmu has three sets:
+target phone. FastEmu has four sets:
 
-| Key | Nokia and most others | Siemens | Motorola |
-| --- | --- | --- | --- |
-| Left soft | -6 | -1 | -21 |
-| Right soft | -7 | -4 | -22 |
-| Up | -1 | -59 | -1 |
-| Down | -2 | -60 | -6 |
-| Left | -3 | -61 | -2 |
-| Right | -4 | -62 | -5 |
-| Fire | -5 | -26 | -20 |
-| Clear | -8 | -8 | -8 |
-| Send | -10 | -10 | -10 |
-| End | -11 | -11 | -11 |
+| Key | Nokia and most others | Siemens | Motorola | LG |
+| --- | --- | --- | --- | --- |
+| Left soft | -6 | -1 | -21 | -202 |
+| Right soft | -7 | -4 | -22 | -203 |
+| Up | -1 | -59 | -1 | -1 |
+| Down | -2 | -60 | -6 | -2 |
+| Left | -3 | -61 | -2 | -3 |
+| Right | -4 | -62 | -5 | -4 |
+| Fire | -5 | -26 | -20 | -5 |
+| Clear | -8 | -8 | -8 | -204 |
+| Send | -10 | -10 | -10 | -10 |
+| End | -11 | -11 | -11 | -11 |
 
 If a game's menu does not respond to the soft keys or arrows, the
 profile's key codes are the first thing to change.

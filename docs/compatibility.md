@@ -36,9 +36,9 @@ see them on the Nokia, Sony Ericsson and generic profiles.
 
 **Other makers' APIs.** Siemens' game and colour game packages and its
 `ui.Image` class on the Siemens profile, and Motorola's backlight class
-on the Motorola profile. Samsung's sound clip, backlight and vibration
-classes and LG's backlight and vibration classes are in place too, but
-FastEmu has no Samsung or LG phone profile yet, so no game sees them.
+on the Motorola profile, Samsung's sound clip, backlight and vibration
+classes on the Samsung profile, and LG's backlight and vibration classes
+on the LG profile.
 
 ## What does not work yet
 
