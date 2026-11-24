@@ -184,9 +184,14 @@ pub(super) fn key(
             }
             return Ok(Handled::No);
         }
+        if len == 0 {
+            // The game emptied the group while its list was open.
+            g.open = false;
+            return Ok(Handled::Yes);
+        }
         match action {
-            keys::UP => g.model.focus = (g.model.focus + len - 1) % len.max(1),
-            keys::DOWN => g.model.focus = (g.model.focus + 1) % len.max(1),
+            keys::UP => g.model.focus = (g.model.focus + len - 1) % len,
+            keys::DOWN => g.model.focus = (g.model.focus + 1) % len,
             keys::FIRE => return choose(ctx, item),
             _ => g.open = false,
         }

@@ -206,6 +206,25 @@ fn screens_form_fits_a_small_phone() {
 }
 
 #[test]
+fn screens_popup_emptied_while_open_takes_keys() {
+    let Some(jar) = suite("edges-popup") else {
+        return;
+    };
+    let mut run = Running::launch(&jar, midlet::EDGES);
+    run.wait_log("edges shown");
+    run.wait_frame(|f| count(f, HIGHLIGHT) > 0);
+    // Open the popup's list, let the game empty it, then move in it.
+    run.tap(Key::Fire);
+    run.tap(Key::SoftLeft);
+    run.wait_log("emptied 1");
+    run.tap(Key::Up);
+    run.tap(Key::Down);
+    run.tap(Key::SoftLeft);
+    run.wait_log("emptied 2");
+    assert_eq!(run.instance.error_count(), 0, "{}", run.dump());
+}
+
+#[test]
 fn screens_custom_item_gets_its_callbacks() {
     let Some(jar) = suite("custom") else { return };
     let mut run = Running::launch(&jar, midlet::CUSTOMS);

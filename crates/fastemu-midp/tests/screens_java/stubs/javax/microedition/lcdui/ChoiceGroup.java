@@ -6,4 +6,6 @@ public class ChoiceGroup extends Item {
     public int getSelectedIndex() {
         return 0;
     }
+
+    public void deleteAll() {}
 }

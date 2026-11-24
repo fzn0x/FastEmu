@@ -21,7 +21,8 @@ MIDlet-1: Lists, , s.Lists\r\n\
 MIDlet-2: Texts, , s.Texts\r\n\
 MIDlet-3: Alerts, , s.Alerts\r\n\
 MIDlet-4: Forms, , s.Forms\r\n\
-MIDlet-5: Customs, , s.Customs\r\n";
+MIDlet-5: Customs, , s.Customs\r\n\
+MIDlet-6: Edges, , s.Edges\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 pub mod midlet {
@@ -30,6 +31,7 @@ pub mod midlet {
     pub const ALERTS: usize = 2;
     pub const FORMS: usize = 3;
     pub const CUSTOMS: usize = 4;
+    pub const EDGES: usize = 5;
 }
 
 /// The JDK tool `name`, from `JAVA_HOME` first, then the `PATH`.
