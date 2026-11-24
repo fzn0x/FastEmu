@@ -206,6 +206,17 @@ fn kept_exceptions_end_in_out_of_memory_error() {
 }
 
 #[test]
+fn kept_exceptions_thrown_by_a_native_end_in_out_of_memory_error() {
+    // A trace of 104 frames is 1664 bytes.
+    fills_memory("nativeThrown", 1664);
+}
+
+#[test]
+fn kept_exceptions_thrown_by_the_interpreter_end_in_out_of_memory_error() {
+    fills_memory("faultThrown", 1664);
+}
+
+#[test]
 fn dropped_exceptions_are_collected_as_they_are_counted() {
     with_vm(HEAP, |vm| {
         assert_eq!(call(vm, "exceptionGarbage"), 2000);

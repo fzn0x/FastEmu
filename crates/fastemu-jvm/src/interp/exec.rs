@@ -1224,7 +1224,10 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
             }
             Err(fault) => {
                 sync!();
-                let thrown = fault.into_throw(ctx);
+                let thrown = match fault.into_throw(ctx) {
+                    Throw::Exception(exc) => ctx.judge_thrown(exc),
+                    stop @ Throw::Stop => stop,
+                };
                 ctx.thread.locals.truncate(locals_mark);
                 match thrown {
                     Throw::Stop => {

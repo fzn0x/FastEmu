@@ -83,6 +83,60 @@ public class HeapCases {
         return i;
     }
 
+    static int keepNativeThrown(Object[] keep, int depth) {
+        if (depth > 0) {
+            return keepNativeThrown(keep, depth - 1);
+        }
+        String text = "abc";
+        int i = 0;
+        try {
+            for (; i < keep.length; i++) {
+                try {
+                    text.charAt(10);
+                } catch (StringIndexOutOfBoundsException e) {
+                    keep[i] = e;
+                }
+            }
+        } catch (OutOfMemoryError e) {
+            return i;
+        }
+        return -1;
+    }
+
+    /**
+     * Exceptions that a native throws 100 frames down, kept in an array
+     * made first: 2000 of them. Nothing in the loop allocates with new or
+     * returns from a native without an exception.
+     */
+    static int nativeThrown() {
+        return keepNativeThrown(new Object[2000], 100);
+    }
+
+    static int keepFaultThrown(Object[] keep, int depth) {
+        if (depth > 0) {
+            return keepFaultThrown(keep, depth - 1);
+        }
+        Object nothing = null;
+        int i = 0;
+        try {
+            for (; i < keep.length; i++) {
+                try {
+                    nothing.hashCode();
+                } catch (NullPointerException e) {
+                    keep[i] = e;
+                }
+            }
+        } catch (OutOfMemoryError e) {
+            return i;
+        }
+        return -1;
+    }
+
+    /** As nativeThrown, with a NullPointerException the interpreter throws. */
+    static int faultThrown() {
+        return keepFaultThrown(new Object[2000], 100);
+    }
+
     /** Resource streams of /big.bin (64 KiB), kept: 100 of them. */
     static int resources() {
         Vector keep = new Vector();

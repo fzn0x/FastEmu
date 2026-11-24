@@ -170,6 +170,33 @@ impl<'vm> Ctx<'vm> {
         Ok(())
     }
 
+    /// Judges the heap as the interpreter is about to throw `exc`, which a
+    /// native threw or the interpreter made. Like a native's allocations,
+    /// an exception counts its stack trace as it is made, and a game that
+    /// keeps exceptions that natives or faults throw (a bad index, a null
+    /// receiver, a number that does not parse) makes no allocation that
+    /// checks the heap. So when the heap asked for a collection, it runs
+    /// here, and if the live data still does not fit, as
+    /// [`Ctx::safepoint_after_native`] decides, an `OutOfMemoryError` is
+    /// thrown in place of `exc`. An `OutOfMemoryError` passes as it is.
+    pub(crate) fn judge_thrown(&mut self, exc: ObjRef) -> Throw {
+        if !self.state.heap.gc_requested() || self.shared.is_stopping() {
+            return Throw::Exception(exc);
+        }
+        let class = self.state.heap.class_of(exc);
+        if self.state.classes.load("java/lang/OutOfMemoryError").ok() == Some(class) {
+            return Throw::Exception(exc);
+        }
+        let grew = self.state.heap.used() > self.baseline;
+        // The collection must not free the exception.
+        self.root(exc);
+        self.collect();
+        if grew && self.state.heap.used() > self.state.heap.limit() {
+            return self.out_of_memory();
+        }
+        Throw::Exception(exc)
+    }
+
     /// Runs `f` with the VM lock released, for slow work that does not
     /// touch the virtual machine (file and network I/O, decoding). Other
     /// Java threads run meanwhile and may collect: keep only rooted
