@@ -175,6 +175,35 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_wake_without_the_lock_reaches_a_thread_that_waits_after_it() {
+        let queue = WaitQueue::default();
+        let lock = Mutex::new(());
+        let mut guard = lock.lock();
+        // This thread checked its condition under the lock. The notifier
+        // could not take the lock, so its wake went out before this thread
+        // joined the queue.
+        queue.notify_all_unlocked();
+        let start = Instant::now();
+        let timed_out = queue.wait(&mut guard, Some(start + Duration::from_secs(10)));
+        assert!(!timed_out, "the wait returned at once");
+        assert!(start.elapsed() < Duration::from_secs(5));
+        // Only the wait that follows the wake returns early.
+        let timed_out = queue.wait(&mut guard, Some(Instant::now() + Duration::from_millis(5)));
+        assert!(timed_out, "the next wait blocks until its deadline");
+    }
+
+    #[test]
+    fn a_released_wait_leaves_the_lock_to_others_and_ends_at_its_deadline() {
+        let queue = WaitQueue::default();
+        let lock = Mutex::new(());
+        let guard = lock.lock();
+        let start = Instant::now();
+        let timed_out = queue.wait_released(guard, Some(start + Duration::from_millis(5)));
+        assert!(timed_out);
+        assert!(lock.try_lock().is_some(), "the guard was given up");
+    }
+
     /// How long each of ten waits for `wait` took, sorted.
     fn timed(signal: &Signal, wait: Duration) -> Vec<Duration> {
         let mut took: Vec<Duration> = (0..10)
