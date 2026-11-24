@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <title>FastEmu</title>
+  <rect width="32" height="32" rx="8" fill="#5eead4"/>
+  <rect x="12" y="5" width="14" height="21" rx="3.5" fill="none" stroke="#0a0a0a" stroke-width="2.4"/>
+  <rect x="5" y="9" width="14" height="19" rx="3.5" fill="#0a0a0a"/>
+  <rect x="8" y="12.5" width="8" height="7" rx="1.2" fill="#5eead4"/>
+</svg>
