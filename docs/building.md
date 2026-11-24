@@ -10,9 +10,10 @@ git clone https://github.com/fzn0x/FastEmu.git
 cd FastEmu
 ```
 
-The repository pins its Rust toolchain in `rust-toolchain.toml`.
-Install [rustup](https://rustup.rs/) and the right version downloads
-on the first build.
+`rust-toolchain.toml` selects the stable Rust toolchain with clippy
+and rustfmt. Install [rustup](https://rustup.rs/) and it downloads on
+the first build. The oldest Rust that builds FastEmu is the
+`rust-version` in `Cargo.toml`.
 
 ## Crates
 
