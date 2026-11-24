@@ -52,10 +52,12 @@ fn read_chunks(ctx: &mut Ctx<'_>, stream: ObjRef, byte_reads: bool) -> JResult<V
                 break;
             }
             out.push(byte as u8);
-            continue;
+        } else {
+            let count = (count as usize).min(CHUNK);
+            out.extend(ctx.array::<i8>(buffer)?[..count].iter().map(|&b| b as u8));
         }
-        let count = (count as usize).min(CHUNK);
-        out.extend(ctx.array::<i8>(buffer)?[..count].iter().map(|&b| b as u8));
+        // Checked after either kind of read, so a stream that never ends
+        // one byte at a time is cut off too.
         if out.len() >= MAX_BYTES {
             ctx.log(
                 LogLevel::Warn,
