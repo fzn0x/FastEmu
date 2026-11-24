@@ -236,11 +236,19 @@ impl NativeClass {
     /// A `public static final` field with a constant value, as a
     /// `ConstantValue` attribute would give it.
     #[must_use]
-    pub fn constant(mut self, name: &str, desc: &str, value: Value) -> Self {
+    pub fn constant(self, name: &str, desc: &str, value: Value) -> Self {
+        self.constant_with(name, desc, value, access::PUBLIC)
+    }
+
+    /// A `static final` field with a constant value and the visibility in
+    /// `access`, such as [`access::PROTECTED`] for the constants a class
+    /// declares for its subclasses.
+    #[must_use]
+    pub fn constant_with(mut self, name: &str, desc: &str, value: Value, access: u16) -> Self {
         self.fields.push(NativeField {
             name: name.to_owned(),
             desc: desc.to_owned(),
-            access: access::PUBLIC | access::STATIC | access::FINAL,
+            access: access | access::STATIC | access::FINAL,
             constant: Some(ConstValue::Value(value)),
         });
         self
