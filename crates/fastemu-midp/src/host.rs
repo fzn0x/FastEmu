@@ -243,6 +243,21 @@ mod tests {
     }
 
     #[test]
+    fn the_app_hears_when_text_is_wanted() {
+        let (link, count) = counting();
+        assert!(!link.wants_text());
+        link.set_wants_text(true);
+        assert!(link.wants_text());
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+        link.frame();
+        link.set_wants_text(true);
+        assert_eq!(count.load(Ordering::Relaxed), 1, "no change, no news");
+        link.set_wants_text(false);
+        assert!(!link.wants_text());
+        assert_eq!(count.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
     fn finished_statuses_are_final() {
         let (link, _) = counting();
         link.set_status(InstanceStatus::Exited);
