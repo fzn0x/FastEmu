@@ -56,14 +56,16 @@ named.
   not an error. A value with `://` gives only its last part. Each part is
   added to the JAD's folder one at a time, so no drive, `\\host\share`
   or `..` can replace or leave it. This is text work, done before any
-  file is looked at, and it gives the same answer on every system.
+  file is looked at. It gives the same answer on every system, except
+  that only Windows refuses device names.
 - **Size limits.** `read_capped` reads each JAR and JAD. A JAR over
   64 MiB (`MAX_JAR_BYTES`) and a JAD over 1 MiB (`MAX_JAD_BYTES`) give
   `LaunchError::InvalidSuite` with the file name, its size and the limit,
   before the file is read. So does a path that is not a regular file. The
   read stops one byte past the limit, so a file that grows cannot pass it.
-  A JAD beside a JAR that is over its limit is left out, with a note. The
-  JAR stays in the one buffer it was read into.
+  When a JAR is opened and the JAD of the same name beside it is over
+  1 MiB, the JAD is left out with a note and the JAR still opens. The JAR
+  stays in the one buffer it was read into.
 - **MIDlets.** `MIDlet-1` up to the first gap; class after the last
   comma, name before the first, icon in between. With no `MIDlet-<n>` at
   all, the classes that extend `MIDlet` (found by walking superclasses in

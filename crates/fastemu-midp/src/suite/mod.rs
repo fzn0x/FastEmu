@@ -180,9 +180,10 @@ fn find_jar_of_jad(jad: &Path, attributes: &[(String, String)]) -> Option<PathBu
 /// place is the JAD's folder followed by plain file or folder names,
 /// whatever `url` says, so it cannot leave the folder, start with a drive
 /// or a network share, or reach a stream or a device. This works on the
-/// text alone, the same on every system, and touches no file: a guess with
-/// a part that is not a plain name is dropped, and the caller asks the
-/// file system only about what is left.
+/// text alone and touches no file: a guess with a part that is not a plain
+/// name is dropped, and the caller asks the file system only about what is
+/// left. The answer is the same on every system, but for device names,
+/// which only Windows refuses.
 fn jar_candidates(dir: &Path, url: &str) -> Vec<PathBuf> {
     let url = url.strip_prefix("file://").unwrap_or(url);
     let value = url.split(['?', '#']).next().unwrap_or_default();
