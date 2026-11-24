@@ -1,0 +1,114 @@
+name: Rerun
+
+# A run of CI that fails reruns its failed jobs by itself, again and again,
+# for up to 5 hours from its start: a mirror that does not answer, a runner
+# that goes away or a download that breaks off should not leave a pull
+# request or a commit of main red, nor wait for someone to press "Re-run".
+# A failure that stays after 5 hours of reruns is left red, as it is likely
+# real.
+#
+# Each rerun waits longer than the one before: 1, 2, 4, 8, 16 minutes, then
+# 30 minutes at most. That is about 12 reruns in 5 hours, under GitHub's 50
+# reruns of a run.
+#
+# A pull request's run is rerun only while its commit is still the head of
+# the pull request, and the pull request is open: a newer commit has a run
+# of its own. A run from a fork does not name its pull request, so it is
+# found by the fork's owner and branch; a run whose pull request cannot be
+# found is not rerun. A run that was rerun by hand meanwhile is left to that
+# rerun. When GitHub refuses a rerun, as for a run whose pull request
+# closed before any job started, it says so in a warning and ends green:
+# the run stays red on its own. The release and publishing workflows are
+# not in the list: rerunning them is a decision.
+#
+# It checks out nothing and runs no code of the run it reruns: it only asks
+# GitHub to rerun it.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: rerun-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  rerun:
+    name: Rerun the failed jobs
+    if: github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Wait, then rerun the failed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          STARTED: ${{ github.event.workflow_run.created_at }}
+          EVENT: ${{ github.event.workflow_run.event }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          NAME: ${{ github.event.workflow_run.name }}
+          PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          budget=$((5 * 3600))
+          age=$(( $(date +%s) - $(date -d "$STARTED" +%s) ))
+          if [ "$ATTEMPT" -ge 40 ] || [ "$age" -ge "$budget" ]; then
+            echo "::warning::$NAME failed $ATTEMPT times over $((age / 60)) minutes: it isn't rerun again."
+            exit 0
+          fi
+
+          # A fork's run names no pull request: find the newest one of its
+          # head, the fork's owner and branch.
+          if [ "$EVENT" = pull_request ] && [ -z "$PR" ]; then
+            if [ -n "$HEAD_OWNER" ] && [ -n "$HEAD_BRANCH" ]; then
+              PR="$(gh api -X GET "repos/$REPO/pulls" -f state=all -f head="$HEAD_OWNER:$HEAD_BRANCH" \
+                --jq '.[0].number // empty' || true)"
+            fi
+            if [ -z "$PR" ]; then
+              echo "::notice::$NAME ran for a pull request that can't be found (head ${HEAD_OWNER:-?}:${HEAD_BRANCH:-?}): it isn't rerun."
+              exit 0
+            fi
+          fi
+
+          # still says whether the run should still be rerun: not rerun by
+          # hand meanwhile, and, for a pull request, still its head and open.
+          still() {
+            local attempt status
+            attempt="$(gh api "repos/$REPO/actions/runs/$RUN" --jq '.run_attempt')"
+            status="$(gh api "repos/$REPO/actions/runs/$RUN" --jq '.status')"
+            if [ "$attempt" != "$ATTEMPT" ] || [ "$status" != completed ]; then
+              echo "$NAME was rerun meanwhile (attempt $attempt, $status): that rerun counts."
+              return 1
+            fi
+            if [ "$EVENT" = pull_request ] && [ -n "$PR" ]; then
+              local pr
+              pr="$(gh api "repos/$REPO/pulls/$PR" --jq '.state + " " + .head.sha')"
+              if [ "$pr" != "open $SHA" ]; then
+                echo "Pull request #$PR is no longer open at this commit ($pr): it isn't rerun."
+                return 1
+              fi
+            fi
+          }
+
+          n=$((ATTEMPT - 1)); [ "$n" -gt 5 ] && n=5
+          wait=$((60 << n)); [ "$wait" -gt 1800 ] && wait=1800
+          left=$((budget - age)); [ "$wait" -gt "$left" ] && wait=$left
+          echo "$NAME failed (attempt $ATTEMPT, $((age / 60)) minutes in): its failed jobs run again in $((wait / 60)) minutes."
+          still || exit 0
+          sleep "$wait"
+          still || exit 0
+          if ! out="$(gh run rerun "$RUN" --failed -R "$REPO" 2>&1)"; then
+            echo "::warning::GitHub refused to rerun $NAME: $(echo "$out" | tr '\n' ' ')"
+            exit 0
+          fi
+          echo "Rerunning the failed jobs of $NAME: https://github.com/$REPO/actions/runs/$RUN"
