@@ -27,6 +27,10 @@ const HAS_DESCRIPTOR: u16 = 1 << 3;
 /// exhaust the host. No phone had this much storage for one file.
 const MAX_ENTRY_BYTES: usize = 64 * 1024 * 1024;
 
+/// The most a deflate stream can expand: a 258-byte match can take as
+/// little as two bits, so one input byte gives at most 4 * 258 bytes.
+const MAX_DEFLATE_RATIO: usize = 1032;
+
 /// Why an archive or an entry could not be read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ZipError {
@@ -185,7 +189,10 @@ fn inflate(raw: &[u8], expected: usize) -> Result<Vec<u8>, ZipError> {
     use miniz_oxide::inflate::core::{DecompressorOxide, decompress, inflate_flags};
 
     let flags = inflate_flags::TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF;
+    // The size the header claims is only a hint: deflate cannot expand
+    // more than about 1032 times, so a larger claim is a lie.
     let start = expected
+        .min(raw.len().saturating_mul(MAX_DEFLATE_RATIO))
         .max(raw.len().saturating_mul(2))
         .clamp(64, MAX_ENTRY_BYTES);
     let mut out = vec![0u8; start];
@@ -208,6 +215,7 @@ fn inflate(raw: &[u8], expected: usize) -> Result<Vec<u8>, ZipError> {
         }
     }
     out.truncate(written);
+    out.shrink_to_fit();
     Ok(out)
 }
 
@@ -596,6 +604,19 @@ mod tests {
             data
         );
         assert!(took < std::time::Duration::from_secs(2), "took {took:?}");
+    }
+
+    /// A size field that lies costs no memory beyond the real contents.
+    #[test]
+    fn a_huge_claimed_size_is_not_kept() {
+        let text = b"small text, small text, small text".to_vec();
+        let mut bytes = write(&[TestEntry::deflated("a.txt", &text)], true);
+        let cd = bytes.len() - 22 - 46 - 5;
+        bytes[cd + 24..cd + 28].copy_from_slice(&u32::MAX.to_le_bytes());
+        let archive = ZipArchive::new(bytes).unwrap();
+        let read = archive.read(&archive.entries()[0]).unwrap();
+        assert_eq!(read, text);
+        assert!(read.capacity() < 4096, "kept {} bytes", read.capacity());
     }
 
     #[test]
