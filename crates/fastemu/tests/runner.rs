@@ -87,7 +87,8 @@ const MANIFEST: &str = "Manifest-Version: 1.0\r\n\
 MIDlet-Name: Probe\r\n\
 MIDlet-Vendor: FastEmu\r\n\
 MIDlet-Version: 1.0\r\n\
-MIDlet-1: Probe, , probe.Probe\r\n";
+MIDlet-1: Probe, , probe.Probe\r\n\
+MIDlet-2: Slow, , probe.Slow\r\n";
 
 /// Compiles the probe and packs its JAR once.
 fn build() -> Result<PathBuf, String> {
@@ -245,7 +246,7 @@ fn record_saves_every_nth_frame() {
         jar,
         &[
             "--frames",
-            "30",
+            "120",
             "--record",
             path_arg(&frames),
             "--every",
@@ -272,5 +273,22 @@ fn record_saves_every_nth_frame() {
             .contains(&format!("recorded {} frames in", names.len())),
         "{}",
         run.out
+    );
+}
+
+#[test]
+fn frames_count_screen_time_for_games_that_draw_rarely() {
+    let Some(jar) = probe_jar() else {
+        return;
+    };
+    // Slow draws three pictures 400 ms apart, then keeps the last one up
+    // for good, as Tetris does on its game-over screen.
+    let started = std::time::Instant::now();
+    let run = run(jar, &["--midlet", "2", "--frames", "120"]);
+    assert_eq!(run.code, Some(0), "{}{}", run.out, run.err);
+    assert!(run.out.contains("ran 120 frames ("), "{}", run.out);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(20),
+        "120 frames are two seconds of screen time, not 120 pictures"
     );
 }

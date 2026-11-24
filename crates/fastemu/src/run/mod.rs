@@ -3,8 +3,13 @@
 //! It launches the suite with the real launcher and no audio output, runs
 //! it for a number of frames or seconds while pressing the keys of a
 //! script, prints the game's log as it comes, saves the last frame if
-//! asked, and exits with 1 when the game crashed or stopped presenting
-//! frames. No GPUI code runs on this path.
+//! asked, and exits with 1 when the game crashed or never showed a
+//! picture. No GPUI code runs on this path.
+//!
+//! Frames are refreshes of the phone's screen, 60 a second, as video
+//! emulators count them, and not the pictures the game draws: a puzzle
+//! game that redraws once a second would otherwise make `--frames 300`
+//! last five minutes, and a game-over screen would never reach it.
 
 mod record;
 mod script;
@@ -32,7 +37,8 @@ Options:
   --midlet N        Start MIDlet-<N> of the suite (default 1)
   --profile ID      Run on the phone profile ID (default generic-240x320)
   --touch           Give the phone a touch screen whatever the profile
-  --frames N        Stop after N frames (default 300)
+  --frames N        Stop after N frames of the screen, 60 a second, from
+                    the game's first picture (default 300)
   --seconds S       Stop after S seconds instead
   --screenshot PATH Save the last frame as a PNG
   --record DIR      Save presented frames in DIR as frame-000001.png and on
@@ -54,12 +60,14 @@ finger down, drag@XxY moves it, release@XxY lifts it, and tap@XxY does
 all three (tap@XxY:MS holds for MS milliseconds). Games get them only on
 a touch screen: a touch profile such as generic-360x640, or --touch.
 
-Exits with 1 when the game crashes or presents no new frame for 30
+Exits with 1 when the game crashes or shows nothing in its first 30
 seconds, and with 2 for a bad command line.
 ";
 
-/// How long the runner waits for a new frame before it gives up.
+/// How long the runner waits for the game's first picture.
 const STALL: Duration = Duration::from_secs(30);
+/// How often a phone's screen refreshes: the frames `--frames` counts.
+const REFRESH_RATE: f64 = 60.0;
 /// How long a stopping game gets to wind down.
 const STOP_WAIT: Duration = Duration::from_secs(5);
 
@@ -276,10 +284,10 @@ pub fn run(options: &Options, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
             return 1;
         }
     };
-    let code = drive(options, &*instance, recorder.as_mut(), out, err);
+    let Ran { code, frames } = drive(options, &*instance, recorder.as_mut(), out, err);
     let errors = instance.error_count();
-    let frames = instance.frame().map_or(0, |f| f.serial());
     let last = instance.frame();
+    let drawn = last.as_ref().map_or(0, fastemu_core::Frame::serial);
     instance.stop();
     let deadline = Instant::now() + STOP_WAIT;
     while !instance.status().is_finished() && Instant::now() < deadline {
@@ -289,7 +297,7 @@ pub fn run(options: &Options, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     if temporary {
         let _ = std::fs::remove_dir_all(&data_dir);
     }
-    let _ = writeln!(out, "ran {frames} frames, {errors} errors");
+    let _ = writeln!(out, "ran {frames} frames ({drawn} drawn), {errors} errors");
     if let Some(recorder) = &recorder {
         let _ = writeln!(
             out,
@@ -325,19 +333,36 @@ pub fn run(options: &Options, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     code
 }
 
-/// Runs the game until its limit, a crash, its exit or a stall, saving
-/// frames into `recorder` as they come, and returns the exit code so far.
+/// How a run went.
+struct Ran {
+    /// The exit code so far.
+    code: u8,
+    /// Screen refreshes from the first picture to the end.
+    frames: u64,
+}
+
+/// The screen refreshes in `time`.
+fn refreshes(time: Duration) -> u64 {
+    (time.as_secs_f64() * REFRESH_RATE) as u64
+}
+
+/// Runs the game until its limit, a crash, its exit or a start that
+/// shows nothing, saving pictures into `recorder` as they come.
 fn drive(
     options: &Options,
     instance: &dyn Instance,
     mut recorder: Option<&mut Recorder>,
     out: &mut dyn Write,
     err: &mut dyn Write,
-) -> u8 {
+) -> Ran {
     let start = Instant::now();
     let mut script = Script::new(options.keys.clone());
     let mut serial = 0;
-    let mut changed = start;
+    let mut first: Option<Instant> = None;
+    let ran = |code, first: Option<Instant>| Ran {
+        code,
+        frames: first.map_or(0, |first| refreshes(first.elapsed())),
+    };
     loop {
         print_log(instance, out, err);
         let now = Instant::now();
@@ -345,11 +370,11 @@ fn drive(
             InstanceStatus::Crashed { message } => {
                 print_log(instance, out, err);
                 let _ = writeln!(err, "fastemu: the game crashed: {message}");
-                return 1;
+                return ran(1, first);
             }
             InstanceStatus::Exited => {
                 let _ = writeln!(out, "the game exited");
-                return 0;
+                return ran(0, first);
             }
             _ => {}
         }
@@ -357,31 +382,31 @@ fn drive(
             && frame.serial() > serial
         {
             serial = frame.serial();
-            changed = now;
+            first.get_or_insert(now);
             if let Some(recorder) = recorder.as_deref_mut()
                 && let Err(e) = recorder.offer(&frame)
             {
                 let _ = writeln!(err, "fastemu: could not record: {e}");
-                return 1;
+                return ran(1, first);
             }
         }
-        if serial > 0 {
+        if first.is_some() {
             script.advance(instance, now);
         }
         let done = match options.limit {
-            Limit::Frames(n) => serial >= n,
+            Limit::Frames(n) => first.is_some_and(|first| refreshes(now - first) >= n),
             Limit::Seconds(s) => now.duration_since(start).as_secs_f64() >= s,
         };
         if done {
-            return 0;
+            return ran(0, first);
         }
-        if now.duration_since(changed) > STALL {
+        if first.is_none() && now.duration_since(start) > STALL {
             let _ = writeln!(
                 err,
-                "fastemu: no new frame for {} seconds; stopping",
+                "fastemu: the game showed nothing for {} seconds; stopping",
                 STALL.as_secs()
             );
-            return 1;
+            return ran(1, first);
         }
         std::thread::sleep(Duration::from_millis(2));
     }
@@ -528,7 +553,7 @@ mod tests {
             out.starts_with("loaded snake.jar (Snake 1.2)\nprofile generic-240x320, 1 instance\n"),
             "{out}"
         );
-        assert!(out.ends_with("ran 0 frames, 1 errors\n"), "{out}");
+        assert!(out.ends_with("ran 0 frames (0 drawn), 1 errors\n"), "{out}");
         assert!(err.contains("the game crashed"), "{err}");
         assert!(err.contains("no.such.Game"), "{err}");
         std::fs::remove_dir_all(dir).unwrap();
