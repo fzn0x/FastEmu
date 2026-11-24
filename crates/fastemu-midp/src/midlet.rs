@@ -263,9 +263,9 @@ pub fn classes() -> Vec<NativeClass> {
                 )
             }
         })
-        .abstract_method("startApp", "()V")
-        .abstract_method("pauseApp", "()V")
-        .abstract_method("destroyApp", "(Z)V")
+        .abstract_method_with("startApp", "()V", protected)
+        .abstract_method_with("pauseApp", "()V", protected)
+        .abstract_method_with("destroyApp", "(Z)V", protected)
         .method_with("notifyDestroyed", "()V", final_method, |ctx, _| {
             env(ctx).host.control(Control::Exited);
             Ok(Value::Void)

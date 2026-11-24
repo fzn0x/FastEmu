@@ -290,7 +290,7 @@ pub fn class() -> NativeClass {
         .method_with("showNotify", "()V", protected, noop)
         .method_with("hideNotify", "()V", protected, noop)
         .method_with("sizeChanged", "(II)V", protected, noop)
-        .abstract_method("paint", PAINT)
+        .abstract_method_with("paint", PAINT, protected)
         .method_with("repaint", "(IIII)V", final_method, |ctx, a| {
             let canvas = this(ctx, a[0])?;
             let region = Rect::new(a[1].int(), a[2].int(), a[3].int(), a[4].int());
