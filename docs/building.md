@@ -71,7 +71,9 @@ You need the Android SDK and NDK, and the Rust Android targets:
 rustup target add aarch64-linux-android
 ```
 
-The Android build uses the Zed Android port of GPUI. The
+The Android build uses the
+[Zed Android port](https://github.com/Dylanmurzello/zed-android-port)
+of GPUI. The
 `fastemu-android` crate documents the exact commands for building and
 signing the `.apk`, which may change as that port changes. Check its
 readme before you start.
