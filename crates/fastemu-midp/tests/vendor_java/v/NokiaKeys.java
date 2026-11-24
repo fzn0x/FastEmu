@@ -39,6 +39,11 @@ class KeysCanvas extends FullCanvas {
         } catch (IllegalStateException e) {
             System.out.println("setCommandListener: IllegalStateException");
         }
+        FullCanvas see = new FullCanvas(true) {
+            protected void paint(Graphics g) {}
+        };
+        System.out.println("transparency: " + getTransparency() + " " + see.getTransparency()
+                + " " + see.getWidth() + "x" + see.getHeight());
     }
 
     protected void showNotify() {

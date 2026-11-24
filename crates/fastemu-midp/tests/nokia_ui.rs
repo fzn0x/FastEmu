@@ -94,6 +94,8 @@ fn a_full_canvas_fills_the_screen_and_has_no_commands() {
     game.wait_log("shown 240x320");
     assert!(game.has("addCommand: IllegalStateException"));
     assert!(game.has("setCommandListener: IllegalStateException"));
+    // The later edition's constructor: full screen, the request kept.
+    assert!(game.has("transparency: false true 240x320"));
     // No soft key bar: the green reaches the bottom corners.
     let frame = game.wait_frame(|f| f.pixel(0, 319).is_some_and(|p| p & 0xFF_FFFF == 0xFF00));
     assert_eq!(rgb(&frame, 239, 319), 0x00FF00);

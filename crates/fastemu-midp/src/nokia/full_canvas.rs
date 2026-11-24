@@ -7,12 +7,29 @@
 //! `KEY_SOFTKEY*` constants: the runtime passes the soft keys of a canvas
 //! without a `CommandListener` to the game. The `Graphics` its `paint`
 //! gets is also a `DirectGraphics` (see [`super::direct_graphics`]).
+//!
+//! The later edition's `FullCanvas(boolean transparency)` asks for a
+//! canvas that shows what lies beneath it. Nothing lies beneath a game's
+//! screen in FastEmu, so the canvas is drawn as any other and only
+//! `getTransparency` reports the request.
 
-use fastemu_jvm::{NativeClass, Value, classfile::access};
+use fastemu_jvm::{Ctx, JResult, NativeClass, Value, classfile::access};
 
 use crate::lcdui::displayable::data_mut;
 
 const CLASS: &str = "com/nokia/mid/ui/FullCanvas";
+/// The private field that keeps the constructor's `transparency`.
+const TRANSPARENCY: &str = "transparency";
+
+/// Makes the new canvas `a[0]` full screen and keeps `transparency`. It is
+/// not shown yet, so there is nothing to lay out again.
+fn init(ctx: &mut Ctx<'_>, a: &[Value], transparency: bool) -> JResult<Value> {
+    let this = ctx.non_null(a[0])?;
+    data_mut(ctx, this)?.full_screen = true;
+    let field = ctx.field_id(CLASS, TRANSPARENCY, "Z")?;
+    ctx.set_field(this, field, Value::from(transparency));
+    Ok(Value::Void)
+}
 
 /// The class.
 pub fn class() -> NativeClass {
@@ -29,11 +46,17 @@ pub fn class() -> NativeClass {
         .constant("KEY_DOWN_ARROW", "I", int(-2))
         .constant("KEY_LEFT_ARROW", "I", int(-3))
         .constant("KEY_RIGHT_ARROW", "I", int(-4))
+        .field_with(TRANSPARENCY, "Z", access::PRIVATE)
         .method_with("<init>", "()V", access::PROTECTED, |ctx, a| {
-            // Not shown yet, so there is nothing to lay out again.
+            init(ctx, a, false)
+        })
+        .method_with("<init>", "(Z)V", access::PROTECTED, |ctx, a| {
+            init(ctx, a, a[1].boolean())
+        })
+        .method("getTransparency", "()Z", |ctx, a| {
             let this = ctx.non_null(a[0])?;
-            data_mut(ctx, this)?.full_screen = true;
-            Ok(Value::Void)
+            let field = ctx.field_id(CLASS, TRANSPARENCY, "Z")?;
+            Ok(ctx.get_field(this, field))
         })
         .method(
             "addCommand",

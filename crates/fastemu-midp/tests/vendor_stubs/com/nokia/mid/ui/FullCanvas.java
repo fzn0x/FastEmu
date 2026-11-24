@@ -16,4 +16,10 @@ public abstract class FullCanvas extends Canvas {
     public static final int KEY_RIGHT_ARROW = -4;
 
     protected FullCanvas() {}
+
+    protected FullCanvas(boolean transparency) {}
+
+    public boolean getTransparency() {
+        return false;
+    }
 }

@@ -53,7 +53,11 @@ offered.
   `setCommandListener` throw `IllegalStateException`, as on the phones and
   in J2ME Loader. The runtime passes the soft keys of a canvas without a
   `CommandListener` to the game, so they arrive as `KEY_SOFTKEY1` (-6),
-  `KEY_SOFTKEY2` (-7) and `KEY_SOFTKEY3` (-5).
+  `KEY_SOFTKEY2` (-7) and `KEY_SOFTKEY3` (-5). The later edition's
+  `FullCanvas(boolean transparency)` asks to show what lies beneath the
+  canvas; nothing does in FastEmu, so it draws as any other and only
+  `getTransparency` reports the request. `DeviceControl` has that
+  edition's `KEYMAT_*` constants.
 - **`DirectGraphics` is MIDP's `Graphics`.** `lib.rs` passes the
   `Graphics` class through `nokia::direct_graphics::implement`, which adds
   the interface and its methods, so games that cast `(DirectGraphics) g`
