@@ -92,6 +92,14 @@ impl Ctx<'_> {
             .is_some_and(|e| e.interrupted)
     }
 
+    /// Sets this thread's interrupt flag, as
+    /// `Thread.currentThread().interrupt()` does.
+    pub(crate) fn interrupt_self(&mut self) {
+        if let Some(e) = self.state.threads.get_mut(&self.tid) {
+            e.interrupted = true;
+        }
+    }
+
     /// Clears the interrupt flag, returning whether it was set.
     pub fn take_interrupt(&mut self) -> bool {
         self.state
