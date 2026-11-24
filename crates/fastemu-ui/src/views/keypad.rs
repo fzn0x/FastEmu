@@ -1,6 +1,6 @@
 //! The on-screen phone keypad: soft keys, a D-pad with fire, and the
-//! twelve number keys. Each button sends one press while held down and
-//! one release when let go, wherever the pointer is let go.
+//! twelve number keys. Each button sends one press while held down by the
+//! mouse or a finger and one release when let go, wherever it is let go.
 
 use fastemu_core::Key;
 use gpui::{
@@ -8,7 +8,7 @@ use gpui::{
 };
 
 use super::widgets::icon;
-use super::{FastEmuView, Tile, TileId};
+use super::{FastEmuView, Tile, TileId, touch};
 use crate::assets::Icon;
 use crate::layout::{CLUSTER_GAP, KEY_GAP, KEY_HEIGHT, KEY_WIDTH, KeypadPlacement};
 use crate::theme::Theme;
@@ -154,6 +154,8 @@ impl FastEmuView {
         let hover = theme.hover;
         div()
             .id(("key", key as u64))
+            .debug_selector(|| format!("key-{key:?}"))
+            .relative()
             .flex()
             .flex_none()
             .items_center()
@@ -186,6 +188,7 @@ impl FastEmuView {
                 }),
             )
             .child(face)
+            .child(touch::hold_key(cx.entity().downgrade(), tile, key))
     }
 }
 

@@ -14,6 +14,7 @@ mod screen;
 #[cfg(test)]
 mod tests;
 mod tiles;
+mod touch;
 mod widgets;
 
 use std::collections::HashMap;

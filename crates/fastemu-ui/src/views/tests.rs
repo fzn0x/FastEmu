@@ -472,6 +472,66 @@ fn a_pointer_held_down_is_released_when_the_game_loses_focus(cx: &mut TestAppCon
     );
 }
 
+/// A finger at `phase` on `at`, having started at `start`.
+fn finger(
+    phase: gpui::TouchPhase,
+    start: gpui::Point<gpui::Pixels>,
+    at: gpui::Point<gpui::Pixels>,
+) -> gpui::TouchDragEvent {
+    gpui::TouchDragEvent {
+        phase,
+        start_position: start,
+        position: at,
+    }
+}
+
+#[gpui::test]
+fn fingers_hold_keypad_keys_and_drag_on_screens(cx: &mut TestAppContext) {
+    use gpui::{TouchPhase, point, px};
+
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    let game = h.launcher.instance(0);
+    game.show(1);
+    h.redraw();
+    let key5 = h.cx.debug_bounds("key-Num5").expect("the 5 key is drawn");
+    let center = key5.center();
+    h.cx.simulate_event(finger(TouchPhase::Started, center, center));
+    assert_eq!(
+        game.events(),
+        vec![key(Key::Num5, KeyAction::Press)],
+        "the key goes down with the finger"
+    );
+    h.cx.simulate_event(finger(TouchPhase::Ended, center, center));
+    assert_eq!(game.events().len(), 2);
+
+    let tile = h.read(|v| v.tiles[0].id.0);
+    let selector: &'static str = Box::leak(format!("screen-{tile}").into_boxed_str());
+    let screen = h.cx.debug_bounds(selector).expect("the screen is drawn");
+    let start = screen.origin + point(px(1.0), px(1.0));
+    let moved = start + point(px(20.0), px(0.0));
+    h.cx.simulate_event(finger(TouchPhase::Started, start, start));
+    h.cx.simulate_event(finger(TouchPhase::Moved, start, moved));
+    h.cx.simulate_event(finger(TouchPhase::Ended, start, moved));
+    let actions: Vec<PointerAction> = game
+        .events()
+        .into_iter()
+        .filter_map(|e| match e {
+            InputEvent::Pointer { action, .. } => Some(action),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        actions,
+        [
+            PointerAction::Press,
+            PointerAction::Drag,
+            PointerAction::Release
+        ]
+    );
+}
+
 #[gpui::test]
 fn the_keypad_and_the_keyboard_hold_keys_together(cx: &mut TestAppContext) {
     let mut h = open(cx);

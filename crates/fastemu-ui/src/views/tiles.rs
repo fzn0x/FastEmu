@@ -13,6 +13,7 @@ use gpui::{
 
 use super::library::SIDEBAR_WIDTH;
 use super::panels::LOG_HEIGHT;
+use super::touch::{self, Finger};
 use super::widgets::{icon, icon_button, text_button, toggle_icon_button};
 use super::{Dialog, FastEmuView, NoticeLevel, SettingsTab, Tile, TileId};
 use crate::assets::Icon;
@@ -356,6 +357,44 @@ impl FastEmuView {
         if inside {
             tile.session.pointer_press((x, y));
         }
+    }
+
+    /// A finger on `id`'s screen. A touch starting on a running game's
+    /// screen is the game's, as a press, drags and a release; any other
+    /// is left to become a tap, for the buttons over a stopped game.
+    pub(super) fn screen_touch(
+        &mut self,
+        id: TileId,
+        finger: Finger,
+        position: Point<Pixels>,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        if finger == Finger::Down {
+            let running = self
+                .tile(id)
+                .is_some_and(|t| t.session.is_running() && !t.restarting);
+            if !running {
+                return false;
+            }
+            self.focus_tile(id, cx);
+        }
+        let Some(tile) = self.tile_mut(id) else {
+            return false;
+        };
+        let at = map_pointer(tile, position);
+        match finger {
+            Finger::Down => match at {
+                Some((pixel, true)) => tile.session.pointer_press(pixel),
+                _ => return false,
+            },
+            Finger::Moved => {
+                if let Some((pixel, _)) = at {
+                    tile.session.pointer_drag(pixel);
+                }
+            }
+            Finger::Up => tile.session.pointer_release(at.map(|(pixel, _)| pixel)),
+        }
+        true
     }
 
     fn on_screen_move(&mut self, id: TileId, event: &MouseMoveEvent) {
@@ -845,6 +884,8 @@ impl FastEmuView {
             return screen;
         }
         screen
+            .debug_selector(|| format!("screen-{}", id.0))
+            .child(touch::touch_screen(cx.entity().downgrade(), id))
             .cursor_crosshair()
             .on_mouse_down(
                 MouseButton::Left,
