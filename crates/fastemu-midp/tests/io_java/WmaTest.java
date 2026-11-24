@@ -80,8 +80,14 @@ public class WmaTest {
         } catch (IOException e) {
             System.out.println("port -> " + e.getMessage());
         }
+        final Object lock = new Object();
+        final boolean[] started = new boolean[1];
         Thread waiter = new Thread() {
             public void run() {
+                synchronized (lock) {
+                    started[0] = true;
+                    lock.notifyAll();
+                }
                 try {
                     server.receive();
                     System.out.println("received a message");
@@ -93,6 +99,14 @@ public class WmaTest {
             }
         };
         waiter.start();
+        // A receive that starts after the close fails another way, and a
+        // busy machine may start the thread late: wait until it runs, then
+        // give it time to get into its receive.
+        synchronized (lock) {
+            while (!started[0]) {
+                lock.wait();
+            }
+        }
         Thread.sleep(300);
         server.close();
         waiter.join();
