@@ -1,31 +1,64 @@
 # Settings
 
-Settings apply to one game, so two games can use different phones.
-Global defaults, set once, apply to games you add later.
+FastEmu has settings for the whole app and settings for each game. Open the
+app's settings with the gear button on the toolbar (`Ctrl+,`, `Cmd+,` on
+macOS), and a game's settings with the sliders button next to it in the
+library.
 
-## Device profiles
+## App settings
 
-A device profile is the phone a game believes it runs on: screen size,
-the `microedition.platform` string, key codes, whether the screen takes
-touch, the memory it reports and its font sizes. Many games check these
-and refuse to start, or draw wrongly, on a phone they do not know.
+The **General** tab:
+
+| Setting | What it does | Default |
+| --- | --- | --- |
+| Theme | Dark or Light | Dark |
+| Layout | Grid sizes all games alike; Focus enlarges one | Grid |
+| On-screen keypad | Soft keys, D-pad and number keys beside each game | On |
+| Default phone | The phone profile games start with unless their own settings pick another | Generic 240x320 |
+
+The **Keys** tab binds keyboard keys to phone keys; see
+[Playing](/docs/playing/) for the defaults. **Reset to defaults** puts them
+back.
+
+## Game settings
+
+Each game in the library keeps its own:
+
+| Setting | What it does | Default |
+| --- | --- | --- |
+| Volume | From silent to full in tenths | Full |
+| Allow network access | Whether the game may open connections | Off |
+| Text encoding | The game's `microedition.encoding` | ISO-8859-1 |
+| Phone | A phone profile, or the app's default phone | The app's default |
+
+The volume changes at once. The phone, the network and the encoding apply
+when the game starts again: use **Restart** on its tile.
+
+## Phone profiles
+
+A phone profile is the phone a game believes it runs on: screen size, the
+`microedition.platform` string, key codes, whether the screen takes touch,
+the memory it reports and its font sizes. Many games check these and
+refuse to start, or draw wrongly, on a phone they do not know.
 
 FastEmu ships these profiles:
 
-| Profile                      | Screen  | Touch |
-| ---------------------------- | ------- | ----- |
-| Generic 240x320 (the default)| 240x320 | no    |
-| Generic 320x240 (landscape)  | 320x240 | no    |
-| Generic 360x640 (touch)      | 360x640 | yes   |
-| Nokia Series 40              | 128x160 | no    |
-| Nokia Series 60              | 176x208 | no    |
-| Sony Ericsson                | 176x220 | no    |
-| Siemens                      | 132x176 | no    |
-| Motorola                     | 176x220 | no    |
+| Profile | Id | Screen | Touch | Key codes |
+| --- | --- | --- | --- | --- |
+| Generic 240x320 (the default) | `generic-240x320` | 240x320 | no | Nokia |
+| Generic 320x240 (landscape) | `generic-320x240` | 320x240 | no | Nokia |
+| Generic 360x640 (touch) | `generic-360x640` | 360x640 | yes | Nokia |
+| Nokia Series 40 128x160 | `nokia-s40-128x160` | 128x160 | no | Nokia |
+| Nokia Series 60 176x208 | `nokia-s60-176x208` | 176x208 | no | Nokia |
+| Sony Ericsson 176x220 | `sonyericsson-176x220` | 176x220 | no | Nokia |
+| Siemens 132x176 | `siemens-132x176` | 132x176 | no | Siemens |
+| Motorola 176x220 | `motorola-176x220` | 176x220 | no | Motorola |
 
 If a game looks too small or too large, try a profile that matches the
 screen size it was made for. The game's name or its download page often
-says which phone it targets.
+says which phone it targets. Games that are played by touch need the touch
+profile: on the others, clicks and taps on the screen do not reach the
+game. The ids are what `fastemu run --profile` takes.
 
 ## Vendor key codes
 
@@ -33,42 +66,62 @@ MIDP fixes the codes of the number keys but leaves the soft keys, arrow
 keys and fire key to the phone maker. Games test for the codes of their
 target phone. FastEmu has three sets:
 
-| Key         | Nokia and most others | Siemens | Motorola |
-| ----------- | --------------------- | ------- | -------- |
-| Left soft   | -6                    | -1      | -21      |
-| Right soft  | -7                    | -4      | -22      |
-| Up          | -1                    | -59     | -1       |
-| Down        | -2                    | -60     | -6       |
-| Left        | -3                    | -61     | -2       |
-| Right       | -4                    | -62     | -5       |
-| Fire        | -5                    | -26     | -20      |
+| Key | Nokia and most others | Siemens | Motorola |
+| --- | --- | --- | --- |
+| Left soft | -6 | -1 | -21 |
+| Right soft | -7 | -4 | -22 |
+| Up | -1 | -59 | -1 |
+| Down | -2 | -60 | -6 |
+| Left | -3 | -61 | -2 |
+| Right | -4 | -62 | -5 |
+| Fire | -5 | -26 | -20 |
+| Clear | -8 | -8 | -8 |
+| Send | -10 | -10 | -10 |
+| End | -11 | -11 | -11 |
 
 If a game's menu does not respond to the soft keys or arrows, the
 profile's key codes are the first thing to change.
 
-## Encodings and locale
+## Encodings
 
-The **Encoding** setting sets the `microedition.encoding` property, the
-character set used when a game turns bytes into text. The default is
-`UTF-8`. Games made for some regions expect the encoding of their
-phones, for example `windows-1251` for Cyrillic text or `Shift_JIS` for
-Japanese. If text shows as wrong characters, change this and restart the
-game.
-
-**Locale** sets `microedition.locale`, for example `en-US`. Some games
-pick their language from it.
+**Text encoding** sets the `microedition.encoding` property, the character
+set a game uses when it turns bytes into text and names none. The default
+is `ISO-8859-1`, as on Nokia's phones. Games made for some regions expect
+the encoding of their phones, for example `windows-1251` for Cyrillic text
+or `Shift_JIS` for Japanese. If text shows as wrong characters, pick
+another and restart the game.
 
 ## Network
 
 Network access is off by default. A game that opens an HTTP or socket
-connection then fails the way it would on a phone with no signal.
-Turn **Allow network** on for a game that needs it. Only allow games
+connection then fails the way it would on a phone with no signal. Turn
+**Allow network access** on for a game that needs it. Only allow games
 you trust, since a game with network access can send data out.
 
-## Other settings
+## Where FastEmu keeps its files
 
-- **Volume**: from silent to full, per game.
-- **Frame limit**: an upper bound on frames per second.
-- **Properties**: extra system properties, and overrides for the
-  application properties in the game's `.jad`, one `name=value` per
-  line.
+| What | Windows | macOS | Linux |
+| --- | --- | --- | --- |
+| Library and settings (`library.json`, `settings.json`) | `%APPDATA%\FastEmu` | `~/Library/Application Support/FastEmu` | `~/.config/fastemu` |
+| Saves | `%APPDATA%\FastEmu\games` | `~/Library/Application Support/FastEmu/games` | `~/.local/share/fastemu/games` |
+| Screenshots | `Pictures\FastEmu` | `~/Pictures/FastEmu` | `~/Pictures/FastEmu` |
+
+Each game's saves are in a folder named after its number in the library,
+with one folder per running copy inside: `games/3/0` is the first copy of
+game 3, `games/3/1` the second copy running beside it. The record stores
+are in its `rms` folder. Where the system names no Pictures folder,
+screenshots go to a `screenshots` folder beside `games`. A file that
+cannot be read, such as a damaged
+`settings.json`, is reported in the window and the defaults are used.
+
+On Android the library, settings, saves and the app's copies of games are
+in the app's private storage, and screenshots in
+`Android/data/io.github.fzn0x.fastemu/files/screenshots` on the shared
+storage.
+
+## Messages on the terminal
+
+The desktop app prints its warnings to the terminal it was started from.
+Set `FASTEMU_LOG` to `info` or `debug` for more, or to `off` for none.
+`fastemu --mock` starts test patterns instead of games, for working on the
+window itself.

@@ -48,38 +48,54 @@ made free to share.
 
 ## Usage
 
-**Adding games.** Drag `.jar` or `.jad` files onto the window, choose Add
-game, or pass the files on the command line:
+**Adding games.** Drag `.jar` or `.jad` files onto the window, choose **+**
+at the top of the library, or pass the files on the command line, which
+adds each one and starts it:
 
 ```sh
-fastemu snake.jar tetris.jar
+fastemu snake.jar tetris.jad
 ```
 
-On Android, choose Add game and pick the file from storage. FastEmu reads
-the name, vendor, version and icon from the manifest or the descriptor and
-lists the game in its library.
+On Android, choose **+** and pick the files from storage, or open them
+from a file manager with FastEmu. FastEmu reads the name, vendor, version
+and icon from the manifest or the descriptor and lists the game in its
+library. Click a game to start it.
 
 **Running several games.** Start another game from the library while one
-runs and it opens next to the first. You can start the same game twice.
-Sound plays from the game you focus. The window shows the running games in
-a grid, or one large with the others beside it, or one alone.
+runs and it opens next to the first. You can start the same game twice;
+each copy keeps its own saves. Every game plays its sound, and each can be
+muted. The window shows the running games in a grid of equal tiles, or the
+highlighted one large with the others in a strip beside it.
 
-**Keys.** The keyboard maps to the phone keypad:
+**Keys.** The keyboard plays the highlighted game:
 
 | Phone key | Keyboard |
 | --- | --- |
 | 0 to 9 | `0` to `9` on the number row and the number pad |
+| `*` and `#` | `*` and `#` (`Shift+8`, `Shift+3`), or the number pad's `*` and `/` |
 | Up, down, left, right | Arrow keys |
 | Fire | Enter or Space |
-| Left and right soft keys | `Q` and `E` |
+| Left and right soft keys | F1 and F2 |
+| Clear | Backspace |
 
-Every binding can be changed in the settings. On a touch screen FastEmu
-draws a keypad, and games that read touch get the taps and drags. The key
-codes a game sees come from its device profile, because phone makers used
-different codes: Nokia, Siemens and Motorola layouts are built in.
+Every binding can be changed in the settings. Each game also has a phone
+keypad under its screen, held by the mouse or a finger, and games on a
+touch phone profile get clicks, taps and drags on their screen. While a
+game shows a text box, typing goes into it as text; on Android a dialog
+with the system keyboard opens. The key codes a game sees come from its
+phone profile, because phone makers used different codes: Nokia, Siemens
+and Motorola layouts are built in.
+
+**Without a window.** `fastemu run` runs a game for tests and scripts,
+presses keys and touches the screen from a script, and saves pictures:
+
+```sh
+fastemu run snake.jar --frames 300 --keys "wait:1500 5" --screenshot snake.png
+```
 
 The [documentation](https://fastemu.functionx.dev) has the full list of
-keys, the settings and the device profiles.
+keys and shortcuts, the settings, the phone profiles, where saves live and
+every option of `fastemu run`.
 
 ## Supported APIs
 

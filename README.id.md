@@ -49,40 +49,56 @@ dibagikan gratis oleh pembuatnya.
 
 ## Penggunaan
 
-**Menambah game.** Seret file `.jar` atau `.jad` ke jendela, pilih Add
-game, atau berikan file lewat baris perintah:
+**Menambah game.** Seret file `.jar` atau `.jad` ke jendela, pilih **+**
+di atas perpustakaan, atau berikan file lewat baris perintah, yang
+menambahkan lalu menjalankan setiap file:
 
 ```sh
-fastemu snake.jar tetris.jar
+fastemu snake.jar tetris.jad
 ```
 
-Di Android, pilih Add game dan pilih file dari penyimpanan. FastEmu
-membaca nama, vendor, versi, dan ikon dari manifes atau deskriptor, lalu
-menampilkan game di perpustakaannya.
+Di Android, pilih **+** dan pilih file dari penyimpanan, atau buka file
+dari pengelola file dengan FastEmu. FastEmu membaca nama, vendor, versi,
+dan ikon dari manifes atau deskriptor, lalu menampilkan game di
+perpustakaannya. Klik sebuah game untuk menjalankannya.
 
 **Menjalankan beberapa game.** Jalankan game lain dari perpustakaan saat
 satu game sedang berjalan, dan game itu terbuka di sebelahnya. Game yang
-sama bisa dijalankan dua kali. Suara diputar dari game yang sedang
-difokuskan. Jendela menampilkan game yang berjalan dalam kisi, atau satu
-besar dengan yang lain di sampingnya, atau satu saja.
+sama bisa dijalankan dua kali; setiap salinan menyimpan datanya sendiri.
+Semua game memutar suaranya, dan masing-masing bisa dibisukan. Jendela
+menampilkan game yang berjalan dalam kisi berukuran sama, atau game yang
+disorot dalam ukuran besar dengan yang lain di jalur sampingnya.
 
-**Tombol.** Keyboard dipetakan ke tombol ponsel:
+**Tombol.** Keyboard memainkan game yang disorot:
 
 | Tombol ponsel | Keyboard |
 | --- | --- |
 | 0 sampai 9 | `0` sampai `9` di baris angka dan numpad |
+| `*` dan `#` | `*` dan `#` (`Shift+8`, `Shift+3`), atau `*` dan `/` di numpad |
 | Atas, bawah, kiri, kanan | Tombol panah |
 | Fire | Enter atau Spasi |
-| Soft key kiri dan kanan | `Q` dan `E` |
+| Soft key kiri dan kanan | F1 dan F2 |
+| Clear | Backspace |
 
-Semua pemetaan bisa diubah di pengaturan. Di layar sentuh, FastEmu
-menggambar keypad, dan game yang membaca sentuhan menerima ketukan dan
-geseran. Kode tombol yang dilihat game berasal dari profil perangkatnya,
-karena pembuat ponsel memakai kode berbeda: tata letak Nokia, Siemens, dan
-Motorola sudah tersedia.
+Semua pemetaan bisa diubah di pengaturan. Setiap game juga punya keypad
+ponsel di bawah layarnya, yang ditahan dengan mouse atau jari, dan game
+dengan profil ponsel layar sentuh menerima klik, ketukan, dan geseran di
+layarnya. Saat game menampilkan kotak teks, ketikan masuk sebagai teks; di
+Android terbuka dialog dengan keyboard sistem. Kode tombol yang dilihat
+game berasal dari profil ponselnya, karena pembuat ponsel memakai kode
+berbeda: tata letak Nokia, Siemens, dan Motorola sudah tersedia.
 
-[Dokumentasi](https://fastemu.functionx.dev) memuat daftar tombol lengkap,
-pengaturan, dan profil perangkat.
+**Tanpa jendela.** `fastemu run` menjalankan game untuk pengujian dan
+skrip, menekan tombol dan menyentuh layar dari skrip, dan menyimpan
+gambar:
+
+```sh
+fastemu run snake.jar --frames 300 --keys "wait:1500 5" --screenshot snake.png
+```
+
+[Dokumentasi](https://fastemu.functionx.dev) memuat daftar tombol dan
+pintasan lengkap, pengaturan, profil ponsel, lokasi data simpanan, dan
+semua opsi `fastemu run`.
 
 ## API yang didukung
 
