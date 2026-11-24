@@ -18,7 +18,9 @@ use crate::interp::{Code, Resolved};
 use crate::native::NativeFn;
 use crate::value::Value;
 
-pub(crate) use table::{ClassTable, InitState, LoadError};
+pub(crate) use table::{
+    ClassTable, InitState, LoadError, MAX_CLASS_NAME, MAX_LOADABLE_NAME, short,
+};
 
 /// Identifies a loaded class within one virtual machine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use super::{string_value, throw};
-use crate::class::{ClassId, ClassKind};
+use crate::class::{ClassId, ClassKind, MAX_CLASS_NAME, MAX_LOADABLE_NAME, short};
 use crate::ctx::{Ctx, JResult};
 use crate::descriptor::internal_name;
 use crate::heap::Payload;
@@ -112,6 +112,18 @@ pub(crate) fn classes() -> Vec<NativeClass> {
 
 fn for_name(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let name_obj = ctx.non_null(a[0])?;
+    // No class has a name this long, and the game's string is not copied,
+    // not even into the message.
+    let units = ctx.string_utf16(name_obj)?;
+    let limit = if units.first() == Some(&u16::from(b'[')) {
+        MAX_LOADABLE_NAME
+    } else {
+        MAX_CLASS_NAME
+    };
+    if units.len() > limit {
+        let head = short(&String::from_utf16_lossy(&units[..limit]));
+        return throw(ctx, "java/lang/ClassNotFoundException", &head);
+    }
     let name = ctx.string(name_obj)?;
     let internal = internal_name(&name);
     // Class.forName takes binary names; an internal name with slashes is
@@ -128,7 +140,7 @@ fn for_name(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     };
     let Some(class) = class else {
         ctx.report(Diagnostic::MissingClass(internal));
-        return throw(ctx, "java/lang/ClassNotFoundException", &name);
+        return throw(ctx, "java/lang/ClassNotFoundException", &short(&name));
     };
     ctx.initialize(class)?;
     Ok(ctx.class_object(class).into())
