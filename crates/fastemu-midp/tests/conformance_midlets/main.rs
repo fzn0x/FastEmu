@@ -13,6 +13,7 @@ mod conformance_support;
 mod support;
 
 mod events;
+mod media;
 mod records;
 mod resources;
 mod suites;
