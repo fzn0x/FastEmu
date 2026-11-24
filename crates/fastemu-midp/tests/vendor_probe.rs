@@ -13,7 +13,7 @@ const NOKIA: &str = "com.nokia.mid.ui.FullCanvas com.nokia.mid.ui.DirectGraphics
                      com.nokia.mid.sound.Sound";
 
 const SIEMENS: &str = "com.siemens.mp.game.Light com.siemens.mp.game.Sprite \
-                       com.siemens.mp.ui.Image";
+                       com.siemens.mp.color_game.GameCanvas com.siemens.mp.ui.Image";
 
 /// What the probe finds on a profile of each maker, by the first word of
 /// the profile id.

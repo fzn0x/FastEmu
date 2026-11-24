@@ -1,9 +1,12 @@
 //! Siemens' game APIs, on Siemens profiles only: `com.siemens.mp.game`
 //! (lights, vibration, sound and melodies, black and white bitmaps,
-//! sprites and tiled backgrounds) and `com.siemens.mp.ui.Image`.
-//! Signatures and constants come from `docs/compat/api/vendors.md`.
+//! sprites and tiled backgrounds), `com.siemens.mp.color_game` (Siemens'
+//! copy of MIDP 2.0's game package for its MIDP 1.0 colour phones) and
+//! `com.siemens.mp.ui.Image`. Signatures and constants come from
+//! `docs/compat/api/vendors.md`.
 
 mod bitmap;
+mod color_game;
 mod extended_image;
 mod graphic_object;
 mod sound;
@@ -27,6 +30,7 @@ pub fn classes() -> Vec<NativeClass> {
     ];
     classes.extend(sound::classes());
     classes.extend(graphic_object::classes());
+    classes.extend(color_game::classes());
     classes
 }
 

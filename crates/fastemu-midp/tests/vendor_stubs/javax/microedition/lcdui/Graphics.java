@@ -27,6 +27,10 @@ public class Graphics {
 
     public void translate(int x, int y) {}
 
+    public int getTranslateX() {
+        return 0;
+    }
+
     public void setClip(int x, int y, int w, int h) {}
 
     public int getClipX() {
