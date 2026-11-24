@@ -13,6 +13,10 @@ use futures::channel::mpsc;
 use gpui_android::android_activity::AndroidApp;
 use log::LevelFilter;
 
+/// Where android-activity logs "Spurious ALOOPER_POLL_CALLBACK" for every
+/// Choreographer callback; nothing else useful comes from it.
+const SPURIOUS_VSYNC_LOG_MODULE: &str = "android_activity::activity_impl";
+
 /// Where android-activity hands over once GameActivity has started, on a
 /// thread of its own that becomes GPUI's main thread. GPUI starts once per
 /// process: the Activity ends the process when it is destroyed.
@@ -23,6 +27,14 @@ extern "Rust" fn android_main(android_app: AndroidApp) {
     android_logger::init_once(
         android_logger::Config::default()
             .with_max_level(LevelFilter::Info)
+            .with_filter(
+                android_logger::FilterBuilder::new()
+                    .filter_level(LevelFilter::Info)
+                    // android-activity 0.6.1 logs an error each time the
+                    // looper runs the backend's vsync callback: every frame.
+                    .filter_module(SPURIOUS_VSYNC_LOG_MODULE, LevelFilter::Off)
+                    .build(),
+            )
             .with_tag("fastemu"),
     );
     // Android drops what a panic prints to stderr.
