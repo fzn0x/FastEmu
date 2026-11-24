@@ -145,9 +145,9 @@ cargo test            # crate emulator
 cargo run -p fastemu  # aplikasi desktop
 ```
 
-Di Linux, setiap crate butuh `pkg-config` dan header ALSA, dan aplikasi
-desktop juga butuh compiler C dan paket pengembangan GPUI: fontconfig,
-xkbcommon, Wayland, X11, dan Vulkan. Di macOS, aplikasi desktop butuh
+Di Linux, aplikasi desktop juga butuh compiler C, `pkg-config`, header
+ALSA untuk suaranya, dan paket pengembangan GPUI: fontconfig, xkbcommon,
+Wayland, X11, dan Vulkan. Di macOS, aplikasi desktop butuh
 Xcode, yang toolchain Metal-nya mengompilasi shader GPUI. Banyak tes
 mengompilasi program Java kecil, dan tes mesin virtual membandingkan
 hasilnya dengan JVM asli, jadi pasang JDK 9 atau lebih baru; CI memakai

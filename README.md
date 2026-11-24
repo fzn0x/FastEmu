@@ -142,9 +142,9 @@ cargo test            # the emulator crates
 cargo run -p fastemu  # the desktop app
 ```
 
-On Linux every crate needs `pkg-config` and the ALSA headers, and the
-desktop app also needs a C compiler and the development packages of GPUI:
-fontconfig, xkbcommon, Wayland, X11 and Vulkan. On macOS the desktop app
+On Linux the desktop app also needs a C compiler, `pkg-config`, the ALSA
+headers for its sound and the development packages of GPUI: fontconfig,
+xkbcommon, Wayland, X11 and Vulkan. On macOS the desktop app
 needs Xcode, whose Metal toolchain compiles GPUI's shaders. Many tests
 compile small Java programs, and the virtual machine's tests compare its
 results with a real JVM's, so install a JDK 9 or newer; CI uses 17.
