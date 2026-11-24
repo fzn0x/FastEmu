@@ -51,6 +51,23 @@ fn group_volume_scales_its_players() {
 }
 
 #[test]
+fn a_volume_that_is_not_a_number_is_silence() {
+    let engine = engine(8000);
+    let group = engine.create_group();
+    let player = group
+        .create_player(&constant_wav(8000, 8000, 16000), None)
+        .unwrap();
+    player.start().unwrap();
+    group.set_volume(f32::NAN);
+    assert_eq!(group.volume(), 0.0);
+    assert_eq!(peak(&render(&engine, 200)[100..]), 0.0);
+    group.set_volume(1.0);
+    engine.set_master_volume(f32::NAN);
+    assert_eq!(engine.master_volume(), 0.0);
+    assert_eq!(peak(&render(&engine, 200)[100..]), 0.0);
+}
+
+#[test]
 fn pausing_a_group_freezes_its_time() {
     let engine = engine(8000);
     let group = engine.create_group();

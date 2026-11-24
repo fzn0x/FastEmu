@@ -8,6 +8,7 @@ use crate::engine::Engine;
 use crate::error::AudioError;
 use crate::event::{EventCallback, PlayerEvent, PlayerEventKind, PlayerId};
 use crate::format::Format;
+use crate::gain::unit_gain;
 use crate::media;
 use crate::mixer::{GroupId, GroupState, Slot};
 use crate::nokia;
@@ -90,7 +91,7 @@ impl Group {
     /// Sets the group's gain, from 0.0 (silent) to 1.0, on top of each
     /// player's own level. It slides over a few milliseconds.
     pub fn set_volume(&self, volume: f32) {
-        self.with(|group| group.volume = volume.clamp(0.0, 1.0));
+        self.with(|group| group.volume = unit_gain(volume));
     }
 
     pub fn volume(&self) -> f32 {

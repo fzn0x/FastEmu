@@ -11,6 +11,17 @@ pub(crate) fn level_gain(level: u8) -> f32 {
     level.powf(10.0 / 6.0206)
 }
 
+/// Clamps a gain from the app to 0.0 to 1.0. A NaN (from a broken slider
+/// or a division by zero) is silence: kept as NaN it would make the
+/// gain ramp slide without end and blow up the mix.
+pub(crate) fn unit_gain(volume: f32) -> f32 {
+    if volume.is_nan() {
+        0.0
+    } else {
+        volume.clamp(0.0, 1.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

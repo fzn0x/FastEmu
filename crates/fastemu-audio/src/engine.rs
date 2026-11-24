@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::event::EventQueue;
+use crate::gain::unit_gain;
 use crate::group::Group;
 use crate::midi::soundfont::SoundFont;
 use crate::mixer::{GroupId, GroupState, Mixer};
@@ -99,7 +100,7 @@ impl Engine {
 
     /// Sets the gain of the whole mix, from 0.0 (silent) to 1.0.
     pub fn set_master_volume(&self, volume: f32) {
-        self.lock().master = volume.clamp(0.0, 1.0);
+        self.lock().master = unit_gain(volume);
     }
 
     /// Sets the SoundFont MIDI players created from now on use, or `None`
