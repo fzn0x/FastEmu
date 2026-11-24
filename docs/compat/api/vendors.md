@@ -1930,20 +1930,20 @@ Every member above comes from the javadoc named first under Sources. The script 
 - `com.siemens.mp.media.PlayerListener`
   - `STARTED`: freej2me-plus has `"STARTED"`, javadoc has `"started"`
   - `STOPPED`: freej2me-plus has `"STOPPED"`, javadoc has `"stopped"`
-  - `STOPPED_AT_TIME`: freej2me-plus has `"STOPPEDATTIME"`, javadoc has `"stoppedAtTime"`
-  - `END_OF_MEDIA`: freej2me-plus has `"ENDOFMEDIA"`, javadoc has `"endOfMedia"`
-  - `DURATION_UPDATED`: freej2me-plus has `"DURATIONUPDATED"`, javadoc has `"durationUpdated"`
-  - `DEVICE_UNAVAILABLE`: freej2me-plus has `"DEVICEUNAVAILABLE"`, javadoc has `"deviceUnavailable"`
-  - `DEVICE_AVAILABLE`: freej2me-plus has `"DEVICEAVAILABLE"`, javadoc has `"deviceAvailable"`
-  - `VOLUME_CHANGED`: freej2me-plus has `"VOLUMECHANGED"`, javadoc has `"volumeChanged"`
-  - `SIZE_CHANGED`: freej2me-plus has `"SIZECHANGED"`, javadoc has `"sizeChanged"`
+  - `STOPPED_AT_TIME`: freej2me-plus has `"STOPPED_AT_TIME"`, javadoc has `"stoppedAtTime"`
+  - `END_OF_MEDIA`: freej2me-plus has `"END_OF_MEDIA"`, javadoc has `"endOfMedia"`
+  - `DURATION_UPDATED`: freej2me-plus has `"DURATION_UPDATED"`, javadoc has `"durationUpdated"`
+  - `DEVICE_UNAVAILABLE`: freej2me-plus has `"DEVICE_UNAVAILABLE"`, javadoc has `"deviceUnavailable"`
+  - `DEVICE_AVAILABLE`: freej2me-plus has `"DEVICE_AVAILABLE"`, javadoc has `"deviceAvailable"`
+  - `VOLUME_CHANGED`: freej2me-plus has `"VOLUME_CHANGED"`, javadoc has `"volumeChanged"`
+  - `SIZE_CHANGED`: freej2me-plus has `"SIZE_CHANGED"`, javadoc has `"sizeChanged"`
   - `ERROR`: freej2me-plus has `"ERROR"`, javadoc has `"error"`
   - `CLOSED`: freej2me-plus has `"CLOSED"`, javadoc has `"closed"`
-  - `RECORD_STARTED`: freej2me-plus has `"RECORDSTARTED"`, javadoc has `"recordStarted"`
-  - `RECORD_STOPPED`: freej2me-plus has `"RECORDSTOPPED"`, javadoc has `"recordStopped"`
-  - `RECORD_ERROR`: freej2me-plus has `"RECORDERROR"`, javadoc has `"recordError"`
-  - `BUFFERING_STARTED`: freej2me-plus has `"BUFFERINGSTARTED"`, javadoc has `"bufferingStarted"`
-  - `BUFFERING_STOPPED`: freej2me-plus has `"BUFFERINGSTOPPED"`, javadoc has `"bufferingStopped"`
+  - `RECORD_STARTED`: freej2me-plus has `"RECORD_STARTED"`, javadoc has `"recordStarted"`
+  - `RECORD_STOPPED`: freej2me-plus has `"RECORD_STOPPED"`, javadoc has `"recordStopped"`
+  - `RECORD_ERROR`: freej2me-plus has `"RECORD_ERROR"`, javadoc has `"recordError"`
+  - `BUFFERING_STARTED`: freej2me-plus has `"BUFFERING_STARTED"`, javadoc has `"bufferingStarted"`
+  - `BUFFERING_STOPPED`: freej2me-plus has `"BUFFERING_STOPPED"`, javadoc has `"bufferingStopped"`
 - `com.siemens.mp.media.control.VolumeControl`
   - microemu-siemensapi.jar does not declare `getLevel()I`, `isMuted()Z`, `setLevel(I)I`, `setMute(Z)V`
   - [MicroEmulator](https://github.com/barteo/microemu/blob/e47b656d983deaa67810c776662444483bdbf134/microemulator/microemu-extensions/microemu-siemensapi/src/main/java/com/siemens/mp/media/control/VolumeControl.java) does not declare `getLevel()I`, `isMuted()Z`, `setLevel(I)I`, `setMute(Z)V`
