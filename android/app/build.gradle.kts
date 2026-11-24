@@ -49,7 +49,15 @@ android {
 
     buildTypes {
         getByName("release") {
-            isMinifyEnabled = false
+            // R8 drops the parts of AppCompat the app never uses, most of
+            // the Java side's size; proguard-rules.pro keeps what Rust
+            // calls by name.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             // Debug-signed until FastEmu has a release key; see
             // docs/building-android.md.
             signingConfig = signingConfigs.getByName("debug")
