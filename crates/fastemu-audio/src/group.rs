@@ -54,8 +54,11 @@ fn close_group(engine: &Engine, id: GroupId) {
         mixer.emit(&engine.shared.events, player, PlayerEventKind::Closed);
         mixer.slots.remove(&player);
     }
-    mixer.groups.remove(&id);
+    let state = mixer.groups.remove(&id);
     drop(mixer);
+    // The listener may own player or group handles, whose drops take the
+    // mixer lock: drop it only after the lock is released.
+    drop(state);
     engine.deliver();
 }
 
@@ -133,20 +136,19 @@ impl Group {
     /// players, or `None` for none. See [`EventCallback`] for the rules
     /// it must follow.
     pub fn set_listener(&self, listener: Option<EventCallback>) {
-        self.with(|group| group.listener = listener);
+        let old = self.with(|group| std::mem::replace(&mut group.listener, listener));
+        // Dropped here, with the mixer unlocked: it may own handles whose
+        // drops take the lock.
+        drop(old);
     }
 
     /// Sends the group's events into a channel and returns its receiving
     /// end, replacing any listener.
     pub fn subscribe(&self) -> mpsc::Receiver<PlayerEvent> {
         let (sender, receiver) = mpsc::channel();
-        let sender = std::sync::Mutex::new(sender);
         self.set_listener(Some(Arc::new(move |event| {
             // The receiver may be gone; then nobody is listening.
-            let _ = sender
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .send(event);
+            let _ = sender.send(event);
         })));
         receiver
     }
