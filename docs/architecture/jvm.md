@@ -551,20 +551,22 @@ classes have 5 classes at most.
 - Array classes are made in a loop, from the innermost dimension out.
   The stack a name needs does not grow with its length.
 - A hierarchy is bounded twice, because a chain loads in two ways. A class
-  loaded before its superclass nests one load per class, and the load
-  stops at 256 nested classes. A class loaded after its whole chain nests
-  nothing, so `define` checks the length of its superclass chain. That
-  check also bounds initialization, which recurses once per superclass.
-  Loading and initialization are depth bounded for every load order.
-- Interfaces need no bound of their own. Each class keeps the flat list
-  of all its interfaces, and nothing recurses over it.
+  loaded before its superclass or interfaces nests one load per class, and
+  the load stops at 256 nested classes. A class loaded after its whole
+  chain nests nothing, so `define` checks the height of the class: the
+  most classes on any path up to `Object` through superclasses and
+  interfaces. That bounds initialization, which recurses once per
+  superclass, and the flat list of all interfaces of a class, which grows
+  with a chain of interfaces. Loading and initialization are depth
+  bounded for every load order.
 - Field resolution searches each class once, in the order of JVMS
   5.4.3.2, so it takes time linear in the size of the interface graph.
   A graph of layers that each extend the two before is no harder than a
   chain.
-- A name a game chose is cut to 100 characters in an error message, and
-  `Class.forName` refuses a string over the longest loadable name
-  without copying it.
+- A name a game chose is cut to 100 characters in an error message.
+  `Class.forName` refuses a name over the limit, counted in characters
+  and in bytes, with `ClassNotFoundException`, and does not copy a string
+  that is too long.
 
 **Diagnostics.** Something a game needs that FastEmu lacks throws the
 usual error and is reported once to the diagnostics hook and the log, by
