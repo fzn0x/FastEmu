@@ -39,10 +39,10 @@ rilis punya file `SHA256SUMS` untuk memeriksa unduhan.
 
 | Sistem | Caranya |
 | --- | --- |
-| Windows | Ekstrak `.zip` di mana saja dan jalankan `fastemu.exe`. Jika SmartScreen memperingatkan, pilih More info, lalu Run anyway: programnya belum ditandatangani. |
-| Linux | Ekstrak `.tar.gz` di mana saja dan jalankan `fastemu`. Butuh driver Vulkan dan sesi Wayland atau X11. |
-| macOS | Ekstrak `.zip` dan pindahkan aplikasinya ke Applications. Aplikasinya belum dinotarisasi: buka sekali lewat System Settings, Privacy & Security, Open Anyway. |
-| Android | Buka `.apk` dari berkas Anda. Android akan meminta izin memasang dari sumber itu pada pertama kali. |
+| Windows | Ekstrak `fastemu-<versi>-windows-x64.zip` di mana saja dan jalankan `fastemu.exe`. Jika SmartScreen memperingatkan, pilih More info, lalu Run anyway: programnya belum ditandatangani. |
+| Linux | Ekstrak `fastemu-<versi>-linux-x64.tar.gz` (atau `-linux-arm64`) di mana saja dan jalankan `fastemu`, atau pasang `fastemu-<versi>-linux-x64.deb` di Debian dan Ubuntu. Butuh driver Vulkan dan sesi Wayland atau X11. |
+| macOS | Ekstrak `fastemu-<versi>-macos-universal.zip` dan pindahkan aplikasinya ke Applications. Aplikasinya belum dinotarisasi: buka sekali lewat System Settings, Privacy & Security, Open Anyway. |
+| Android | Buka `fastemu-<versi>-android.apk` dari berkas Anda. Android akan meminta izin memasang dari sumber itu pada pertama kali. |
 
 FastEmu tidak menyertakan game. Pakai file yang Anda miliki atau yang
 dibagikan gratis oleh pembuatnya.

@@ -64,6 +64,16 @@ cargo build --release -p fastemu
 GPUI draws with Metal, so the full Xcode app may be needed to compile
 its shaders. The program is `target/release/fastemu`.
 
+## Release builds
+
+`.github/workflows/release.yml` builds the files of a release from a
+tag: `fastemu-<version>-windows-x64.zip`, `-linux-x64.tar.gz`,
+`-linux-x64.deb`, `-linux-arm64.tar.gz`, `-macos-universal.zip` and
+`-android.apk`. The scripts in `packaging/` pack each one and run on
+your own machine too. Run the workflow by hand on main, as a dry run,
+before tagging. `cargo xtask icons` renders `assets/icon.svg` into
+`packaging/icons` and the Android launcher icons.
+
 ## Android
 
 You need the Android SDK and NDK, and the Rust Android targets:

@@ -8,15 +8,16 @@ files. This page takes you from a download to a running game.
 Download the build for your system from the
 [latest release](https://github.com/fzn0x/FastEmu/releases/latest).
 
-| System  | What to download                         |
-| ------- | ---------------------------------------- |
-| Windows | the `.zip`, unpack it anywhere           |
-| Linux   | the `.tar.gz`, unpack it anywhere        |
-| macOS   | the `.zip`, move the app to Applications |
-| Android | the `.apk`, install it from your files   |
+| System  | What to download                                                                  |
+| ------- | --------------------------------------------------------------------------------- |
+| Windows | `fastemu-<version>-windows-x64.zip`, unpack it anywhere                           |
+| Linux   | `fastemu-<version>-linux-x64.tar.gz` or `-linux-arm64.tar.gz`, unpack it anywhere |
+| macOS   | `fastemu-<version>-macos-universal.zip`, move the app to Applications             |
+| Android | `fastemu-<version>-android.apk`, install it from your files                       |
 
 FastEmu does not need an installer and does not need Java installed. It
-carries its own virtual machine.
+carries its own virtual machine. On Debian and Ubuntu,
+`fastemu-<version>-linux-x64.deb` installs it with a menu entry instead.
 
 ## Get a game
 

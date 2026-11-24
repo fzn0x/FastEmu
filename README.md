@@ -38,10 +38,10 @@ release has a `SHA256SUMS` file to check the downloads against.
 
 | System | What to do |
 | --- | --- |
-| Windows | Unpack the `.zip` anywhere and run `fastemu.exe`. If SmartScreen warns, choose More info, then Run anyway: the program is not signed. |
-| Linux | Unpack the `.tar.gz` anywhere and run `fastemu`. It needs a Vulkan driver and a Wayland or X11 session. |
-| macOS | Unpack the `.zip` and move the app to Applications. The app is not notarized: open it once from System Settings, Privacy & Security, Open Anyway. |
-| Android | Open the `.apk` from your files. Android asks you to allow installs from that source the first time. |
+| Windows | Unpack `fastemu-<version>-windows-x64.zip` anywhere and run `fastemu.exe`. If SmartScreen warns, choose More info, then Run anyway: the program is not signed. |
+| Linux | Unpack `fastemu-<version>-linux-x64.tar.gz` (or `-linux-arm64`) anywhere and run `fastemu`, or install `fastemu-<version>-linux-x64.deb` on Debian and Ubuntu. It needs a Vulkan driver and a Wayland or X11 session. |
+| macOS | Unpack `fastemu-<version>-macos-universal.zip` and move the app to Applications. The app is not notarized: open it once from System Settings, Privacy & Security, Open Anyway. |
+| Android | Open `fastemu-<version>-android.apk` from your files. Android asks you to allow installs from that source the first time. |
 
 FastEmu does not include games. Use files you own or that their authors
 made free to share.
