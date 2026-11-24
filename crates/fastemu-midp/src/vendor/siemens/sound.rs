@@ -100,7 +100,11 @@ fn expand(notes: &[(i32, i32)]) -> Vec<(Option<u8>, u32)> {
             TONE_REPEAT | TONE_REPEAT_MARK => {
                 let from = if note == TONE_REPEAT { 0 } else { mark };
                 let part = out[from..].to_vec();
-                let room = (MAX_EVENTS - out.len()) / part.len().max(1);
+                // Repeating nothing adds nothing, however many times.
+                let room = match part.len() {
+                    0 => 0,
+                    len => (MAX_EVENTS - out.len()) / len,
+                };
                 for _ in 0..(length.max(0) as usize).min(room) {
                     out.extend_from_slice(&part);
                 }
@@ -129,7 +133,8 @@ fn put_varint(out: &mut Vec<u8>, mut value: u32) {
 /// A standard MIDI file (format 0) playing `notes` at `bpm` beats per
 /// minute.
 fn midi(bpm: i32, notes: &[(Option<u8>, u32)]) -> Vec<u8> {
-    let quarter_us = 60_000_000 / bpm.max(1) as u32;
+    // A MIDI tempo has 24 bits, so below 4 bpm the slowest one plays.
+    let quarter_us = (60_000_000 / bpm.max(1) as u32).min(0xFF_FFFF);
     let mut track = vec![0x00, 0xFF, 0x51, 0x03];
     track.extend_from_slice(&quarter_us.to_be_bytes()[1..]);
     track.extend_from_slice(&[0x00, 0xC0, 80]);
@@ -394,5 +399,20 @@ mod tests {
         let mut varint = Vec::new();
         put_varint(&mut varint, 0x0FFF_FFFF);
         assert_eq!(varint, [0xFF, 0xFF, 0xFF, 0x7F]);
+    }
+
+    #[test]
+    fn a_tempo_below_four_bpm_is_the_slowest_midi_tempo() {
+        let file = midi(1, &[]);
+        assert_eq!(&file[22..29], &[0x00, 0xFF, 0x51, 0x03, 0xFF, 0xFF, 0xFF]);
+    }
+
+    #[test]
+    fn repeating_nothing_returns_at_once() {
+        let started = std::time::Instant::now();
+        assert!(expand(&[(TONE_REPEAT, i32::MAX)]).is_empty());
+        let marked = [(0, 0), (TONE_MARK, 0), (TONE_REPEAT_MARK, i32::MAX)];
+        assert_eq!(expand(&marked).len(), 1);
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
     }
 }
