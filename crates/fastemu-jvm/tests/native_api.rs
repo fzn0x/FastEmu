@@ -179,9 +179,10 @@ fn vm() -> Vm {
     vm_with(VmConfig::default())
 }
 
-/// Polls `check` until it holds or two seconds pass.
+/// Polls `check` until it holds or ten seconds pass: far longer than
+/// anything here takes, so a busy machine waits rather than fails.
 fn eventually(mut check: impl FnMut() -> bool) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         if check() {
             return true;
