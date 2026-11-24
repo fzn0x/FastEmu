@@ -1625,6 +1625,9 @@ dependencies = [
 [[package]]
 name = "fastemu-gfx"
 version = "0.1.0"
+dependencies = [
+ "fastemu-core",
+]
 
 [[package]]
 name = "fastemu-jvm"
