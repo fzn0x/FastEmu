@@ -8,16 +8,12 @@ mod vendor_support;
 
 use fastemu_core::Key;
 use support::{Running, rgb};
-use vendor_support::{check, profile, suite};
+use vendor_support::{audio, check, check_with, profile, suite};
 
 const SIEMENS: &str = "siemens-132x176";
 
-#[test]
-fn the_game_package_draws_bitmaps_sprites_and_tiles() {
-    let Some(output) = check(
-        "SiemensGame",
-        &profile(SIEMENS),
-        r"
+/// What `SiemensGame` prints, with or without sound.
+const GAME: &str = r"
         composer: 2 of 32767
         composed: 2
         reset: 0
@@ -57,8 +53,11 @@ fn the_game_package_draws_bitmaps_sprites_and_tiles() {
         after deleting: 0 -1
         object 5: java.lang.ArrayIndexOutOfBoundsException
         paint on transparent: java.lang.IllegalArgumentException
-        ",
-    ) else {
+        ";
+
+#[test]
+fn the_game_package_draws_bitmaps_sprites_and_tiles() {
+    let Some(output) = check("SiemensGame", &profile(SIEMENS), GAME) else {
         return;
     };
     assert_eq!(
@@ -71,6 +70,16 @@ fn the_game_package_draws_bitmaps_sprites_and_tiles() {
             "vibration off"
         ]
     );
+}
+
+#[test]
+fn melodies_play_through_the_sound_engine() {
+    let (engine, group) = audio();
+    let Some(output) = check_with("SiemensGame", &profile(SIEMENS), Some(group), GAME) else {
+        return;
+    };
+    assert_eq!(output.warn, Vec::<String>::new());
+    drop(engine);
 }
 
 #[test]

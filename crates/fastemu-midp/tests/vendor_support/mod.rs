@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use fastemu_audio::{Engine, EngineConfig, Group};
 use fastemu_core::{DeviceProfile, LogLevel, LogLine, builtin_profiles};
 use fastemu_jvm::{DirSource, Vm, VmConfig};
 use fastemu_midp::env::InstanceEnv;
@@ -27,6 +28,15 @@ pub struct Output {
     pub out: Vec<String>,
     pub err: Vec<String>,
     pub info: Vec<String>,
+    pub warn: Vec<String>,
+}
+
+/// An offline sound engine (no output device) and a group in it for one
+/// instance.
+pub fn audio() -> (Engine, Group) {
+    let engine = Engine::new(EngineConfig { sample_rate: 8000 });
+    let group = engine.create_group();
+    (engine, group)
 }
 
 /// The built-in profile with id `id`.
@@ -184,10 +194,10 @@ pub fn test_png() -> Vec<u8> {
     png
 }
 
-/// Runs `v.<class>`'s `main` on a machine with the classes of `profile`
-/// and returns what it printed, or `None` when there is no JDK. The
-/// program ends by printing `done`.
-pub fn run(class: &str, profile: &DeviceProfile) -> Option<Output> {
+/// Runs `v.<class>`'s `main` on a machine with the classes of `profile`,
+/// and `audio` as the instance's sound, and returns what it printed, or
+/// `None` when there is no JDK. The program ends by printing `done`.
+pub fn run(class: &str, profile: &DeviceProfile, audio: Option<Group>) -> Option<Output> {
     let classes = classes()?;
     let lines: Arc<Mutex<Vec<LogLine>>> = Arc::default();
     let sink = Arc::clone(&lines);
@@ -206,6 +216,7 @@ pub fn run(class: &str, profile: &DeviceProfile) -> Option<Output> {
     vm.attach("setup", |ctx| {
         ctx.set_extension(InstanceEnv {
             profile,
+            audio,
             ..InstanceEnv::for_tests(data_dir)
         });
     });
@@ -246,13 +257,24 @@ pub fn run(class: &str, profile: &DeviceProfile) -> Option<Output> {
         out: pick(LogLevel::Out),
         err: pick(LogLevel::Err),
         info: pick(LogLevel::Info),
+        warn: pick(LogLevel::Warn),
     })
 }
 
-/// Checks that `v.<class>` printed `expected` on `profile` (one line per
-/// line, `done` last), showing the error output when it did not.
+/// Checks that `v.<class>` printed `expected` on a silent `profile` (one
+/// line per line, `done` last), showing the error output when it did not.
 pub fn check(class: &str, profile: &DeviceProfile, expected: &str) -> Option<Output> {
-    let output = run(class, profile)?;
+    check_with(class, profile, None, expected)
+}
+
+/// [`check`] with `audio` as the instance's sound.
+pub fn check_with(
+    class: &str,
+    profile: &DeviceProfile,
+    audio: Option<Group>,
+    expected: &str,
+) -> Option<Output> {
+    let output = run(class, profile, audio)?;
     let mut want: Vec<&str> = expected
         .lines()
         .map(str::trim)
