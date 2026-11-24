@@ -1,4 +1,35 @@
-//! The software rasterizer behind MIDP's `Graphics`, `Image` and `Font`.
+//! The software rasterizer behind MIDP's `Graphics`, `Image` and `Font`,
+//! and Nokia's `DirectGraphics`.
+//!
+//! A [`Surface`] is the screen or an image: `0xAARRGGBB` pixels, the
+//! format of [`fastemu_core::Frame`]. A [`Graphics`] holds MIDP's drawing
+//! state (translation, clip, colour, stroke, font) and draws onto whatever
+//! surface each call is given, so a wrapper can keep the state in the Java
+//! object and look the target up per call. A [`FontLibrary`] sizes the
+//! bundled fonts for one phone. [`Surface::decode`] reads PNG, JPEG, GIF
+//! and BMP files. Calls that MIDP lets throw return a [`GfxError`] naming
+//! the Java exception.
+//!
+//! Every primitive follows MIDP's pixel coverage rules; see
+//! `docs/architecture/graphics.md` for the full list.
+//!
+//! ```
+//! use fastemu_core::FontSizes;
+//! use fastemu_gfx::anchor::{HCENTER, TOP};
+//! use fastemu_gfx::{FontLibrary, Graphics, Surface, TextRendering};
+//!
+//! let sizes = FontSizes { small: 12, medium: 14, large: 16 };
+//! let fonts = FontLibrary::new(sizes, TextRendering::Antialiased);
+//! let mut screen = Surface::screen(240, 320)?;
+//! let mut g = Graphics::new(&screen, fonts.default_font())?;
+//! g.set_color(0x00_0080);
+//! g.fill_rect(&mut screen, 0, 0, 240, 320);
+//! g.set_color(0xFF_FFFF);
+//! g.draw_str(&mut screen, "Hello", 120, 10, HCENTER | TOP)?;
+//! let frame = screen.to_frame(1);
+//! assert_eq!(frame.pixel(0, 0), Some(0xFF00_0080));
+//! # Ok::<(), fastemu_gfx::GfxError>(())
+//! ```
 
 pub mod anchor;
 pub mod color;
