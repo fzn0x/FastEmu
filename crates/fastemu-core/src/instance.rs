@@ -72,7 +72,9 @@ pub struct InstanceSettings {
     /// The starting volume, 0.0 (silent) to 1.0.
     pub volume: f32,
     pub network: NetworkPolicy,
-    /// An upper bound on presented frames per second, if any.
+    /// The most frames per second the instance presents. `None` takes the
+    /// runtime's default, 60, the rate phones' screens ran at; `Some(0)`
+    /// removes the bound.
     pub max_fps: Option<u32>,
     /// Extra system properties, and application properties that override
     /// the suite's own (a user's JAD edits).
