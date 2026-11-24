@@ -232,6 +232,14 @@ pub trait Instance: Send + Sync {
 
     /// Takes the log lines written since the last call.
     fn drain_log(&self) -> Vec<LogLine>;
+
+    /// Whether the game shows a text box or a focused text field right now,
+    /// so an app should send typed characters as [`InputEvent::Text`] (and
+    /// show the on-screen keyboard on a phone) instead of mapping keys to
+    /// the keypad. Instances without text fields keep the default, `false`.
+    fn wants_text(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
