@@ -116,17 +116,37 @@ fn write_bytes(ctx: &mut Ctx<'_>, ps: ObjRef, bytes: &[u8]) -> JResult<()> {
 
 /// Writes `chars` in the game's encoding. Java's print methods send the
 /// bytes through the print stream's own `write(byte[], int, int)`, so a
-/// game's subclass that overrides it sees them; a plain one writes them
-/// straight to its stream.
+/// game's subclass that overrides it sees them; without an override they
+/// go straight to the stream. No bytes make no write, as in Java, which
+/// still finds a closed stream.
 fn print_chars(ctx: &mut Ctx<'_>, ps: ObjRef, chars: &[u16]) -> JResult<()> {
     let bytes = default_charset(ctx).encode(chars);
-    if ctx.class_name(ctx.class_of(ps)) == PS {
+    if bytes.is_empty() {
+        return ensure_open(ctx, ps);
+    }
+    if !ctx.is_overridden(ps, PS, "write", "([BII)V") {
         return write_bytes(ctx, ps, &bytes);
     }
     let arr = ctx.new_byte_array(&bytes)?;
     let args = [arr.into(), Value::Int(0), Value::Int(bytes.len() as i32)];
     let result = ctx.call_virtual(ps, "write", "([BII)V", &args).map(|_| ());
     absorb(ctx, ps, result)
+}
+
+/// Sets the error flag if `ps` is closed, as Java's print methods do
+/// before they write anything.
+fn ensure_open(ctx: &mut Ctx<'_>, ps: ObjRef) -> JResult<()> {
+    let st = state(ctx, ps)?;
+    if log_level(st.target).is_some() {
+        st.trouble |= st.closed;
+        return Ok(());
+    }
+    open_stream(ctx, ps).map(|_| ())
+}
+
+/// Ends a line, as Java's private `newLine` does: a write of its own.
+fn new_line(ctx: &mut Ctx<'_>, ps: ObjRef) -> JResult<()> {
+    print_chars(ctx, ps, &[u16::from(b'\n')])
 }
 
 /// The text `print(Object)` writes.
@@ -276,7 +296,7 @@ fn print_stream() -> NativeClass {
             Ok(Value::Void)
         })
         .method("println", "()V", |ctx, a| {
-            print_chars(ctx, this(a), &[u16::from(b'\n')])?;
+            new_line(ctx, this(a))?;
             Ok(Value::Void)
         });
     for desc in [
@@ -296,11 +316,19 @@ fn print_stream() -> NativeClass {
             print_chars(ctx, this(a), &chars)?;
             Ok(Value::Void)
         });
-        let d = desc.to_owned();
+        // Java's println(x) is print(x), through a game's override of it,
+        // then the line break.
+        let (d, print) = (desc.to_owned(), format!("({desc})V"));
         class = class.method("println", &format!("({desc})V"), move |ctx, a| {
-            let mut chars = text(ctx, &d, a[1])?;
-            chars.push(u16::from(b'\n'));
-            print_chars(ctx, this(a), &chars)?;
+            let ps = this(a);
+            if ctx
+                .call_if_overridden(ps, PS, "print", &print, &[a[1]])?
+                .is_none()
+            {
+                let chars = text(ctx, &d, a[1])?;
+                print_chars(ctx, ps, &chars)?;
+            }
+            new_line(ctx, ps)?;
             Ok(Value::Void)
         });
     }

@@ -598,11 +598,18 @@ What natives and games can rely on:
   classes call their own overridable methods as the JDK does
   (`InputStream.skip` reads through `read(byte[], int, int)`,
   `Random.nextInt` through `next(int)`, `PrintStream.print` through
-  `write(byte[], int, int)`), so a game's own stream, generator or
-  calendar sees the same calls as on Java. An object of exactly the
-  library's own class (a plain `ByteArrayInputStream` under a
-  `DataInputStream`, a plain `Random`) takes a Rust fast path instead;
-  `src/io/access.rs` is the byte-level access the wrappers share.
+  `write(byte[], int, int)` and `println(x)` through `print(x)` and then
+  a write of its own for the line break, `Stack.push`, `pop`, `peek`,
+  `empty` and `search` through `addElement`, `size`, `peek`, `elementAt`,
+  `removeElementAt` and `lastIndexOf`, `Vector.removeElement` through
+  `indexOf` and `removeElementAt`, `contains` and `indexOf(Object)`
+  through `indexOf(Object, int)`, `Hashtable.put` through `rehash`), so a
+  game's own stream, generator, list, table or calendar sees the same
+  calls as on Java. An object of exactly the library's own class (a plain
+  `ByteArrayInputStream` under a `DataInputStream`, a plain `Random`), or
+  of a subclass that does not override the method called, takes a Rust
+  fast path instead; `src/io/access.rs` is the byte-level access the
+  wrappers share.
 - **Collections.** The methods Java declares `synchronized` on `Vector`,
   `Stack` and `Hashtable` hold the object's monitor. `Hashtable` is the
   JDK's design bucket for bucket (11 buckets, chains with new entries

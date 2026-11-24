@@ -58,6 +58,94 @@ public class PrintStreams {
         }
     }
 
+    // One that shows each write(byte[], int, int) the print methods make,
+    // in brackets, and counts write(int), which they never call.
+    static class Calls extends PrintStream {
+        final StringBuffer seen = new StringBuffer();
+        int single;
+
+        Calls(OutputStream out) {
+            super(out);
+        }
+
+        public void write(byte[] buf, int off, int len) {
+            seen.append('[');
+            for (int i = 0; i < len; i++) {
+                if (buf[off + i] != '\r') {
+                    seen.append((char) buf[off + i]);
+                }
+            }
+            seen.append(']');
+            super.write(buf, off, len);
+        }
+
+        public void write(int b) {
+            single++;
+            super.write(b);
+        }
+    }
+
+    // One whose print methods mark what they print: println goes through
+    // them.
+    static class Marked extends PrintStream {
+        Marked(OutputStream out) {
+            super(out);
+        }
+
+        public void print(String s) {
+            super.print("<" + s + ">");
+        }
+
+        public void print(int i) {
+            super.print(i * 2);
+        }
+    }
+
+    // One that overrides nothing print uses.
+    static class Plain extends PrintStream {
+        Plain(OutputStream out) {
+            super(out);
+        }
+
+        public void flush() {
+            super.flush();
+        }
+    }
+
+    static void overrides() {
+        Calls calls = new Calls(new ByteArrayOutputStream());
+        calls.print("ab");
+        calls.print("");
+        calls.println(5);
+        calls.println("");
+        calls.println();
+        calls.print('c');
+        calls.println(new char[] {'x', 'y'});
+        System.out.println("calls " + calls.seen + " single " + calls.single);
+
+        ByteArrayOutputStream marked = new ByteArrayOutputStream();
+        Marked m = new Marked(marked);
+        m.print("a");
+        m.println("b");
+        m.println(21);
+        m.println(7L);
+        m.println(new char[] {'c'});
+        m.println((String) null);
+        System.out.println("marked [" + text(marked) + "]");
+
+        ByteArrayOutputStream plain = new ByteArrayOutputStream();
+        Plain p = new Plain(plain);
+        p.print("plain ");
+        p.println(1.5);
+        System.out.println("plain [" + text(plain) + "]");
+
+        // print("") on a closed stream still finds it closed.
+        PrintStream closed = new PrintStream(new ByteArrayOutputStream());
+        closed.close();
+        closed.print("");
+        System.out.println("empty print on a closed stream: error " + closed.checkError());
+    }
+
     static String text(ByteArrayOutputStream bytes) {
         String s = bytes.toString();
         StringBuffer sb = new StringBuffer();
@@ -145,5 +233,6 @@ public class PrintStreams {
         } catch (NullPointerException e) {
             System.out.println("null stream NPE");
         }
+        overrides();
     }
 }
