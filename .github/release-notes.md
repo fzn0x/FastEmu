@@ -5,11 +5,10 @@
 | System | Download |
 | --- | --- |
 | **Windows** 10 and 11, x64 | [`fastemu-{version}-windows-x64.zip`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-windows-x64.zip): unpack it and run `fastemu.exe` |
-| **Linux**, x64 | [`fastemu-{version}-linux-x64.tar.gz`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-linux-x64.tar.gz) |
+| **Linux**, x64 | [`fastemu-{version}-linux-x64.tar.gz`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-linux-x64.tar.gz), or [`fastemu-{version}-linux-x64.deb`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-linux-x64.deb) for Debian and Ubuntu |
 | **Linux**, Arm64 | [`fastemu-{version}-linux-arm64.tar.gz`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-linux-arm64.tar.gz) |
-| **macOS**, Apple silicon | [`fastemu-{version}-macos-arm64.zip`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-macos-arm64.zip) |
-| **macOS**, Intel | [`fastemu-{version}-macos-x64.zip`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-macos-x64.zip) |
-| **Android** | [`fastemu-{version}-android.apk`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-android.apk): allow installing from this source when Android asks |
+| **macOS** 11 or later, Apple silicon and Intel | [`fastemu-{version}-macos-universal.zip`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-macos-universal.zip): unpack it and move FastEmu to Applications |
+| **Android** 12 or later | [`fastemu-{version}-android.apk`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-android.apk): allow installing from this source when Android asks |
 
 **First launch on macOS.** The app is not notarized: open it once from System Settings > Privacy & Security > Open Anyway, or run `xattr -dr com.apple.quarantine /Applications/FastEmu.app`.
 
