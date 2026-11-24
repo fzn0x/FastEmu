@@ -84,7 +84,7 @@ impl Entry {
 /// An open archive: the whole file in memory and an index of its entries.
 #[derive(Clone)]
 pub struct ZipArchive {
-    data: Arc<[u8]>,
+    data: Arc<Vec<u8>>,
     entries: Vec<Entry>,
     exact: HashMap<Vec<u8>, usize>,
     folded: HashMap<Vec<u8>, usize>,
@@ -100,9 +100,11 @@ impl fmt::Debug for ZipArchive {
 }
 
 impl ZipArchive {
-    /// Indexes the archive in `data`.
-    pub fn new(data: impl Into<Arc<[u8]>>) -> Result<Self, ZipError> {
-        let data: Arc<[u8]> = data.into();
+    /// Indexes the archive in `data`. A `Vec` is kept as it is: turning it
+    /// into an `Arc<[u8]>` would copy it, and a big JAR would take twice
+    /// its size while that happens.
+    pub fn new(data: impl Into<Arc<Vec<u8>>>) -> Result<Self, ZipError> {
+        let data: Arc<Vec<u8>> = data.into();
         let mut entries = read_central_directory(&data).unwrap_or_default();
         if entries.is_empty() {
             entries = scan_local_headers(&data);
@@ -689,6 +691,14 @@ mod tests {
         let read = archive.read(&archive.entries()[0]).unwrap();
         assert!(!read.is_empty() && read.len() < text.len());
         assert_eq!(&text[..read.len()], &read[..]);
+    }
+
+    #[test]
+    fn the_bytes_are_kept_where_they_were_read() {
+        let bytes = write(&[TestEntry::stored("a.txt", b"data")], true);
+        let at = bytes.as_ptr();
+        let archive = ZipArchive::new(bytes).unwrap();
+        assert_eq!(archive.data.as_ptr(), at, "the archive copied its bytes");
     }
 
     #[test]
