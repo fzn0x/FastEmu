@@ -295,10 +295,13 @@ impl EmulatorView {
             },
         )
         .flex_1()
-        .w_full()
+        .min_w_0()
+        .min_h_0()
     }
 
-    fn keypad(&self, cx: &Context<'_, Self>) -> impl IntoElement {
+    /// The keypad below the screen, or beside it when the window is wider
+    /// than tall.
+    fn keypad(&self, beside: bool, cx: &Context<'_, Self>) -> impl IntoElement {
         let rows: Vec<_> = keypad::ROWS
             .iter()
             .map(|row| {
@@ -306,12 +309,21 @@ impl EmulatorView {
                     .iter()
                     .map(|button| self.key_button(*button, cx))
                     .collect();
-                div().flex().flex_row().flex_1().gap_1().children(buttons)
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_1()
+                    .min_h_0()
+                    .gap_1()
+                    .children(buttons)
             })
             .collect();
-        div()
-            .w_full()
-            .h(relative(KEYPAD_SHARE))
+        let keypad = if beside {
+            div().h_full().w(relative(KEYPAD_SHARE))
+        } else {
+            div().w_full().h(relative(KEYPAD_SHARE))
+        };
+        keypad
             .flex()
             .flex_col()
             .gap_1()
@@ -351,7 +363,14 @@ impl EmulatorView {
 impl Render for EmulatorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let safe_area = window.insets().safe_area;
+        let viewport = window.viewport_size();
+        let landscape = viewport.width > viewport.height;
         let view = cx.entity().downgrade();
+        let body = if landscape {
+            div().flex_row()
+        } else {
+            div().flex_col()
+        };
         div()
             .relative()
             .size_full()
@@ -384,7 +403,6 @@ impl Render for EmulatorView {
                 cx.listener(|view, _: &MouseUpEvent, _, cx| view.mouse_released(cx)),
             )
             .child(self.header(cx))
-            .child(self.screen(cx))
             .children(self.error.clone().map(|error| {
                 div()
                     .px_3()
@@ -393,7 +411,13 @@ impl Render for EmulatorView {
                     .text_color(rgb(ERROR))
                     .child(error)
             }))
-            .child(self.keypad(cx))
+            .child(
+                body.flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(self.screen(cx))
+                    .child(self.keypad(landscape, cx)),
+            )
             .child(touch_end_listener(view))
     }
 }
