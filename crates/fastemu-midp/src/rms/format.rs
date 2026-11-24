@@ -21,9 +21,10 @@
 //! ```
 //!
 //! Reading never fails. A damaged file gives back every record whose
-//! checksum holds; a record whose checksum fails keeps its id with no data,
-//! and a header that cannot be read gives an empty store. Each problem is
-//! reported so the caller can log it.
+//! checksum holds; a record whose checksum fails keeps its id with no data
+//! when the header is sound (and is dropped when it is not, since its id
+//! cannot be trusted), and a header that cannot be read gives an empty
+//! store. Each problem is reported so the caller can log it.
 
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
@@ -301,7 +302,10 @@ fn read_records(
             break;
         };
         seen += 1;
-        let plausible = id > 0 && (!header.sound || id < header.next_id);
+        // Only a sound header can vouch for the id of a record whose
+        // checksum fails; without one the id may be any garbage, and one
+        // near i32::MAX would leave the store unable to take a record.
+        let plausible = header.sound && id > 0 && id < header.next_id;
         let Entry::Vacant(slot) = records.entry(id) else {
             problems.push(format!("record {id} appears twice; the first copy is kept"));
             continue;
@@ -476,6 +480,22 @@ mod tests {
         assert_eq!(loaded.data.last_modified, NOW + 9);
         assert!(!loaded.data.shared);
         assert_eq!(loaded.problems.len(), 1);
+    }
+
+    #[test]
+    fn a_damaged_header_drops_records_that_fail_their_checksum() {
+        let mut bytes = StoreData::new(name("x"), NOW).encode();
+        // Break the header checksum, then add a record whose id is garbage
+        // and whose checksum fails too, as a misread file gives.
+        bytes[12] ^= 0x01;
+        bytes.extend_from_slice(&i32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.push(7);
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        let mut loaded = StoreData::decode(&bytes, &name("x"), NOW);
+        assert!(loaded.data.records.is_empty());
+        // The store still takes new records.
+        assert_eq!(loaded.data.add(vec![1], NOW), Some(1));
     }
 
     #[test]

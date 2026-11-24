@@ -172,9 +172,11 @@ grow a store always succeeds. A full disk also throws
   - a file that is not a store, has another format version or has an
     unreadable header opens as an empty store;
   - a header whose checksum fails keeps every record whose checksum holds,
-    and takes the next id from the records;
-  - a record whose checksum fails keeps its id with no data (as J2ME
-    Loader does), so games that read record 1 still find it;
+    drops the others (their ids cannot be trusted), and takes the next id
+    from the records;
+  - under a sound header, a record whose checksum fails keeps its id with
+    no data (as J2ME Loader does), so games that read record 1 still find
+    it;
   - a file cut short keeps the records before the cut.
 
   Each problem is logged as a warning, and the damaged file is first
