@@ -120,7 +120,8 @@ FastEmu cannot play never throws (rule 14 of
 | Locator | Player |
 | --- | --- |
 | `device://tone` | A tone player with an empty sequence; give it notes with `ToneControl`. |
-| `device://midi`, any other `device://`, `capture://` | `MediaException`: FastEmu has no such device. |
+| `device://midi` | A silent MIDI player of length 0, logged: its `MIDIControl` takes every event and plays nothing. |
+| Any other `device://`, `capture://` | `MediaException`: FastEmu has no such device. |
 | `resource:...`, `file:...`, `/path`, `path` | The suite resource at that path, read through `Class.getResourceAsStream` so the suite's lookup rules apply; the extension suggests a content type. A missing resource throws `IOException`. |
 | Anything else (`http://`, `rtsp://`) | A silent player, logged: FastEmu does not fetch from the network. |
 
@@ -273,8 +274,8 @@ thread.
 
 ## Gaps
 
-- `device://midi` (live MIDI with no file) throws `MediaException`; the
-  engine renders MIDI only while a file plays.
+- `device://midi` (live MIDI with no file) is silent; the engine
+  renders MIDI only while a file plays.
 - The controls listed as returning `null` above are not provided.
 - Players of the network (`http://`) are silent.
 - Silent players keep wall-clock time while the VM is paused, so one

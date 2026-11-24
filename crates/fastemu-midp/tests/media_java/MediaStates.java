@@ -140,11 +140,15 @@ public class MediaStates extends MediaUtil {
         } catch (Exception e) {
             threw("capture locator", e);
         }
-        try {
-            Manager.createPlayer(Manager.MIDI_DEVICE_LOCATOR);
-        } catch (Exception e) {
-            threw("midi device locator", e);
-        }
+        // Live MIDI plays nothing, but the player and its MIDIControl work.
+        Player midiDevice = Manager.createPlayer(Manager.MIDI_DEVICE_LOCATOR);
+        midiDevice.prefetch();
+        say("midi device type", midiDevice.getContentType());
+        javax.microedition.media.control.MIDIControl live =
+            (javax.microedition.media.control.MIDIControl) midiDevice.getControl("MIDIControl");
+        live.shortMidiEvent(0x90, 60, 100);
+        say("midi device takes events", live != null);
+        midiDevice.close();
         try {
             Manager.createPlayer("/missing.wav");
         } catch (Exception e) {

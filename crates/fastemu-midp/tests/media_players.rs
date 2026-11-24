@@ -54,7 +54,8 @@ fn states_and_exceptions() {
         null stream: java.lang.IllegalArgumentException
         null locator: java.lang.IllegalArgumentException
         capture locator: javax.microedition.media.MediaException
-        midi device locator: javax.microedition.media.MediaException
+        midi device type: audio/midi
+        midi device takes events: true
         missing resource: java.io.IOException
         resource locator: audio/x-wav
         bare locator duration: 200000

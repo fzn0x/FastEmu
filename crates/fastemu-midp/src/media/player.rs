@@ -38,6 +38,10 @@ pub(crate) enum Source {
     },
     /// `Manager.TONE_DEVICE_LOCATOR`: a tone player waiting for notes.
     ToneDevice,
+    /// `Manager.MIDI_DEVICE_LOCATOR`: live MIDI, which the engine cannot
+    /// render without a file, so a silent MIDI player whose
+    /// `MIDIControl` takes every event.
+    MidiDevice,
 }
 
 /// What a `PlayerImpl` keeps beside its (empty) Java fields.
@@ -154,6 +158,11 @@ fn open(source: &Source, group: Option<&Group>, probe: Option<&Group>) -> Opened
                 Format::ToneSequence.content_type().to_owned(),
             ),
         },
+        Source::MidiDevice => Opened::silent(
+            0,
+            Some(Format::Midi),
+            Format::Midi.content_type().to_owned(),
+        ),
         Source::Data {
             format: None,
             declared,

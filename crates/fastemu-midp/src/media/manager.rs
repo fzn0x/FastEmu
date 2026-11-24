@@ -82,6 +82,7 @@ fn create_from_stream(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
 #[derive(Debug, PartialEq, Eq)]
 enum Locator<'a> {
     ToneDevice,
+    MidiDevice,
     /// A resource of the suite, as an absolute path.
     Resource(String),
     /// A device or capture locator FastEmu has no device for.
@@ -94,6 +95,9 @@ fn parse_locator(locator: &str) -> Locator<'_> {
     let lower = locator.to_ascii_lowercase();
     if lower == "device://tone" {
         return Locator::ToneDevice;
+    }
+    if lower == "device://midi" {
+        return Locator::MidiDevice;
     }
     if lower.starts_with("device:") || lower.starts_with("capture:") {
         return Locator::NoDevice;
@@ -136,6 +140,11 @@ fn create_from_locator(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     };
     let player = match parse_locator(&locator) {
         Locator::ToneDevice => player::new_player(ctx, Source::ToneDevice)?,
+        Locator::MidiDevice => {
+            let player = player::new_player(ctx, Source::MidiDevice)?;
+            events::warn_silent(ctx, &format!("{locator:?} (live MIDI)"), &[]);
+            player
+        }
         Locator::NoDevice => {
             return ctx.throw(MEDIA_EXCEPTION, &format!("no device for {locator}"));
         }
@@ -264,7 +273,8 @@ mod tests {
     fn locators_name_resources_devices_and_the_network() {
         assert_eq!(parse_locator("device://tone"), Locator::ToneDevice);
         assert_eq!(parse_locator("DEVICE://TONE"), Locator::ToneDevice);
-        assert_eq!(parse_locator("device://midi"), Locator::NoDevice);
+        assert_eq!(parse_locator("device://midi"), Locator::MidiDevice);
+        assert_eq!(parse_locator("device://video"), Locator::NoDevice);
         assert_eq!(parse_locator("capture://audio"), Locator::NoDevice);
         for (locator, path) in [
             ("resource:///snd/a.mid", "/snd/a.mid"),
