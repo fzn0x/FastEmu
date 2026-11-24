@@ -584,17 +584,23 @@ fn the_run_time_stands_still_while_paused() {
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(clock.elapsed(), paused_at);
     assert_eq!(from_ctx.elapsed(), paused_at, "one clock per machine");
+    let resumed_at = Instant::now();
     vm.resume();
     std::thread::sleep(Duration::from_millis(20));
     let resumed = clock.elapsed();
+    let since = resumed_at.elapsed();
     assert!(resumed >= paused_at + Duration::from_millis(20));
+    // The run time went on only for the time since the resume, however
+    // long the sleep took: the 100 ms pause is left out.
     assert!(
-        resumed < paused_at + Duration::from_millis(100),
-        "{resumed:?}"
+        resumed <= paused_at + since,
+        "{resumed:?} after {paused_at:?} and {since:?}"
     );
-    // A deadline on the run time, waited for in host time.
-    let due = resumed + Duration::from_millis(30);
+    // A deadline on the run time, waited for in host time. The run time
+    // moves no faster than host time, so it is due 30 ms after `start`
+    // at the soonest.
     let start = Instant::now();
+    let due = clock.elapsed() + Duration::from_millis(30);
     vm.spawn("waiter", move |ctx| {
         let clock = ctx.clock();
         while clock.elapsed() < due {
@@ -603,8 +609,8 @@ fn the_run_time_stands_still_while_paused() {
         Ok(())
     })
     .unwrap();
-    assert!(vm.wait_finished(Some(Duration::from_secs(2))));
-    assert!(start.elapsed() >= Duration::from_millis(25));
+    assert!(vm.wait_finished(Some(Duration::from_secs(10))));
+    assert!(start.elapsed() >= Duration::from_millis(30));
 }
 
 #[test]
