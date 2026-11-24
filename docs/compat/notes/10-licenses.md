@@ -103,7 +103,10 @@ notice with it. wie's SMAF support uses the separate `smaf` and
    comment naming the source project, the source file, the commit, the
    copyright holders and the license, for example:
    `// Derived from J2ME Loader, KeyMapper.java at e270ed91e67b,`
-   `// Copyright 2019-2023 Yury Kharchenko, Apache-2.0.`
+   `// Copyright 2018 Nikita Shakarun, 2021 Yury Kharchenko,`
+   `// 2023 Cansor, Apache-2.0.`
+   Copy the copyright lines from the source file's own header, which
+   can differ from file to file.
 2. A third-party notices file at the repository root (for example
    `THIRD-PARTY-NOTICES.md` or a `LICENSES/` folder) with the full texts
    of Apache-2.0, MIT, BSD-3 and LGPL-2.1 for every project code came
