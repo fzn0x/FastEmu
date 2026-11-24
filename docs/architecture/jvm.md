@@ -350,7 +350,9 @@ ctx.call_virtual(canvas, "keyPressed", "(I)V", &[Value::Int(code)])?;
 ```
 
 `call_virtual` runs the game's override if it has one, the native body
-otherwise. `call_special(class, obj, name, desc, args)` calls one class's
+otherwise; `call_interface` is the same call for a method of an
+interface (a `Runnable`, a `CommandListener`). `call_special(class, obj,
+name, desc, args)` calls one class's
 method without dispatch (a `super` call), `call_static(class, name, desc,
 args)` a static method (initializing the class first), and
 `construct(class, desc, args)` makes an object and runs its constructor.
