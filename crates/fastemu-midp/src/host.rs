@@ -182,9 +182,11 @@ impl HostLink {
         self.changed();
     }
 
-    /// Shows a new frame.
+    /// Shows a new frame. The frame it replaces is freed after the lock is
+    /// released, so the app's `frame` never waits for that.
     pub(crate) fn present(&self, frame: Frame) {
-        self.0.state.lock().frame = Some(frame);
+        let old = self.0.state.lock().frame.replace(frame);
+        drop(old);
         self.changed();
     }
 
