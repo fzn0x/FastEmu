@@ -511,9 +511,14 @@ mod tests {
         );
     }
 
-    /// A task that counts its runs and keeps the worst lateness it sees
-    /// as javadoc's tardiness check computes it:
-    /// `System.currentTimeMillis() - scheduledExecutionTime()`.
+    /// A task that counts its runs and keeps the worst lateness it sees,
+    /// as javadoc's tardiness check computes it
+    /// (`System.currentTimeMillis() - scheduledExecutionTime()`), beyond
+    /// how far the run time had passed the run's due time.
+    ///
+    /// A run that comes late because its thread woke late is late by that
+    /// much on both clocks, so a busy machine adds nothing here. A
+    /// scheduled time that left out a pause would add the whole pause.
     fn tardy() -> NativeClass {
         const TARDY: &str = "test/Tardy";
         NativeClass::new(TARDY)
@@ -525,8 +530,15 @@ mod tests {
                 Ok(Value::Void)
             })
             .method("run", "()V", |ctx, a| {
+                // The wall clock first and the run time last, so that a
+                // thread descheduled between the reads can only make the
+                // run seem less late than its lag.
+                let now = current_time_millis();
                 let at = ctx.call_virtual(this(a), "scheduledExecutionTime", "()J", &[])?;
-                let late = current_time_millis() - at.long();
+                let t = task(ctx, this(a))?;
+                let due = t.next - t.period;
+                let lag = run_millis(ctx) - due;
+                let late = now - at.long() - lag;
                 let runs = ctx.static_field_id(TARDY, "runs", "I")?;
                 let worst = ctx.static_field_id(TARDY, "worst", "J")?;
                 let n = ctx.get_static(runs)?.int();
@@ -537,7 +549,8 @@ mod tests {
             })
     }
 
-    /// The runs and the worst lateness a `test/Tardy` task saw so far.
+    /// The runs a `test/Tardy` task made so far, and the worst lateness
+    /// beyond its lag it saw.
     fn tardiness(vm: &Vm) -> (i32, i64) {
         vm.attach("read", |ctx| {
             let runs = ctx.static_field_id("test/Tardy", "runs", "I").unwrap();
@@ -610,14 +623,13 @@ mod tests {
             later - resumed >= 4,
             "the rate goes on: {resumed} then {later}"
         );
-        // A run is late only by how late its thread woke. Counted on the
-        // wall clock, the runs after the resume would seem as late as the
-        // pause was long. Half the pause, 150 ms or more, leaves room for
-        // a thread descheduled for 100 ms.
+        // Counted on the wall clock, the runs after the resume would seem
+        // late by the whole pause, beyond their lag. A correct timer's
+        // runs show a millisecond or two of rounding.
         let limit = i64::try_from(pause.as_millis() / 2).unwrap_or(i64::MAX);
         assert!(
             worst < limit,
-            "a run seemed {worst} ms late after a {pause:?} pause"
+            "a run seemed {worst} ms late beyond its lag after a {pause:?} pause"
         );
         vm.attach("cancel", |ctx| {
             let timer = timer.get(ctx);
