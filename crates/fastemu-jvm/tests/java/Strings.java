@@ -41,6 +41,12 @@ public class Strings {
         String b = new String("interned");
         System.out.println((a == "interned") + " " + (b == "interned") + " " + (b.intern() == a) + " " + b.equals(a));
         System.out.println("abc".contains("bc") + " " + "x".contains("y"));
+        Object nullText = new Object() {
+            public String toString() {
+                return null;
+            }
+        };
+        System.out.println((String.valueOf(nullText) == null) + " " + new StringBuffer().append(nullText) + " " + nullText);
 
         StringBuffer sb = new StringBuffer("start");
         sb.append(1).append('c').append(2L).append(1.5f).append(2.5).append(true).append((Object) null).append(new char[] {'x', 'y'});

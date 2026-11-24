@@ -539,15 +539,11 @@ pub(crate) fn classes() -> Vec<NativeClass> {
             .static_method(
                 "valueOf",
                 &format!("(Ljava/lang/Object;){ret}"),
+                // As in Java, a toString() that returns null makes
+                // valueOf return null too.
                 |ctx, a| match a[0].obj() {
                     None => value_of(ctx, "null".to_owned()),
-                    Some(obj) => {
-                        let s = ctx.call_virtual(obj, "toString", "()Ljava/lang/String;", &[])?;
-                        if s.is_null() {
-                            return value_of(ctx, "null".to_owned());
-                        }
-                        Ok(s)
-                    }
+                    Some(obj) => ctx.call_virtual(obj, "toString", "()Ljava/lang/String;", &[]),
                 },
             )
             .static_method("valueOf", &format!("(Z){ret}"), |ctx, a| {
