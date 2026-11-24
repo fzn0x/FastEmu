@@ -62,9 +62,11 @@ pub struct Session {
     /// What the keyboard and the on-screen keypad hold down.
     pub keys: KeyTracker,
     pub muted: bool,
-    /// Typed characters go to the game as text instead of keypad keys,
-    /// for its text boxes.
-    pub text_mode: bool,
+    /// Whether the game showed a text box when last polled.
+    wants_text: bool,
+    /// The user's choice of typing mode, which wins over `wants_text`
+    /// until the game opens or closes a text box.
+    text_override: Option<bool>,
     /// Where a pointer press on the screen holds it, in phone pixels.
     pointer_at: Option<(i32, i32)>,
 }
@@ -89,7 +91,8 @@ impl Session {
             log: LogBuffer::default(),
             keys: KeyTracker::default(),
             muted: false,
-            text_mode: false,
+            wants_text: false,
+            text_override: None,
             pointer_at: None,
         }
     }
@@ -113,6 +116,12 @@ impl Session {
             self.status = status;
             changed = true;
         }
+        let wants_text = self.instance.wants_text();
+        if wants_text != self.wants_text {
+            self.wants_text = wants_text;
+            self.text_override = None;
+            changed = true;
+        }
         let lines = self.instance.drain_log();
         if !lines.is_empty() {
             self.log.extend(lines);
@@ -131,9 +140,25 @@ impl Session {
         self.log.clear();
         self.keys = KeyTracker::default();
         self.pointer_at = None;
+        self.wants_text = false;
+        self.text_override = None;
         if self.muted {
             self.instance.set_volume(0.0);
         }
+    }
+
+    /// Whether typed characters go to the game as text, for its text
+    /// boxes, instead of pressing keypad keys: while the game shows a text
+    /// box, unless the user chose otherwise.
+    pub fn typing_text(&self) -> bool {
+        self.text_override.unwrap_or(self.wants_text)
+    }
+
+    /// Switches between typing text and pressing keys, for as long as the
+    /// game keeps its text box open or closed. Held keys are let go.
+    pub fn toggle_typing(&mut self) {
+        self.release_everything();
+        self.text_override = Some(!self.typing_text());
     }
 
     pub fn is_running(&self) -> bool {

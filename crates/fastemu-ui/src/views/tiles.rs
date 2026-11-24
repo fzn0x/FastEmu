@@ -735,13 +735,12 @@ impl FastEmuView {
                     "text-mode",
                     Icon::Text,
                     "Type text into the game",
-                    s.text_mode,
+                    s.typing_text(),
                     &theme,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(tile) = this.tile_mut(id) {
-                        tile.session.release_everything();
-                        tile.session.text_mode = !tile.session.text_mode;
+                        tile.session.toggle_typing();
                     }
                     cx.notify();
                 })),

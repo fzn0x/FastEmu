@@ -75,7 +75,7 @@ impl FastEmuView {
             cx.stop_propagation();
             return;
         }
-        if session.text_mode
+        if session.typing_text()
             && let Some(text) = typed_text(keystroke)
         {
             session.instance.send(InputEvent::Text(text.to_owned()));

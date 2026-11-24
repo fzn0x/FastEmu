@@ -25,6 +25,7 @@ struct FakeInstance {
     events: Mutex<Vec<InputEvent>>,
     log: Mutex<Vec<LogLine>>,
     volume: Mutex<f32>,
+    wants_text: Mutex<bool>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -81,6 +82,10 @@ impl Instance for FakeInstance {
     fn drain_log(&self) -> Vec<LogLine> {
         std::mem::take(&mut lock(&self.log))
     }
+
+    fn wants_text(&self) -> bool {
+        *lock(&self.wants_text)
+    }
 }
 
 /// Reads any `.jar` or `.jad` path as a suite named after the file, and
@@ -133,6 +138,7 @@ impl Launcher for FakeLauncher {
                 text: "javax.microedition.m3g is not available".into(),
             }]),
             volume: Mutex::new(request.settings.volume),
+            wants_text: Mutex::new(false),
         });
         lock(&self.started).push((request, Arc::clone(&instance)));
         Ok(instance)
@@ -306,7 +312,7 @@ fn text_mode_sends_typed_characters(cx: &mut TestAppContext) {
     h.launch_first();
     let game = h.launcher.instance(0);
     h.view
-        .update(h.cx, |v, _| v.tiles[0].session.text_mode = true);
+        .update(h.cx, |v, _| v.tiles[0].session.toggle_typing());
     h.key_down("a", Some("a"), false);
     h.key_down("left", None, false);
     h.key_up("left");
@@ -316,6 +322,39 @@ fn text_mode_sends_typed_characters(cx: &mut TestAppContext) {
             InputEvent::Text("a".into()),
             key(Key::Left, KeyAction::Press),
             key(Key::Left, KeyAction::Release),
+        ]
+    );
+}
+
+#[gpui::test]
+fn typing_follows_the_game_text_box(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["chat.jar"]);
+    h.launch_first();
+    let game = h.launcher.instance(0);
+    *lock(&game.wants_text) = true;
+    h.redraw();
+    h.key_down("h", Some("h"), false);
+    h.key_down("5", Some("5"), false);
+    // The user wants keys while the text box shows.
+    h.view
+        .update(h.cx, |v, _| v.tiles[0].session.toggle_typing());
+    h.key_down("5", Some("5"), false);
+    h.key_up("5");
+    // The text box closes and opens again: typing follows the game again.
+    *lock(&game.wants_text) = false;
+    h.redraw();
+    *lock(&game.wants_text) = true;
+    h.redraw();
+    h.key_down("i", Some("i"), false);
+    assert_eq!(
+        game.events(),
+        vec![
+            InputEvent::Text("h".into()),
+            InputEvent::Text("5".into()),
+            key(Key::Num5, KeyAction::Press),
+            key(Key::Num5, KeyAction::Release),
+            InputEvent::Text("i".into()),
         ]
     );
 }
