@@ -18,9 +18,10 @@ You need:
   MIDlets and run them through the launcher. Without a JDK they skip,
   unless `FASTEMU_REQUIRE_JAVA=1` is set, as CI does, in which case they
   fail.
-- **Linux system packages**. The emulator crates need `build-essential`,
-  `pkg-config` and `libasound2-dev`. The GPUI apps need these too, and
-  more. On Debian and Ubuntu, everything:
+- **Linux system packages**. The emulator crates need only a C toolchain
+  (`build-essential`), whose linker Rust uses. The GPUI apps also need
+  `pkg-config`, the ALSA headers (`libasound2-dev`) for sound, and more.
+  On Debian and Ubuntu, everything:
 
   ```sh
   sudo apt-get install build-essential pkg-config clang cmake lld \
