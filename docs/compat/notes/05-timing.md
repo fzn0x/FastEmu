@@ -105,17 +105,27 @@ measure before adding that.
 
 ## System.gc
 
-freej2me-plus first made `System.gc()` a no-op because Bomberman 08 calls
-it so often that it stutters, then had to make that a per-game setting:
-Gradius Neo "uses System.gc ... calls to help with timing and
-synchronization" and ran too fast without them
-([issue 90](https://github.com/TASEmulators/freej2me-plus/issues/90),
-[noGC](https://github.com/TASEmulators/freej2me-plus/blob/aab3350832c0d82aff1771394d28bff6f66b0aa4/src/org/recompile/mobile/MIDletEnhancements.java#L104),
-[commit 3367186](https://github.com/TASEmulators/freej2me-plus/commit/3367186)). [tracker] [code]
+freej2me-plus's history with `System.gc()`:
 
-**For FastEmu:** run a quick, bounded collection on `System.gc()` so it
-takes a small, steady amount of time, and offer a per-game choice
-between "collect", "fixed delay" and "ignore".
+1. It made every call a no-op because games such as Bomberman 08 call it
+   so often that they stutter
+   ([commit 9d7810d](https://github.com/TASEmulators/freej2me-plus/commit/9d7810d)).
+2. Gradius Neo then ran too fast: it "uses System.gc ... calls to help
+   with timing and synchronization", so ignoring them became a per-game
+   setting ([issue 90](https://github.com/TASEmulators/freej2me-plus/issues/90),
+   [commit 3367186](https://github.com/TASEmulators/freej2me-plus/commit/3367186)).
+3. Two weeks later the setting was removed again, "since the instances
+   where it caused issues have been fixed"
+   ([commit a298580](https://github.com/TASEmulators/freej2me-plus/commit/a298580)).
+   Today every `System.gc()` in a game is a no-op
+   ([noGC](https://github.com/TASEmulators/freej2me-plus/blob/aab3350832c0d82aff1771394d28bff6f66b0aa4/src/org/recompile/mobile/MIDletEnhancements.java#L104)). [code] [tracker]
+
+J2ME Loader leaves `System.gc()` alone, so Android's collector runs. [code]
+
+**For FastEmu:** a no-op is what freej2me-plus settled on once its frame
+limiting was right. A quick, bounded collection is also fine and keeps
+memory low for games that allocate a lot between levels; do not let it
+take long enough to stutter.
 
 ## Fast-forward and pause
 

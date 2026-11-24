@@ -100,8 +100,8 @@ built for. A launcher could suggest a profile from a `Nokia-Platform` or
 **For FastEmu:** answer only from the profile, the settings and the
 table below. Every other key returns `null`, including `os.name`,
 `os.arch`, `java.version`, `java.vendor`, `user.dir`, `user.name`,
-`file.separator` and `line.separator`. [`user.home` is set by J2ME
-Loader for its file system; FastEmu does not need it.]
+`file.separator` and `line.separator`. J2ME Loader sets `user.home` for
+its own file system code; FastEmu does not need it.
 
 ## Advertise only what is implemented
 
