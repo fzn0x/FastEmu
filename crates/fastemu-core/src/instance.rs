@@ -242,6 +242,16 @@ pub trait Instance: Send + Sync {
     fn wants_text(&self) -> bool {
         false
     }
+
+    /// Takes the web page the game asked the phone to open
+    /// (`MIDlet.platformRequest`) since the last call: an `http` or `https`
+    /// URL, or `None`. Each request replaces one not taken yet, so only the
+    /// latest is returned, once. An app shows it to the user and opens it
+    /// only when they agree. Instances whose games never ask keep the
+    /// default, `None`.
+    fn take_link_request(&self) -> Option<String> {
+        None
+    }
 }
 
 #[cfg(test)]

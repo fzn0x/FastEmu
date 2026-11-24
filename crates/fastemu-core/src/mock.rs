@@ -1,6 +1,7 @@
 //! A stand-in [`Launcher`] for building and testing apps without the
 //! virtual machine. Its instances draw a moving test pattern with a square
-//! the arrow keys move and the fire key recolours.
+//! the arrow keys move and the fire key recolours; the `#` key asks the
+//! app to open [`MOCK_LINK`], as a game's `platformRequest` does.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,6 +16,9 @@ use crate::instance::{
     Notify,
 };
 use crate::suite::{MidletInfo, SuiteInfo};
+
+/// The web page a mock instance asks to open when `#` is pressed.
+pub const MOCK_LINK: &str = "https://fastemu.functionx.dev/";
 
 /// Launches [`MockInstance`]s for any path, existing or not.
 #[derive(Clone, Copy, Debug, Default)]
@@ -65,6 +69,8 @@ struct State {
     tint: u32,
     tick: u64,
     log: Vec<LogLine>,
+    /// The link asked for and not taken yet.
+    link: Option<String>,
 }
 
 /// An instance that animates a test pattern on its own thread.
@@ -98,6 +104,7 @@ impl MockInstance {
                     level: LogLevel::Info,
                     text: "mock instance started".to_owned(),
                 }],
+                link: None,
             }),
         }
     }
@@ -195,6 +202,16 @@ impl Instance for MockInstance {
                 state.tint = state.tint.rotate_left(8) & 0x00FF_FFFF;
             }
             InputEvent::Key {
+                key: Key::Pound,
+                action: KeyAction::Press,
+            } => {
+                state.link = Some(MOCK_LINK.to_owned());
+                state.log.push(LogLine {
+                    level: LogLevel::Info,
+                    text: format!("the game asked to open {MOCK_LINK}"),
+                });
+            }
+            InputEvent::Key {
                 key,
                 action: KeyAction::Press,
             } => {
@@ -238,6 +255,10 @@ impl Instance for MockInstance {
     fn drain_log(&self) -> Vec<LogLine> {
         std::mem::take(&mut self.lock().log)
     }
+
+    fn take_link_request(&self) -> Option<String> {
+        self.lock().link.take()
+    }
 }
 
 #[cfg(test)]
@@ -265,5 +286,24 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert!(!instance.drain_log().is_empty());
+    }
+
+    #[test]
+    fn the_pound_key_asks_for_a_link_once() {
+        let instance = MockLauncher
+            .launch(LaunchRequest::new("snake.jar", "unused"))
+            .expect("mock launches never fail");
+        assert_eq!(instance.take_link_request(), None);
+        let press = |key| InputEvent::Key {
+            key,
+            action: KeyAction::Press,
+        };
+        instance.send(press(Key::Pound));
+        instance.send(press(Key::Pound));
+        assert_eq!(instance.take_link_request().as_deref(), Some(MOCK_LINK));
+        assert_eq!(instance.take_link_request(), None, "taken once");
+        instance.send(press(Key::Num1));
+        assert_eq!(instance.take_link_request(), None);
+        instance.stop();
     }
 }
