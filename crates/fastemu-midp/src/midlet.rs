@@ -13,6 +13,9 @@
 //! beside it. `destroyApp` alone does not wait, so a game that never
 //! returns from `startApp` can still be stopped; the calls still waiting
 //! then give up.
+//!
+//! `platformRequest` hands web links to the app, which asks the user
+//! before it opens one; see [`platform_request`].
 
 use std::sync::Arc;
 
@@ -23,11 +26,16 @@ use fastemu_jvm::{
 
 use crate::env::env;
 use crate::host::Control;
+use crate::io::url::split_scheme;
 use crate::lcdui::state::log_exception;
 use crate::suite::attributes;
 
 const CLASS: &str = "javax/microedition/midlet/MIDlet";
 const STATE_CHANGE: &str = "javax/microedition/midlet/MIDletStateChangeException";
+const NOT_FOUND: &str = "javax/microedition/io/ConnectionNotFoundException";
+
+/// The longest link, in bytes, a game may ask the app to open.
+const MAX_LINK: usize = 4096;
 
 /// Which lifecycle method a lifecycle thread calls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,6 +250,79 @@ fn permission(ctx: &mut Ctx<'_>, name: &str) -> i32 {
     }
 }
 
+/// `url` as a web link the app may offer to open, with its scheme in
+/// lower case (Android matches schemes exactly), or `None` when it is not
+/// one. A web link has the scheme `http` or `https`, in any case, and a
+/// host after `//`. It holds only printable ASCII, no user name before
+/// the host and at most [`MAX_LINK`] bytes, so the link the user reads is
+/// the page that opens. A link to a `.jad` or `.jar` asks the phone to
+/// install a suite, which FastEmu does not do.
+fn web_link(url: &str) -> Option<String> {
+    if url.len() > MAX_LINK || !url.bytes().all(|b| b.is_ascii_graphic()) {
+        return None;
+    }
+    let (scheme, rest) = split_scheme(url).ok()?;
+    if scheme != "http" && scheme != "https" {
+        return None;
+    }
+    let after = rest.strip_prefix("//")?;
+    let host_end = after.find(['/', '?', '#']).unwrap_or(after.len());
+    let authority = &after[..host_end];
+    if authority.is_empty() || authority.starts_with(':') || authority.contains('@') {
+        return None;
+    }
+    let path = &after[host_end..];
+    let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
+    let suite = path.rsplit_once('.').is_some_and(|(_, extension)| {
+        extension.eq_ignore_ascii_case("jad") || extension.eq_ignore_ascii_case("jar")
+    });
+    if suite {
+        return None;
+    }
+    Some(format!("{scheme}:{rest}"))
+}
+
+/// `platformRequest(url)`. FastEmu handles a request beside the running
+/// MIDlet, so the MIDlet need not exit first and the answer is `false`.
+///
+/// - A web link (see [`web_link`]) waits on the instance's [`HostLink`]
+///   for the app, in place of one the app has not taken yet, and the app
+///   is told. The app asks the user before it opens it, as MIDP requires.
+/// - An empty URL cancels a link the app has not taken yet.
+/// - Anything else (a call, a message, a file, a suite to install, another
+///   app's scheme) throws `ConnectionNotFoundException`, which MIDP allows
+///   for requests the phone cannot handle. FastEmu never hands those to
+///   the host: opening files or other apps' schemes is not safe.
+///
+/// A `null` URL throws `NullPointerException` before this runs, as in the
+/// reference implementation and J2ME Loader: MIDP cancels with an empty
+/// string, "not null".
+///
+/// [`HostLink`]: crate::host::HostLink
+fn platform_request(ctx: &mut Ctx<'_>, url: &str) -> JResult<Value> {
+    let host = env(ctx).host.clone();
+    if url.is_empty() {
+        if host.cancel_link() {
+            ctx.log(
+                LogLevel::Info,
+                "the game took back its request to open a link",
+            );
+        }
+        return Ok(Value::from(false));
+    }
+    let Some(link) = web_link(url) else {
+        ctx.log(
+            LogLevel::Warn,
+            format!("the game asked to open {url:?}; FastEmu opens only web links"),
+        );
+        let message = format!("this phone opens only web links: {url}");
+        return ctx.throw(NOT_FOUND, &message);
+    };
+    ctx.log(LogLevel::Info, format!("the game asked to open {link}"));
+    host.request_link(link);
+    Ok(Value::from(false))
+}
+
 fn string_arg(ctx: &mut Ctx<'_>, v: Value) -> JResult<String> {
     let s = ctx.non_null(v)?;
     ctx.string(s)
@@ -296,10 +377,8 @@ pub fn classes() -> Vec<NativeClass> {
             "(Ljava/lang/String;)Z",
             final_method,
             |ctx, a| {
-                if let Some(url) = ctx.opt_string(a[1])?.filter(|u| !u.is_empty()) {
-                    ctx.log(LogLevel::Info, format!("the game asked to open {url}"));
-                }
-                Ok(Value::from(false))
+                let url = string_arg(ctx, a[1])?;
+                platform_request(ctx, &url)
             },
         )
         .method_with(
@@ -330,4 +409,54 @@ pub fn classes() -> Vec<NativeClass> {
             Ok(Value::Void)
         });
     vec![midlet, state_change]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn web_links_are_http_or_https_with_a_host() {
+        assert_eq!(
+            web_link("http://example.com").as_deref(),
+            Some("http://example.com")
+        );
+        assert_eq!(
+            web_link("HTTPS://Example.com/a?b=c#d").as_deref(),
+            Some("https://Example.com/a?b=c#d"),
+            "the scheme in lower case, the rest kept"
+        );
+        assert_eq!(
+            web_link("http://[::1]:8080/x").as_deref(),
+            Some("http://[::1]:8080/x")
+        );
+        assert_eq!(
+            web_link("https://example.com/game.jad.html").as_deref(),
+            Some("https://example.com/game.jad.html")
+        );
+        for refused in [
+            "tel:+15550100",
+            "sms:+15550100",
+            "mailto:a@example.com",
+            "file:///c:/windows/system32/calc.exe",
+            "localapp://jam/launch?midlet-name=Game",
+            "javascript:alert(1)",
+            "ftp://example.com/",
+            "http:example.com",
+            "http://",
+            "http:///path",
+            "http://:80/",
+            "http://user@example.com/",
+            "http://example.com/a b",
+            "http://example.com/\n",
+            "http://example.com/\u{202e}",
+            "https://example.com/game.jad",
+            "https://example.com/dir/Game.JAR?v=2",
+            "noscheme",
+        ] {
+            assert_eq!(web_link(refused), None, "{refused:?}");
+        }
+        let long = format!("http://example.com/{}", "a".repeat(MAX_LINK));
+        assert_eq!(web_link(&long), None, "too long");
+    }
 }

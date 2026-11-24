@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use fastemu_core::{
-    InputEvent, Instance, InstanceStatus, Key, KeyAction, Launcher, PointerAction, builtin_profiles,
+    InputEvent, Instance, InstanceStatus, Key, KeyAction, Launcher, LogLevel, PointerAction,
+    builtin_profiles,
 };
 use fastemu_midp::MidpLauncher;
 use support::{Running, classes, midlet, rgb, scratch, write_suite};
@@ -317,6 +318,69 @@ fn a_crash_in_start_app_ends_the_instance() {
         other => panic!("expected a crash, got {other:?}"),
     }
     assert!(run.has("destroyApp after crash"), "{}", run.dump());
+}
+
+#[test]
+fn platform_requests_hand_only_web_links_to_the_app() {
+    let Some(jar) = suite("links") else { return };
+    let mut run = Running::launch(&jar, midlet::LINKS);
+    run.wait_log("links ready");
+    assert_eq!(run.instance.take_link_request(), None);
+
+    // A web link waits for the app, which takes it once; the MIDlet need
+    // not exit. The scheme comes in lower case.
+    run.tap(Key::Num1);
+    run.wait_log("first false");
+    assert_eq!(
+        run.instance.take_link_request().as_deref(),
+        Some("http://Example.com/first")
+    );
+    assert_eq!(run.instance.take_link_request(), None, "taken once");
+    let asked = run.line("the game asked to open http://Example.com/first");
+    assert_eq!(asked.map(|l| l.level), Some(LogLevel::Info));
+
+    // A second request replaces one the app has not taken.
+    run.tap(Key::Num2);
+    run.wait_log("third false");
+    assert!(run.has("second false"), "{}", run.dump());
+    assert_eq!(
+        run.instance.take_link_request().as_deref(),
+        Some("https://example.com/third?x=1")
+    );
+    assert_eq!(run.instance.take_link_request(), None);
+
+    // An empty URL takes back a link the app has not taken.
+    run.tap(Key::Num1);
+    run.tap(Key::Num3);
+    run.wait_log("cancel false");
+    assert_eq!(run.instance.take_link_request(), None, "{}", run.dump());
+
+    // Anything but a web link fails as the spec allows, and never reaches
+    // the app; null is not a URL at all.
+    run.tap(Key::Num4);
+    run.wait_log("refused all");
+    let not_found = "javax.microedition.io.ConnectionNotFoundException: \
+                     this phone opens only web links: ";
+    for (name, url) in [
+        ("tel", "tel:+15550100"),
+        ("sms", "sms:+15550100"),
+        ("file", "file:///c:/game.txt"),
+        ("install", "http://example.com/game.jad"),
+        ("app", "localapp://jam/launch?midlet-name=Game"),
+    ] {
+        let line = format!("{name} {not_found}{url}");
+        assert!(run.has(&line), "{line}\n{}", run.dump());
+        let warned = run.line(&format!("the game asked to open {url:?}"));
+        assert_eq!(warned.map(|l| l.level), Some(LogLevel::Warn), "{url}");
+    }
+    assert!(
+        run.has("null java.lang.NullPointerException"),
+        "{}",
+        run.dump()
+    );
+    assert_eq!(run.instance.take_link_request(), None);
+    assert_eq!(run.instance.status(), InstanceStatus::Running);
+    assert_eq!(run.instance.error_count(), 0, "{}", run.dump());
 }
 
 #[test]

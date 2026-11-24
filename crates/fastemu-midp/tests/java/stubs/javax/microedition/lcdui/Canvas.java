@@ -7,6 +7,10 @@ public abstract class Canvas extends Displayable {
     public static final int RIGHT = 5;
     public static final int FIRE = 8;
     public static final int GAME_A = 9;
+    public static final int KEY_NUM1 = 49;
+    public static final int KEY_NUM2 = 50;
+    public static final int KEY_NUM3 = 51;
+    public static final int KEY_NUM4 = 52;
     public static final int KEY_NUM5 = 53;
 
     protected Canvas() {}

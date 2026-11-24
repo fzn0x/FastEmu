@@ -1,6 +1,7 @@
 //! The link between an instance's virtual machine and the app that shows
-//! it: the latest frame, the status, the log, and the messages natives
-//! send to the instance's control thread.
+//! it: the latest frame, the status, the log, the web page the game asks
+//! to open, and the messages natives send to the instance's control
+//! thread.
 //!
 //! A [`HostLink`] holds no Java references and no `Vm`, so it may live in
 //! the virtual machine (inside [`crate::env::InstanceEnv`]) and in the
@@ -42,6 +43,8 @@ struct HostState {
     status: InstanceStatus,
     frame: Option<Frame>,
     log: VecDeque<LogLine>,
+    /// The web page the game asked to open, until the app takes it.
+    link: Option<String>,
 }
 
 struct Inner {
@@ -82,6 +85,7 @@ impl HostLink {
                 status: InstanceStatus::Starting,
                 frame: None,
                 log: VecDeque::new(),
+                link: None,
             }),
             errors: AtomicU64::new(0),
             control: Mutex::new(None),
@@ -135,6 +139,26 @@ impl HostLink {
         if self.0.wants_text.swap(wants, Ordering::AcqRel) != wants {
             self.changed();
         }
+    }
+
+    /// Takes the web page the game asked to open since the last call:
+    /// `Instance::take_link_request`.
+    pub fn take_link(&self) -> Option<String> {
+        self.0.pending.store(false, Ordering::Release);
+        self.0.state.lock().link.take()
+    }
+
+    /// Records a web page the game asks the app to open, in place of one
+    /// the app has not taken yet, and tells the app.
+    pub(crate) fn request_link(&self, url: String) {
+        self.0.state.lock().link = Some(url);
+        self.changed();
+    }
+
+    /// Drops the web page the game asked to open if the app has not taken
+    /// it yet. Returns whether there was one.
+    pub(crate) fn cancel_link(&self) -> bool {
+        self.0.state.lock().link.take().is_some()
     }
 
     /// Tells the app something changed, once until it reads again.
@@ -255,6 +279,22 @@ mod tests {
         link.set_wants_text(false);
         assert!(!link.wants_text());
         assert_eq!(count.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn the_app_takes_the_latest_link_once() {
+        let (link, count) = counting();
+        assert_eq!(link.take_link(), None);
+        link.request_link("http://a.example/".into());
+        link.request_link("http://b.example/".into());
+        assert_eq!(count.load(Ordering::Relaxed), 1, "one notification");
+        assert_eq!(link.take_link().as_deref(), Some("http://b.example/"));
+        assert_eq!(link.take_link(), None);
+        link.request_link("http://c.example/".into());
+        assert_eq!(count.load(Ordering::Relaxed), 2, "taking counts as reading");
+        assert!(link.cancel_link());
+        assert!(!link.cancel_link());
+        assert_eq!(link.take_link(), None);
     }
 
     #[test]

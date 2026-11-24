@@ -17,7 +17,7 @@ named.
 | `suite` | The lenient ZIP reader, the manifest and JAD parser, `Suite::open`, and `JarSource`, the VM's `ClassSource` over the JAR. |
 | `launcher` | `MidpLauncher`, the real `fastemu_core::Launcher`, and the system properties of an instance. |
 | `instance` | `MidpInstance`, the `fastemu_core::Instance` the app holds, and its control thread. |
-| `host` | `HostLink`: the latest frame, the status, the log and the notifications, shared by the VM and the app. |
+| `host` | `HostLink`: the latest frame, the status, the log, the link the game asks to open and the notifications, shared by the VM and the app. |
 | `env` | `InstanceEnv`, what every native knows about its instance. |
 | `midlet` | `javax.microedition.midlet` and the lifecycle calls. |
 | `lcdui` | `javax.microedition.lcdui`: the event thread, `Display`, `Displayable`, `Canvas`, `Screen`, `Command`, `Graphics`, `Image`, `Font`, keys, soft keys and frames. |
@@ -244,8 +244,38 @@ the game keeps running; only the cases above end it. Dropping a
 
 `getAppProperty` reads the settings' properties, then the JAD, then the
 manifest, an exact name before one that differs in case.
-`platformRequest` logs the URL and returns `false`. `checkPermission`
-answers network permissions from the network policy and denies the rest.
+`checkPermission` answers network permissions from the network policy
+and denies the rest.
+
+## Links
+
+`platformRequest` lives in `midlet` (`platform_request`). FastEmu
+handles a request beside the running MIDlet, so it always returns
+`false`: the MIDlet need not exit.
+
+- **A web link**, `http` or `https` in any case with a host after `//`,
+  is logged at `Info` and waits on the `HostLink` until the app takes it
+  with `Instance::take_link_request`. A newer link replaces one not yet
+  taken, so a game cannot pile them up, and the app is notified. The
+  scheme goes to the app in lower case. A link must be printable ASCII
+  with no user name before the host and at most 4096 bytes, so the link
+  the user reads is the page that opens.
+- **An empty string** takes back a link the app has not taken yet.
+- **Anything else** throws `ConnectionNotFoundException`, which MIDP
+  allows for requests the phone cannot handle, and logs a `Warn` line
+  naming the URL: calls (`tel:`), messages (`sms:`), files (`file:`),
+  suites to install (a `.jad` or `.jar` link) and other apps' schemes.
+  These never reach the host; opening them is not safe.
+- **`null`** throws `NullPointerException`, as in the reference
+  implementation and J2ME Loader. MIDP cancels with an empty string, not
+  `null`.
+
+MIDP requires the phone to ask the user before it acts on a request. The
+app does: it shows the link in the game's tile and opens it in the
+system's browser only when the user chooses **Open**
+(`docs/playing.md`). A link asked for just before the game ends is still
+handed over, as MIDP has the phone handle a request after its suite
+exits.
 
 ## The extension point for high-level screens
 

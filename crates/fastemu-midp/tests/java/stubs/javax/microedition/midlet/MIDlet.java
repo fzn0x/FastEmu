@@ -21,7 +21,8 @@ public abstract class MIDlet {
         return null;
     }
 
-    public final boolean platformRequest(String url) {
+    public final boolean platformRequest(String url)
+            throws javax.microedition.io.ConnectionNotFoundException {
         return false;
     }
 

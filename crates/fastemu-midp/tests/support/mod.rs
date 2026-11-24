@@ -135,6 +135,7 @@ MIDlet-9: Lifecycle, , t.Lifecycle\r\n\
 MIDlet-10: Crash, , t.Crash\r\n\
 MIDlet-11: SlowPaint, , t.SlowPaint\r\n\
 MIDlet-12: SlowStart, , t.SlowStart\r\n\
+MIDlet-13: Links, , t.Links\r\n\
 Game-Speed: 3\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each test program.
@@ -151,6 +152,7 @@ pub mod midlet {
     pub const CRASH: usize = 9;
     pub const SLOW_PAINT: usize = 10;
     pub const SLOW_START: usize = 11;
+    pub const LINKS: usize = 12;
 }
 
 /// A 2 by 2 PNG: red, green, blue and half-transparent white.
@@ -304,6 +306,12 @@ impl Running {
     /// The log so far, for failure messages.
     pub fn dump(&mut self) -> String {
         self.lines().join("\n")
+    }
+
+    /// The first line containing `needle` logged so far, with its level.
+    pub fn line(&mut self, needle: &str) -> Option<LogLine> {
+        self.collect();
+        self.log.iter().find(|l| l.text.contains(needle)).cloned()
     }
 
     /// Whether a line containing `needle` was logged.

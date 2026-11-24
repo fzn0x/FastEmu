@@ -341,6 +341,13 @@ impl Instance for MidpInstance {
     fn wants_text(&self) -> bool {
         !self.host.peek_status().is_finished() && self.host.wants_text()
     }
+
+    /// The latest web link `platformRequest` asked for, once. A link asked
+    /// for just before the game ended is still handed over, as MIDP has the
+    /// phone handle a request after its suite exits.
+    fn take_link_request(&self) -> Option<String> {
+        self.host.take_link()
+    }
 }
 
 impl Drop for MidpInstance {
