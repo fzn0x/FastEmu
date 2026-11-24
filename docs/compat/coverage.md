@@ -42,14 +42,14 @@ rest.
 | [`com.siemens.mp.ui`](#comsiemensmpui) | none | none | 1 of 1 | 20 of 20 | none | none |
 | [`com.siemens.mp.media`](#comsiemensmpmedia) | none | none | none | none | 0 of 7 | 0 of 53 |
 | [`com.siemens.mp.media.control`](#comsiemensmpmediacontrol) | none | none | none | none | 0 of 2 | 0 of 15 |
-| [`com.samsung.util`](#comsamsungutil) | none | none | none | none | 0 of 5 | 0 of 26 |
+| [`com.samsung.util`](#comsamsungutil) | none | none | none | none | 5 of 5 | 26 of 26 |
 | [`com.motorola.game`](#commotorolagame) | none | none | none | none | 0 of 8 | 0 of 97 |
 | [`com.motorola.funlight`](#commotorolafunlight) | none | none | none | none | 0 of 3 | 0 of 30 |
 | [`com.motorola.multimedia`](#commotorolamultimedia) | none | none | none | none | 1 of 2 | 2 of 17 |
 | [`com.sonyericsson.capuchin`](#comsonyericssoncapuchin) | none | none | none | none | 0 of 8 | 0 of 33 |
 | [`com.velox`](#comvelox) | none | none | none | none | 0 of 1 | 0 of 12 |
 | [`mmpp.lang`](#mmpplang) | none | none | none | none | 0 of 1 | 0 of 28 |
-| [`mmpp.media`](#mmppmedia) | none | none | none | none | 0 of 5 | 0 of 63 |
+| [`mmpp.media`](#mmppmedia) | none | none | none | none | 2 of 5 | 8 of 63 |
 | [`mmpp.media.phrase`](#mmppmediaphrase) | none | none | none | none | 0 of 4 | 0 of 46 |
 | [`mmpp.microedition.lcdui`](#mmppmicroeditionlcdui) | none | none | none | none | 0 of 2 | 0 of 34 |
 | [`mmpp.phone`](#mmppphone) | none | none | none | none | 0 of 2 | 0 of 19 |
@@ -65,7 +65,7 @@ rest.
 | [`javax.microedition.location`](#javaxmicroeditionlocation) | none | none | none | none | 0 of 13 | none |
 | [`javax.microedition.m2g`](#javaxmicroeditionm2g) | none | none | none | none | 0 of 6 | none |
 | [`org.w3c.dom.svg`](#orgw3cdomsvg) | none | none | none | none | 0 of 10 | none |
-| All | 66 of 66 | 348 of 348 | 66 of 99 | 707 of 1203 | 55 of 201 | 806 of 1521 |
+| All | 66 of 66 | 348 of 348 | 66 of 99 | 707 of 1203 | 62 of 201 | 840 of 1521 |
 
 ## Differences
 
@@ -360,7 +360,7 @@ From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: n
 
 ### com.samsung.util
 
-From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: none classes, none members. Tier 3: 0 of 5 classes, 0 of 26 members.
+From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: none classes, none members. Tier 3: 5 of 5 classes, 26 of 26 members.
 
 ### com.motorola.game
 
@@ -388,7 +388,7 @@ From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: n
 
 ### mmpp.media
 
-From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: none classes, none members. Tier 3: 0 of 5 classes, 0 of 63 members.
+From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: none classes, none members. Tier 3: 2 of 5 classes, 8 of 63 members.
 
 ### mmpp.media.phrase
 
