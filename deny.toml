@@ -13,7 +13,18 @@ all-features = true
 [advisories]
 # A yanked release is one its authors withdrew for a reason.
 yanked = "deny"
-ignore = []
+# Only crates the workspace depends on directly count as unmaintained. The
+# rest arrive with GPUI at the pinned commit of the Zed Android port (chrono,
+# the zbus crates, rustybuzz, ttf-parser) and move when that commit moves.
+unmaintained = "workspace"
+ignore = [
+  # quick-xml reads XML only while building: wayland-scanner, xcb and
+  # zbus-lockstep-macros turn the protocol files shipped inside those crates
+  # into Rust code. No game or user input reaches it. Fixed in quick-xml
+  # 0.41, which those crates do not accept yet.
+  { id = "RUSTSEC-2026-0194", reason = "build-time XML from the crates' own protocol files" },
+  { id = "RUSTSEC-2026-0195", reason = "build-time XML from the crates' own protocol files" },
+]
 
 [licenses]
 confidence-threshold = 0.93
@@ -47,9 +58,22 @@ wildcards = "allow"
 
 [sources]
 unknown-registry = "deny"
-# GPUI is not on crates.io: it comes from Zed's repository, pinned to a
-# commit in the workspace's Cargo.toml. List the repository here when the
-# apps' crates add it.
+# GPUI is not on crates.io: it comes from the Zed Android port, pinned to a
+# commit in the apps' manifests, with the forks listed below.
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# GPUI and the forks Zed builds it with, each pinned to a commit in Cargo.toml
+# or by GPUI's own manifest (the Zed Android port's revision).
+allow-git = [
+  "https://github.com/Dylanmurzello/zed-android-port",
+  "https://github.com/gfx-rs/wgpu",
+  "https://github.com/zed-industries/async-process.git",
+  "https://github.com/zed-industries/async-task.git",
+  "https://github.com/zed-industries/calloop",
+  "https://github.com/zed-industries/font-kit",
+  "https://github.com/zed-industries/khronos-egl",
+  "https://github.com/zed-industries/oo7",
+  "https://github.com/zed-industries/scap",
+  "https://github.com/zed-industries/windows-capture.git",
+  "https://github.com/zed-industries/xim-rs.git",
+]
