@@ -137,8 +137,9 @@ pages: [midp.md](docs/architecture/midp.md) (the event thread, frames,
 keys, soft keys and the hooks for screens and GameCanvas),
 [graphics.md](docs/architecture/graphics.md),
 [rms.md](docs/architecture/rms.md), [audio.md](docs/architecture/audio.md),
-[media.md](docs/architecture/media.md) and
-[connections.md](docs/architecture/connections.md). In short:
+[media.md](docs/architecture/media.md),
+[connections.md](docs/architecture/connections.md) and
+[vendors.md](docs/architecture/vendors.md). In short:
 
 1. Read the class's Javadoc, or the JSR for it, and follow its behavior,
    including the exceptions it throws. Where MicroEmulator or J2ME Loader

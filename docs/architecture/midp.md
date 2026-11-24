@@ -23,7 +23,8 @@ named.
 | `lcdui` | `javax.microedition.lcdui`: the event thread, `Display`, `Displayable`, `Canvas`, `Screen`, `Command`, `Graphics`, `Image`, `Font`, keys, soft keys and frames. |
 | `lcdui::game` | `javax.microedition.lcdui.game`: `GameCanvas`, `Layer`, `Sprite`, `TiledLayer` and `LayerManager`, over the plain Rust layer model in `lcdui::game::model`. |
 | `lcdui::highlevel` | The high-level screens on the extension point below: `Form` and its items, `List`, `TextBox`, `Alert`, `AlertType` and `Ticker`. |
-| `rms`, `media`, `io`, `wma`, `nokia`, `vendor` | The other APIs, built alongside. |
+| `rms`, `media`, `io`, `wma` | The other APIs, built alongside. |
+| `nokia`, `vendor` | Nokia's UI API and the other makers' classes, only on profiles of their maker (`docs/architecture/vendors.md`). |
 
 ## Suites
 
