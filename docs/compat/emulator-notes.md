@@ -87,8 +87,8 @@ the note that backs it.
    resource, never `NullPointerException`; games load images in a loop
    until the exception. ([4](notes/04-graphics.md#image-creation-and-decoding))
 7. Run lifecycle calls (`startApp`, `pauseApp`, `destroyApp`) on their
-   own thread, not on the event thread: many games never return from
-   `startApp`. ([2](notes/02-events-threads.md#the-lifecycle-thread))
+   own thread, not on the event thread, so a game that never returns
+   from `startApp` still gets events. ([2](notes/02-events-threads.md#the-lifecycle-thread))
 8. Serialize every UI callback on one event thread, catch and log every
    exception thrown by a callback, and keep the thread alive.
    ([2](notes/02-events-threads.md#one-event-thread))
@@ -125,7 +125,8 @@ the note that backs it.
 
 The full reasoning is in the notes; this is the list for the lead.
 
-- `KeyCodes::NOKIA` matches all four Java emulators. [code]
+- `KeyCodes::NOKIA` matches J2ME Loader, freej2me-plus and
+  MicroEmulator. [code]
 - `KeyCodes::SIEMENS`: the soft keys, arrows and fire match
   freej2me-plus. The `clear: -12`, `send: -11` and `end: -12` values
   appear in none of the studied emulators, and clear sharing a code with
@@ -139,7 +140,9 @@ The full reasoning is in the notes; this is the list for the lead.
 - `SuiteInfo::property` compares names without case and says MIDP asks
   for that. JSR 118 says the opposite for the descriptor: "Attribute
   names are case-sensitive and MUST match exactly." The JAR manifest
-  format itself compares names without case. ([1](notes/01-suite-loading.md#attribute-name-case))
+  format itself compares names without case; that part was not
+  verified here. Ignoring case is harmless, so only the comment needs
+  fixing. ([1](notes/01-suite-loading.md#attribute-name-case))
 - `FontSizes` should say what the numbers are (pixel line height, the
   value of `Font.getHeight()`); the emulators disagree widely on them.
   ([4](notes/04-graphics.md#font-sizes))

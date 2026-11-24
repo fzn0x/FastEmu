@@ -150,8 +150,9 @@ That lets a game that never returns from `startApp` (it runs its game
 loop there) still receive keys and paints. wie spawns its event loop
 only after `startApp` returns, so such a game gets no events at all.
 [code] The JSR 118 example says `startApp` "should return immediately
-to keep the dispatcher from hanging", which tells us real games did not
-always do so. [spec]
+to keep the dispatcher from hanging". [spec] That a warning was needed
+suggests some games did not; no tracker report studied here names such
+a game. [unverified]
 
 J2ME Loader's state machine:
 
