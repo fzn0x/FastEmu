@@ -435,6 +435,12 @@ pub(crate) fn decode(attr: &CodeAttr, cp: &ConstantPool, arg_slots: u16) -> Resu
     };
     let mut handlers = Vec::with_capacity(attr.handlers.len());
     for h in &attr.handlers {
+        if h.catch_type != 0 && cp.class_name(h.catch_type).is_err() {
+            return Err(format!(
+                "an exception handler catches constant pool entry {}, which is not a class",
+                h.catch_type
+            ));
+        }
         handlers.push(Handler {
             start: bound(h.start_pc)?,
             end: bound(h.end_pc)?,
@@ -442,11 +448,20 @@ pub(crate) fn decode(attr: &CodeAttr, cp: &ConstantPool, arg_slots: u16) -> Resu
             catch_type: h.catch_type,
         });
     }
+    let heights =
+        super::flow::stack_heights(&insns, &pcs, &switches, &handlers, cp, attr.max_stack)?;
+    // Only `ret` reads the heights, to check where a subroutine returns.
+    let ret_heights = if insns.iter().any(|i| matches!(i, Insn::Ret(_))) {
+        heights.into()
+    } else {
+        Box::default()
+    };
     Ok(Code {
         insns: insns.into(),
         pcs: pcs.into(),
         handlers: handlers.into(),
         switches: switches.into(),
+        ret_heights,
         max_locals: attr.max_locals,
         max_stack: attr.max_stack,
     })

@@ -910,6 +910,16 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                             "ret through a local without a return address".to_owned(),
                         ));
                     };
+                    // The decoder assumed the subroutine leaves the stack
+                    // as its jsr found it; a return address from another
+                    // method or another height would run off the frame.
+                    let depth = sp - bp - code.max_locals as usize;
+                    if code.ret_heights.get(t as usize) != Some(&(depth as u32)) {
+                        break Err(Fault::Error(
+                            "java/lang/VerifyError",
+                            "a subroutine returns with a different operand stack".to_owned(),
+                        ));
+                    }
                     jump!(t);
                 }
                 Insn::TableSwitch(i) | Insn::LookupSwitch(i) => {

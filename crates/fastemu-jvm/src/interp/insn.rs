@@ -228,6 +228,9 @@ pub(crate) struct Code {
     pub(crate) pcs: Box<[u32]>,
     pub(crate) handlers: Box<[Handler]>,
     pub(crate) switches: Box<[Switch]>,
+    /// The operand stack height before each instruction, kept only for
+    /// methods with `ret`, which checks it (see [`super::flow`]).
+    pub(crate) ret_heights: Box<[u32]>,
     pub(crate) max_locals: u16,
     pub(crate) max_stack: u16,
 }

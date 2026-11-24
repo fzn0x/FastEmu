@@ -6,6 +6,7 @@
 
 mod decode;
 mod exec;
+mod flow;
 mod insn;
 mod resolve;
 
