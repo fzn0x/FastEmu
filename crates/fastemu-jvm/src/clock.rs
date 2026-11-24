@@ -181,10 +181,17 @@ mod tests {
 
     #[test]
     fn run_times_map_to_wall_times_a_fixed_distance_apart() {
+        // The wall clock read on both sides of the start, so a thread
+        // descheduled between two reads cannot fail the test.
+        let before = crate::lang::system::current_time_millis();
         let clock = Clock::new();
-        let now = crate::lang::system::current_time_millis();
+        let after = crate::lang::system::current_time_millis();
         let at = |run| clock.wall_millis(run);
-        assert!((at(0) - now).abs() <= 50, "{} and {now}", at(0));
+        assert!(
+            (before..=after).contains(&at(0)),
+            "{} not in {before}..={after}",
+            at(0)
+        );
         assert_eq!(at(120) - at(100), 20);
         let before = at(100);
         clock.set_paused(true);
