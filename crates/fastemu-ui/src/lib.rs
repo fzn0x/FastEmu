@@ -2,6 +2,7 @@
 //! shared by the desktop and Android apps.
 
 pub mod bindings;
+pub mod layout;
 pub mod library;
 pub mod settings;
 pub mod store;
