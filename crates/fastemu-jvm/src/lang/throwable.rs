@@ -48,8 +48,11 @@ impl Payload for ThrowableData {
     }
 }
 
-/// Traces longer than this are cut, as HotSpot cuts them at 1024.
-const MAX_TRACE: usize = 1024;
+/// Traces longer than this are cut. CLDC has no stack traces and HotSpot
+/// keeps 1024 frames, but a game that prints one never needs more than a
+/// screenful, and each frame counts 16 bytes of the heap for as long as
+/// the exception lives: 256 frames are 4 KiB.
+const MAX_TRACE: usize = 256;
 
 /// Records the current thread's frames in `exc`, leaving out the frames
 /// that are building the throwable itself.
@@ -76,8 +79,15 @@ pub(crate) fn fill_in_stack_trace(ctx: &mut Ctx<'_>, exc: ObjRef) {
             break;
         }
     }
-    if let Some(data) = ctx.state.heap.get_mut(exc).payload_mut::<ThrowableData>() {
-        data.trace = trace;
+    let stored = match ctx.state.heap.get_mut(exc).payload_mut::<ThrowableData>() {
+        Some(data) => {
+            data.trace = trace;
+            true
+        }
+        None => false,
+    };
+    if stored {
+        ctx.recount(exc);
     }
 }
 
