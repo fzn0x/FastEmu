@@ -48,8 +48,15 @@ function renderGuide(name) {
   const source = readFileSync(join(root, 'docs', `${name}.md`), 'utf8');
   const html = marked.parse(source).replaceAll('<table>', '<div class="table-wrap"><table>').replaceAll('</table>', '</table></div>');
   const title = stripTags((html.match(/<h1[^>]*>(.*?)<\/h1>/s) ?? [, name])[1]);
-  const description = stripTags((html.match(/<p>(.*?)<\/p>/s) ?? [, ''])[1]).replace(/\s+/g, ' ').slice(0, 200);
+  const description = shorten(stripTags((html.match(/<p>(.*?)<\/p>/s) ?? [, ''])[1]).replace(/\s+/g, ' '), 200);
   return { name, html, title, description };
+}
+
+/** Cuts `text` to at most `max` characters at a word boundary. */
+function shorten(text, max) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max - 3);
+  return `${cut.slice(0, cut.lastIndexOf(' ')).replace(/[\s.,;:]+$/, '')}...`;
 }
 
 const head = ({ title, description, path }) => `<!doctype html>
