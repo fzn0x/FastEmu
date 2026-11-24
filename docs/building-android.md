@@ -15,7 +15,7 @@ driver.
 
 | Tool | Version used | Notes |
 | --- | --- | --- |
-| Rust | the stable toolchain in `rust-toolchain.toml` (1.99 here) | `rustup target add aarch64-linux-android x86_64-linux-android` |
+| Rust | 1.99.0, pinned in `rust-toolchain.toml` | `rustup target add aarch64-linux-android x86_64-linux-android` |
 | cargo-ndk | 4.1.2 | `cargo install cargo-ndk --version 4.1.2 --locked` |
 | Android SDK | platform 35, build-tools 35.0.0 | `sdkmanager "platforms;android-35" "build-tools;35.0.0"` |
 | Android NDK | 28.2.13676358 (r28c) | `sdkmanager "ndk;28.2.13676358"` |
@@ -69,8 +69,9 @@ A first build takes about five minutes for both ABIs on a 20-thread machine
 with six cargo jobs; after a change to FastEmu's own crates, about ten seconds
 each. Gradle's first run downloads Gradle and its plugins, about a minute.
 
-`assembleRelease` builds a release APK, shrunk with R8 and, for now, signed
-with the debug key like the debug build.
+`assembleRelease` builds a release APK, shrunk with R8 and signed with the
+release key when one is given, else with the debug key (see
+[Signing](#signing)).
 
 | Output | Path |
 | --- | --- |
@@ -109,7 +110,8 @@ which lets a script start a game without the picker:
 
 ```sh
 adb push snake.jar /data/local/tmp/snake.jar
-adb shell am start -n io.github.fzn0x.fastemu/.MainActivity   --es fastemu.open /data/local/tmp/snake.jar
+adb shell am start -n io.github.fzn0x.fastemu/.MainActivity \
+  --es fastemu.open /data/local/tmp/snake.jar
 ```
 
 ## Check it in a headless emulator
@@ -129,7 +131,8 @@ until [ "$(adb -s emulator-5580 shell getprop sys.boot_completed | tr -d '\r')" 
 
 adb -s emulator-5580 install -r android/app/build/outputs/apk/debug/app-debug.apk
 adb -s emulator-5580 push snake.jar /data/local/tmp/snake.jar
-adb -s emulator-5580 shell am start -W -n io.github.fzn0x.fastemu/.MainActivity   --es fastemu.open /data/local/tmp/snake.jar
+adb -s emulator-5580 shell am start -W -n io.github.fzn0x.fastemu/.MainActivity \
+  --es fastemu.open /data/local/tmp/snake.jar
 adb -s emulator-5580 exec-out screencap -p > fastemu.png
 adb -s emulator-5580 logcat -d | grep -E "fastemu|FATAL|panic"
 
