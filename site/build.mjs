@@ -130,7 +130,8 @@ ${sidebar(guides, '')}
 <main class="doc">
 <article>
 <h1 id="documentation">Documentation</h1>
-<p>Guides for FastEmu, the Java ME emulator written in Rust.</p>
+<p>Modern and faster version of MicroEmu and J2ME Loader with multi instances support, available in Windows, Linux, MacOS and Android built in Zed GPUI.</p>
+<p>These guides cover installing FastEmu, playing with it and building it.</p>
 <ul class="index">
 ${cards}
 </ul>

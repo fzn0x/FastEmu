@@ -1,5 +1,7 @@
 # Getting started
 
+Modern and faster version of MicroEmu and J2ME Loader with multi instances support, available in Windows, Linux, MacOS and Android built in Zed GPUI.
+
 FastEmu runs Java ME (J2ME) games and apps from their `.jar` and `.jad`
 files. This page takes you from a download to a running game.
 

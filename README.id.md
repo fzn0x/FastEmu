@@ -7,8 +7,7 @@
 </p>
 
 <p align="center">
-  Emulator Java ME yang ditulis dengan Rust.<br>
-  Menjalankan banyak game MIDP 2.0 sekaligus dalam satu jendela.
+  Versi modern dan lebih cepat dari MicroEmu dan J2ME Loader dengan dukungan multi instance, tersedia di Windows, Linux, MacOS dan Android, dibangun dengan Zed GPUI.
 </p>
 
 <p align="center">
