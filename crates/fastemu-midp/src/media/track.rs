@@ -19,6 +19,13 @@ pub(crate) enum Backend {
     Silent(Silent),
 }
 
+impl Backend {
+    /// A silent player whose media lasts `duration_us`.
+    pub fn silent(duration_us: i64) -> Self {
+        Self::Silent(Silent::new(duration_us))
+    }
+}
+
 /// The smallest wait the event thread schedules for a stop time, so a
 /// paused engine does not make it spin.
 const MIN_STOP_POLL: Duration = Duration::from_millis(2);
@@ -126,6 +133,11 @@ impl Track {
         self.content_type = content_type;
         self.stopped_at_time = None;
         self.backend.replace(backend)
+    }
+
+    /// Takes the sound out of the track, leaving it without one.
+    pub fn uninstall(&mut self) -> Option<Backend> {
+        self.backend.take()
     }
 
     /// Sends an event the MIDP layer made, such as the `CLOSED` of a

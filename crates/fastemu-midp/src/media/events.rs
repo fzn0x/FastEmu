@@ -30,6 +30,7 @@ use fastemu_jvm::{Ctx, GlobalRef, JResult, ObjRef, Throw, Value};
 use super::event::{Event, Note};
 use super::player;
 use super::track::Track;
+use crate::nokia::sound;
 
 /// The longest the event thread sleeps without looking at the VM's stop
 /// flag.
@@ -43,6 +44,8 @@ const MAX_WARNINGS: u32 = 16;
 pub(crate) enum Owner {
     /// A `javax.microedition.media.Player`.
     Player,
+    /// A `com.nokia.mid.sound.Sound`.
+    Sound,
 }
 
 struct Entry {
@@ -259,6 +262,7 @@ fn held_object(ctx: &mut Ctx<'_>, serial: u64) -> Option<(ObjRef, Owner)> {
 fn track_mut<'c>(ctx: &'c mut Ctx<'_>, obj: ObjRef, owner: Owner) -> JResult<&'c mut Track> {
     Ok(match owner {
         Owner::Player => &mut ctx.payload_mut::<player::PlayerData>(obj)?.track,
+        Owner::Sound => &mut ctx.payload_mut::<sound::SoundData>(obj)?.track,
     })
 }
 
@@ -312,13 +316,15 @@ fn deliver(ctx: &mut Ctx<'_>, serial: u64, event: Event) -> JResult<()> {
     if event.ends_a_run() && !track_mut(ctx, obj, owner)?.is_started(Instant::now()) {
         entry.hold = None;
     }
-    // A closed player never plays again.
-    let keep = event != Event::Closed;
+    // A closed player never plays again; a Nokia sound can be initialized
+    // anew and keeps its entry.
+    let keep = !(owner == Owner::Player && event == Event::Closed);
     if keep && let Some(state) = media(ctx) {
         state.entries.insert(serial, entry);
     }
     match owner {
         Owner::Player => player::deliver(ctx, obj, event),
+        Owner::Sound => sound::deliver(ctx, obj, event),
     }
 }
 

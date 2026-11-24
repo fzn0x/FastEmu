@@ -19,6 +19,8 @@ pub(crate) mod track;
 use fastemu_audio::AudioError;
 use fastemu_jvm::{Ctx, JResult, NativeClass};
 
+pub(crate) use event::Event;
+
 /// The classes of this module.
 pub fn classes() -> Vec<NativeClass> {
     let mut classes = api::classes();
