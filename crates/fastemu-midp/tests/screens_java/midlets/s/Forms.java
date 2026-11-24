@@ -71,6 +71,8 @@ public class Forms extends MIDlet implements ItemStateListener, ItemCommandListe
     }
 
     public void commandAction(Command c, Displayable d) {
+        // Done locks the name, which then takes no more typing.
+        name.setConstraints(TextField.ANY | TextField.UNEDITABLE);
         System.out.println("form command " + c.getLabel());
     }
 

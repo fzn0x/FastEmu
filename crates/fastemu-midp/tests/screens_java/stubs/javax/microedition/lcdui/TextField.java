@@ -17,4 +17,6 @@ public class TextField extends Item {
     public int size() {
         return 0;
     }
+
+    public void setConstraints(int constraints) {}
 }

@@ -101,10 +101,13 @@ fn form_mut<'a>(ctx: &'a mut Ctx<'_>, obj: ObjRef) -> JResult<&'a mut FormState>
     }
 }
 
-/// An item of the form changed: lay it out again and repaint.
+/// An item of the form changed: lay it out again and repaint, and tell
+/// the app whether the focused item still takes text (a text field's
+/// constraints may have changed).
 pub(crate) fn item_changed(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<()> {
     form_mut(ctx, obj)?.stale = true;
     wake_timer(ctx, obj);
+    update_text(ctx, obj)?;
     display::repaint(ctx, obj)
 }
 

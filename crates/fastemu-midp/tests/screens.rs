@@ -190,6 +190,8 @@ fn screens_form_traverses_and_tells_its_listener() {
     wait_until(&mut run, "wants_text again", |r| r.instance.wants_text());
     run.tap(Key::SoftRight);
     run.wait_log("form command Done");
+    // The command made the focused field uneditable.
+    wait_until(&mut run, "wants_text to end", |r| !r.instance.wants_text());
     assert!(!run.has("Exception"), "{}", run.dump());
 }
 
