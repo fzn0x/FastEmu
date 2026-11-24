@@ -1,9 +1,10 @@
 name: Linux packages
 description: >-
   Installs the system packages the Linux jobs need. The emulator crates need
-  the ALSA headers for audio output. The GPUI apps need a C toolchain, the
-  font, keyboard, Wayland, X11 and Vulkan headers, and a few libraries the
-  Zed editor's own script/linux installs. A failed download is tried again.
+  only a C toolchain, which Rust links with. The GPUI apps also need the
+  ALSA headers for sound, the font, keyboard, Wayland, X11 and Vulkan
+  headers, and a few libraries the Zed editor's own script/linux installs.
+  A failed download is tried again.
 
 inputs:
   gui:
@@ -18,9 +19,10 @@ runs:
         GUI: ${{ inputs.gui }}
       run: |
         set -euo pipefail
-        packages=(build-essential pkg-config libasound2-dev)
+        packages=(build-essential pkg-config)
         if [ "$GUI" = true ]; then
           packages+=(
+            libasound2-dev
             clang cmake lld
             libfontconfig-dev
             libglib2.0-dev
