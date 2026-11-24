@@ -172,6 +172,7 @@ fn tone_sequences_and_play_tone() {
         stream duration: 500000
         stream tone control: true
         stream controls: 3
+        silent tone player takes a sequence: 500000
         playTone heard: true
         note 128: java.lang.IllegalArgumentException
         note -1: java.lang.IllegalArgumentException

@@ -58,6 +58,16 @@ public class MediaTones extends MediaUtil {
         say("stream controls", s.getControls().length);
         s.close();
 
+        // A tone stream that does not parse plays as silence, and its
+        // ToneControl still takes a good sequence.
+        byte[] broken = {ToneControl.VERSION, 1, ToneControl.TEMPO, 1};
+        Player b = Manager.createPlayer(new ByteArrayInputStream(broken), "audio/x-tone-seq");
+        b.realize();
+        ToneControl btc = (ToneControl) b.getControl("ToneControl");
+        btc.setSequence(SEQUENCE);
+        say("silent tone player takes a sequence", b.getDuration());
+        b.close();
+
         Manager.playTone(69, 100, 80);
         say("playTone heard", Pump.peak(50) > 0);
         Pump.advance(100);

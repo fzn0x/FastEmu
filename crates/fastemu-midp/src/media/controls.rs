@@ -6,7 +6,7 @@
 
 use std::time::Instant;
 
-use fastemu_audio::{AudioError, Format, PlayerState};
+use fastemu_audio::{Format, PlayerState};
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Payload, Tracer, Value};
 
 use super::api::{self, STOP_TIME_RESET};
@@ -126,15 +126,15 @@ fn tone() -> NativeClass {
             .iter()
             .map(|&b| b as u8)
             .collect();
-        let probe = match events::group(ctx) {
-            Some(_) => None,
-            None => Some(events::probe(ctx)?),
+        // A silent tone player still checks the sequence and learns its
+        // length, in the instance's group when it has one (the player is
+        // silent because its first data did not parse) or in the probe.
+        let measure = match events::group(ctx) {
+            Some(group) => group,
+            None => events::probe(ctx)?,
         };
         let result = player::track(ctx, player)?.set_tone_sequence(&bytes, |bytes| {
-            // A silent tone player still checks the sequence and learns
-            // its length.
-            let probe = probe.as_ref().ok_or(AudioError::Closed)?;
-            probe
+            measure
                 .create_player_as(bytes, Format::ToneSequence)?
                 .duration()
         });
