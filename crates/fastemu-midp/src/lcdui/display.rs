@@ -72,13 +72,16 @@ pub fn repaint(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<()> {
 
 /// Tells the event thread that `obj`'s size or soft keys may have changed
 /// (its commands, title, ticker or full-screen mode). Only the shown
-/// displayable needs it: the others are laid out when they are shown.
+/// displayable needs it: the others are laid out when they are shown. A
+/// screen's timer runs again at once, as a new ticker needs it.
 pub fn relayout(ctx: &mut Ctx<'_>, obj: ObjRef) {
     if current(ctx) != Some(obj) {
         return;
     }
     let global = Arc::new(ctx.new_global(obj));
-    state(ctx).internal.push_back(Internal::Relayout(global));
+    let st = state(ctx);
+    st.internal.push_back(Internal::Relayout(global));
+    st.tick_at = Some(std::time::Instant::now());
     ctx.notify_waiters();
 }
 
