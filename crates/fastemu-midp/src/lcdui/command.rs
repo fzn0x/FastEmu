@@ -221,7 +221,7 @@ mod tests {
     fn a_screen_command_runs_as_a_callback() {
         let env = InstanceEnv::for_tests("unused");
         let host = env.host.clone();
-        let mut classes = crate::classes();
+        let mut classes = crate::classes(&fastemu_core::default_profile());
         classes.push(
             NativeClass::new("t/Throwing")
                 .extends("javax/microedition/lcdui/Screen")

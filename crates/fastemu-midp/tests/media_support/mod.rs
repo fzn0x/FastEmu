@@ -290,7 +290,7 @@ pub fn run(class: &str, audio: Option<Group>) -> Option<Output> {
         allow_exit: false,
         ..VmConfig::default()
     };
-    let mut natives = fastemu_midp::classes();
+    let mut natives = fastemu_midp::classes(&fastemu_core::default_profile());
     natives.push(pump());
     let vm = Vm::new(config, Arc::new(source), natives);
     let data_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("media-data");

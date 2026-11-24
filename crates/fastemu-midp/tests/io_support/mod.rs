@@ -174,7 +174,7 @@ const DATA_OUTPUT: &[(&str, &str)] = &[
 /// `DataOutput` interfaces when the library does not have them yet, so
 /// `Datagram` (which extends both) loads and its methods resolve.
 fn natives() -> Vec<NativeClass> {
-    let mut natives = fastemu_midp::classes();
+    let mut natives = fastemu_midp::classes(&fastemu_core::default_profile());
     for (name, methods) in [
         ("java/io/DataInput", DATA_INPUT),
         ("java/io/DataOutput", DATA_OUTPUT),

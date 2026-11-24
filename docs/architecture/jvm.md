@@ -83,7 +83,7 @@ let config = VmConfig {
     allow_exit: false, // MIDP: System.exit throws SecurityException
     ..VmConfig::default()
 };
-let vm = Vm::new(config, Arc::new(jar_source), midp::classes());
+let vm = Vm::new(config, Arc::new(jar_source), midp::classes(&profile));
 vm.spawn("main", |ctx| {
     // load the MIDlet class, construct it, call startApp ...
     Ok(())

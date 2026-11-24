@@ -75,7 +75,8 @@ apps pass one with output, the headless runner and tests pass none.
   A module that implements an optional API adds its `*.version` key there;
 - `InstanceEnv` installed as an extension, with a sound `Group` from the
   engine at the settings' volume;
-- every class of `fastemu_midp::classes()`;
+- every class of `fastemu_midp::classes(&profile)`: the vendor APIs only
+  on profiles of their maker (`docs/architecture/vendors.md`);
 - the event thread started, then the control thread and the first
   lifecycle thread.
 

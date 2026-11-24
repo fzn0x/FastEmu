@@ -760,7 +760,7 @@ mod tests {
 
         use crate::env::InstanceEnv;
 
-        let mut classes = crate::classes();
+        let mut classes = crate::classes(&fastemu_core::default_profile());
         classes.extend(more);
         let vm = Vm::new(VmConfig::default(), Arc::new(MemorySource::new()), classes);
         vm.attach("test", |ctx| {

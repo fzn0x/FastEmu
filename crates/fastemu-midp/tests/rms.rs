@@ -147,7 +147,7 @@ fn run(
     let vm = Vm::new(
         config,
         Arc::new(DirSource::new(classes)),
-        fastemu_midp::classes(),
+        fastemu_midp::classes(&fastemu_core::default_profile()),
     );
     vm.attach("setup", |ctx| {
         ctx.set_extension(env);

@@ -309,7 +309,7 @@ mod tests {
         let vm = Vm::new(
             VmConfig::default(),
             Arc::new(MemorySource::new()),
-            crate::classes(),
+            crate::classes(&fastemu_core::default_profile()),
         );
         vm.attach("test", |ctx| {
             let mut read = |class: &str, name: &str, desc: &str| {
@@ -330,7 +330,7 @@ mod tests {
         let vm = Vm::new(
             VmConfig::default(),
             Arc::new(MemorySource::new()),
-            crate::classes(),
+            crate::classes(&fastemu_core::default_profile()),
         );
         vm.attach("test", |ctx| {
             let message = ctx.new_string("gone").unwrap();

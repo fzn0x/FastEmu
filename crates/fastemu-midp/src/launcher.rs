@@ -79,7 +79,7 @@ impl MidpLauncher {
             allow_exit: false,
             ..VmConfig::default()
         };
-        let vm = Vm::new(config, source.clone(), crate::classes());
+        let vm = Vm::new(config, source.clone(), crate::classes(&request.profile));
         let env = InstanceEnv {
             id,
             profile: request.profile,

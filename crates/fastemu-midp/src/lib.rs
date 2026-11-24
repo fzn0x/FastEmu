@@ -10,8 +10,10 @@
 //! [`fastemu_jvm::NativeClass`] (see `docs/architecture/jvm.md` for the
 //! rules native code follows). Each area lives in its own module and
 //! returns its classes from a `classes()` function; [`classes`] gathers
-//! them for a new virtual machine. Natives reach the instance they run in
-//! through [`env::env`]. `docs/architecture/midp.md` describes the design.
+//! them for a new virtual machine, with the vendor APIs of the device
+//! profile's maker only ([`vendor::Vendor`]). Natives reach the instance
+//! they run in through [`env::env`]. `docs/architecture/midp.md` describes
+//! the design, `docs/architecture/vendors.md` the vendor APIs.
 
 pub mod env;
 pub mod host;
@@ -27,13 +29,18 @@ pub mod suite;
 pub mod vendor;
 pub mod wma;
 
+use fastemu_core::DeviceProfile;
 use fastemu_jvm::NativeClass;
 
 pub use instance::MidpInstance;
 pub use launcher::MidpLauncher;
 
-/// Every Java class this crate adds to a virtual machine.
-pub fn classes() -> Vec<NativeClass> {
+/// Every Java class this crate adds to the virtual machine of a game
+/// running on `profile`: MIDP and the optional APIs on every profile, and
+/// the vendor APIs only on profiles of their maker, so a game probing for
+/// them with `Class.forName` finds the phone the profile imitates.
+pub fn classes(profile: &DeviceProfile) -> Vec<NativeClass> {
+    let vendor = vendor::Vendor::of(profile);
     let mut classes = Vec::new();
     classes.extend(midlet::classes());
     classes.extend(lcdui::classes());
@@ -41,7 +48,9 @@ pub fn classes() -> Vec<NativeClass> {
     classes.extend(media::classes());
     classes.extend(io::classes());
     classes.extend(wma::classes());
-    classes.extend(nokia::classes());
-    classes.extend(vendor::classes());
+    if vendor.has_nokia_ui() {
+        classes.extend(nokia::classes());
+    }
+    classes.extend(vendor::classes(vendor));
     classes
 }
