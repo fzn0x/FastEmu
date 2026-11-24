@@ -15,7 +15,7 @@ use fastemu_gfx::Surface;
 use fastemu_jvm::{ArrayType, Ctx, JResult, NativeClass, ObjRef, Throw, Tracer, Value};
 use parking_lot::Mutex;
 
-use super::{Handled, ItemData, Kind, Needs, changed, data, data_mut};
+use super::{Handled, ItemData, Kind, MAX_SIDE, Needs, changed, data, data_mut};
 use crate::env::env;
 use crate::lcdui::Rect;
 use crate::lcdui::display;
@@ -96,7 +96,7 @@ fn call_int(
     desc: &str,
     args: &[Value],
 ) -> JResult<i32> {
-    Ok(call(ctx, item, name, desc, args)?.map_or(0, |v| v.int().max(0)))
+    Ok(call(ctx, item, name, desc, args)?.map_or(0, |v| v.int().clamp(0, MAX_SIDE)))
 }
 
 /// The game's sizes: at least its minimum, its preferred width within

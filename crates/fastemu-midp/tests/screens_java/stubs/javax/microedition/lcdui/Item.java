@@ -24,5 +24,7 @@ public abstract class Item {
         return 0;
     }
 
+    public void setPreferredSize(int width, int height) {}
+
     public void notifyStateChanged() {}
 }

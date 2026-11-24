@@ -3,7 +3,7 @@
 
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Value};
 
-use super::{ItemData, Kind, Needs, changed, data, data_mut};
+use super::{ItemData, Kind, MAX_SIDE, Needs, changed, data, data_mut};
 
 const CLASS: &str = "javax/microedition/lcdui/Spacer";
 
@@ -20,9 +20,9 @@ pub(super) fn needs(ctx: &Ctx<'_>, item: ObjRef) -> JResult<Needs> {
         unreachable!("a Spacer's payload is made by its class")
     };
     Ok(Needs {
-        min_width: s.width,
-        width: s.width,
-        height: s.height,
+        min_width: s.width.min(MAX_SIDE),
+        width: s.width.min(MAX_SIDE),
+        height: s.height.min(MAX_SIDE),
     })
 }
 

@@ -75,6 +75,12 @@ pub const BUTTON: i32 = 2;
 /// The space above and below an item's content.
 pub const VPAD: i32 = 2;
 
+/// The largest side, in pixels, a game's own numbers give an item (a
+/// `CustomItem`'s sizes, `setPreferredSize`, a `Spacer`), so that sums
+/// of them stay far from overflowing and a `CustomItem`'s surface stays
+/// a sane size.
+pub const MAX_SIDE: i32 = 8192;
+
 /// What one kind of item keeps.
 pub enum Kind {
     /// The abstract `Item` itself, which no game can make.
@@ -302,7 +308,7 @@ pub(crate) fn needs(ctx: &mut Ctx<'_>, item: ObjRef, fonts: &Fonts, width: i32) 
         natural
     };
     let height = if lock_h >= 0 {
-        lock_h.max(label_h + 2 * VPAD)
+        lock_h.min(MAX_SIDE).max(label_h + 2 * VPAD)
     } else {
         label_h + body.height + 2 * VPAD
     };
@@ -327,7 +333,7 @@ pub(crate) fn height_at(
     let (_, lock_h) = data(ctx, item)?.preferred;
     let label_h = label_height(ctx, item, fonts, inner)?;
     if lock_h >= 0 {
-        return Ok(lock_h.max(label_h + 2 * VPAD));
+        return Ok(lock_h.min(MAX_SIDE).max(label_h + 2 * VPAD));
     }
     let body = content(ctx, item, fonts, inner)?;
     Ok(label_h + body.height + 2 * VPAD)

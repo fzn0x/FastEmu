@@ -225,6 +225,23 @@ fn screens_popup_emptied_while_open_takes_keys() {
 }
 
 #[test]
+fn screens_items_of_the_largest_size_are_laid_out() {
+    let Some(jar) = suite("edges-sizes") else {
+        return;
+    };
+    let mut run = Running::launch(&jar, midlet::EDGES);
+    run.wait_log("edges shown");
+    run.wait_log("tall paint");
+    // Scroll through the tall items to the bottom and back.
+    for _ in 0..4 {
+        run.tap(Key::Down);
+    }
+    run.tap(Key::Up);
+    run.wait_frame(|f| count(f, HIGHLIGHT) > 0);
+    assert_eq!(run.instance.error_count(), 0, "{}", run.dump());
+}
+
+#[test]
 fn screens_gauge_at_the_largest_maximum_moves() {
     let Some(jar) = suite("edges-gauge") else {
         return;
