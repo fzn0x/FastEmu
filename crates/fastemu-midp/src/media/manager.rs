@@ -7,7 +7,7 @@ use fastemu_audio::{Format, SUPPORTED_CONTENT_TYPES};
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Value};
 
 use super::player::{self, Source};
-use super::{events, stream, time_base};
+use super::{events, protocol, stream, time_base};
 
 const MANAGER: &str = "javax/microedition/media/Manager";
 const ILLEGAL_ARGUMENT: &str = "java/lang/IllegalArgumentException";
@@ -40,26 +40,26 @@ fn type_for_name(path: &str) -> Option<&'static str> {
 }
 
 /// A player for sound data, logging sound FastEmu plays as silence.
-fn player_for(ctx: &mut Ctx<'_>, bytes: Vec<u8>, declared: Option<String>) -> JResult<ObjRef> {
+pub(super) fn player_for(
+    ctx: &mut Ctx<'_>,
+    bytes: Vec<u8>,
+    declared: Option<String>,
+) -> JResult<ObjRef> {
     let format = decide(&bytes, declared.as_deref());
+    let bytes: Arc<[u8]> = Arc::from(bytes);
+    let what = match &declared {
+        Some(content_type) => format!("{content_type:?}"),
+        None => "a sound with no content type".to_owned(),
+    };
     let source = Source::Data {
-        bytes: Arc::from(bytes),
+        bytes: Arc::clone(&bytes),
         format,
         declared,
     };
-    let obj = player::new_player(ctx, source.clone())?;
-    if let (
-        None,
-        Source::Data {
-            bytes, declared, ..
-        },
-    ) = (format, &source)
-    {
-        let what = match declared {
-            Some(content_type) => format!("{content_type:?}"),
-            None => "a sound with no content type".to_owned(),
-        };
-        events::warn_silent(ctx, &what, bytes);
+    // Made first: the warning goes through the registry it sets up.
+    let obj = player::new_player(ctx, source)?;
+    if format.is_none() {
+        events::warn_silent(ctx, &what, &bytes);
     }
     Ok(obj)
 }
@@ -220,6 +220,11 @@ pub(crate) fn class() -> NativeClass {
             "createPlayer",
             "(Ljava/lang/String;)Ljavax/microedition/media/Player;",
             create_from_locator,
+        )
+        .static_method(
+            "createPlayer",
+            "(Ljavax/microedition/media/protocol/DataSource;)Ljavax/microedition/media/Player;",
+            protocol::create_player,
         )
         .static_method("playTone", "(III)V", play_tone)
         .static_method(

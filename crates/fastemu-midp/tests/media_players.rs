@@ -294,3 +294,23 @@ fn without_an_engine_players_keep_time_in_silence() {
         ",
     );
 }
+
+#[test]
+fn players_read_the_game_s_own_data_source() {
+    let (_engine, group) = audio();
+    check(
+        "MediaSource",
+        Some(group),
+        r"
+        locator: memory://sound
+        connected and started: true
+        type: audio/x-wav
+        duration: 200000
+        heard: true
+        null source: java.lang.IllegalArgumentException
+        no stream: javax.microedition.media.MediaException
+        broken source: java.io.IOException
+        descriptor: audio/midi
+        ",
+    );
+}

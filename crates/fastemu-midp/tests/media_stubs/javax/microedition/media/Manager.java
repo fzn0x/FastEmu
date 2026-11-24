@@ -29,6 +29,11 @@ public final class Manager {
         return null;
     }
 
+    public static Player createPlayer(javax.microedition.media.protocol.DataSource source)
+            throws IOException, MediaException {
+        return null;
+    }
+
     public static void playTone(int note, int duration, int volume) throws MediaException {
     }
 

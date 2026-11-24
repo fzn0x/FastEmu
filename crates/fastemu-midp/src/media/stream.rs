@@ -1,4 +1,4 @@
-//! Reading a game's `InputStream` to its end.
+//! Reading a game's `InputStream` (or `SourceStream`) to its end.
 //!
 //! A `java.io.ByteArrayInputStream` (what `getResourceAsStream` returns)
 //! is copied straight out of its buffer. Any other stream, the game's own
@@ -17,18 +17,31 @@ const CHUNK: usize = 16 * 1024;
 /// have run out of memory long before.
 const MAX_BYTES: usize = 32 * 1024 * 1024;
 
-/// Reads `stream` to its end. An `IOException` from the stream passes
-/// through.
+/// Reads the `java.io.InputStream` `stream` to its end. An `IOException`
+/// from the stream passes through.
 pub(crate) fn read_all(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<Vec<u8>> {
     if let Some(bytes) = read_byte_array_stream(ctx, stream)? {
         return Ok(bytes);
     }
+    read_chunks(ctx, stream, true)
+}
+
+/// Reads a `javax.microedition.media.protocol.SourceStream` to its end,
+/// or until it has nothing more to give.
+pub(crate) fn read_source_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<Vec<u8>> {
+    read_chunks(ctx, stream, false)
+}
+
+/// Calls `read(byte[], int, int)` until the end. `byte_reads`: the stream
+/// is an `InputStream`, whose `read()` gets past a `read` that returned 0;
+/// otherwise 0 ends the reading.
+fn read_chunks(ctx: &mut Ctx<'_>, stream: ObjRef, byte_reads: bool) -> JResult<Vec<u8>> {
     let buffer = ctx.new_array(ArrayType::Byte, CHUNK as i32)?;
     let mut out = Vec::new();
     loop {
         let args = [buffer.into(), Value::Int(0), Value::Int(CHUNK as i32)];
         let count = ctx.call_virtual(stream, "read", "([BII)I", &args)?.int();
-        if count < 0 {
+        if count < 0 || (count == 0 && !byte_reads) {
             break;
         }
         if count == 0 {

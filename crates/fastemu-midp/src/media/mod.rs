@@ -11,6 +11,7 @@ mod event;
 pub(crate) mod events;
 mod manager;
 mod player;
+mod protocol;
 mod silent;
 mod stream;
 mod time_base;
@@ -25,6 +26,7 @@ pub(crate) use event::Event;
 pub fn classes() -> Vec<NativeClass> {
     let mut classes = api::classes();
     classes.extend(controls::classes());
+    classes.extend(protocol::classes());
     classes.push(manager::class());
     classes.push(player::class());
     classes.push(time_base::class());
