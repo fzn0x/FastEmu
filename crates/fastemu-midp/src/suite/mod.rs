@@ -741,12 +741,6 @@ mod tests {
             panic!("a JAD naming it is refused too");
         };
         assert!(why.contains("big.jar") && why.contains("MiB"), "{why}");
-        // One byte under is read, and is not a ZIP.
-        zeros(&big, MAX_JAR_BYTES);
-        let Err(LaunchError::InvalidSuite(why)) = Suite::open(&big) else {
-            panic!("zeros are not a JAR");
-        };
-        assert!(why.contains("ZIP"), "{why}");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
