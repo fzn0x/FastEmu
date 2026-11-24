@@ -21,6 +21,12 @@ pub(crate) trait Source: Send {
     /// Moves to `frame`, clamped to the length.
     fn seek(&mut self, frame: u64);
 
+    /// The reason the source stopped before its length, if it did: a
+    /// decoder that gave up on damaged data. Taking it clears it.
+    fn take_error(&mut self) -> Option<String> {
+        None
+    }
+
     /// Sends a MIDI channel message to the synthesizer behind the source,
     /// as MMAPI's `MIDIControl.shortMidiEvent` does. Returns whether the
     /// source has a synthesizer to take it.

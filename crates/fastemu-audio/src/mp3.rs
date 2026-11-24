@@ -78,6 +78,8 @@ pub(crate) struct Mp3Source {
     taken: usize,
     /// Frames still to drop after a seek landed before its target.
     skip: u64,
+    /// Why decoding stopped early, until the voice takes it.
+    error: Option<String>,
 }
 
 impl Mp3Source {
@@ -116,6 +118,7 @@ impl Mp3Source {
             pending: Vec::new(),
             taken: 0,
             skip: 0,
+            error: None,
         })
     }
 
@@ -123,21 +126,29 @@ impl Mp3Source {
     fn decode_next(&mut self) -> bool {
         let mut bad = 0;
         loop {
-            let Ok(Some(packet)) = self.stream.reader.next_packet() else {
-                return false;
+            let packet = match self.stream.reader.next_packet() {
+                Ok(Some(packet)) => packet,
+                // The data simply ran out.
+                Ok(None) => return false,
+                Err(err) => {
+                    self.error = Some(format!("cannot read the MP3 data: {err}"));
+                    return false;
+                }
             };
             match self.stream.decoder.decode(&packet) {
                 Ok(buffer) => {
                     if buffer.spec().channels().count() != self.channels {
+                        self.error = Some("the MP3 changes its channel count".into());
                         return false;
                     }
                     buffer.copy_to_vec_interleaved(&mut self.pending);
                     self.taken = 0;
                     return true;
                 }
-                Err(_) => {
+                Err(err) => {
                     bad += 1;
                     if bad > MAX_BAD_FRAMES {
+                        self.error = Some(format!("cannot decode the MP3 data: {err}"));
                         return false;
                     }
                 }
@@ -190,6 +201,10 @@ impl Source for Mp3Source {
         }
         self.pos += done as u64;
         done
+    }
+
+    fn take_error(&mut self) -> Option<String> {
+        self.error.take()
     }
 
     fn seek(&mut self, frame: u64) {
