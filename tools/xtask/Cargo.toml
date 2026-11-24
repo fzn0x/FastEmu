@@ -10,9 +10,13 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-# `cargo xtask coverage` reads the classes the runtime registers.
+# `cargo xtask stubs`, `coverage` and `compat` read the classes the runtime
+# registers, and `compat` runs games with the real launcher.
+fastemu-core.workspace = true
 fastemu-jvm.workspace = true
 fastemu-midp.workspace = true
+# The screenshots of `cargo xtask compat`, with the version the app uses.
+png = "0.18"
 # `cargo xtask icons` renders the app's SVG icon. Only the renderer: the
 # icon has no text or embedded images. The version GPUI already builds
 # with, so the lockfile gains no second copy.

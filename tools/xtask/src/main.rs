@@ -12,9 +12,12 @@
 //!   compile them into a jar for test MIDlets. See [`api::stubs`].
 //! * `coverage`: compare those classes with the API inventory and write
 //!   `docs/compat/coverage.md`. See [`coverage`].
+//! * `compat`: run every JAR of a folder without a window and report what
+//!   each game did. See [`compat`].
 
 mod api;
 mod changelog;
+mod compat;
 mod coverage;
 mod icons;
 mod release_notes;
@@ -31,6 +34,8 @@ Usage: cargo xtask changelog [--root DIR] <--check | --print | --release VERSION
                                  [--out FILE]
        cargo xtask stubs [--root DIR] [--out DIR]
        cargo xtask coverage [--root DIR] [--out FILE]
+       cargo xtask compat DIR [--seconds S] [--keys SCRIPT] [--profile ID] [--jobs N]
+                          [--out DIR]
 
 changelog:
   --check              fail when a fragment of changelog.d is invalid
@@ -63,6 +68,18 @@ coverage:
   which classes and members of each tier are there and which are missing
   --out FILE           the report (default: docs/compat/coverage.md)
 
+compat:
+  runs every .jar under DIR without a window, each in a process of its own,
+  and writes compat.md and compat.json, with a screenshot and the log of
+  each game, to the output folder
+  --seconds S          how long each game runs (default: 20)
+  --keys SCRIPT        the keys to press from the first frame, as fastemu run
+                       takes them (default: 5 after a pause, then the
+                       arrows and fire)
+  --profile ID         the phone profile (default: generic-240x320)
+  --jobs N             how many games run at once (default: 1)
+  --out DIR            the folder (default: compat in the target folder)
+
   --root DIR           the repository's root (default: the workspace root)";
 
 fn main() -> ExitCode {
@@ -83,6 +100,12 @@ fn run(args: &[String]) -> Result<(), String> {
         Some("release-notes") => run_release_notes(&args[1..]),
         Some("stubs") => run_stubs(&args[1..]),
         Some("coverage") => run_coverage(&args[1..]),
+        Some("compat") => run_compat(&args[1..]),
+        // One game of `compat`, in the process `compat` starts for it.
+        Some("compat-run") => {
+            let options = compat::child::Options::parse(&args[1..])?;
+            compat::child::run(&options, &mut std::io::stdout().lock())
+        }
         _ => Err(USAGE.to_string()),
     }
 }
@@ -233,6 +256,55 @@ fn run_coverage(args: &[String]) -> Result<(), String> {
     }
     let out = out.unwrap_or_else(|| root.join("docs/compat/coverage.md"));
     coverage::run(&root, &out)
+}
+
+fn run_compat(args: &[String]) -> Result<(), String> {
+    let mut dir = None;
+    let mut out = None;
+    let mut seconds = 20.0;
+    let mut keys = compat::DEFAULT_KEYS.to_owned();
+    let mut profile = "generic-240x320".to_owned();
+    let mut jobs = 1;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        let mut value = |name: &str| {
+            iter.next()
+                .cloned()
+                .ok_or_else(|| format!("{name} needs a value\n{USAGE}"))
+        };
+        match arg.as_str() {
+            "--seconds" => {
+                let s = value("--seconds")?;
+                seconds = s
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|s| s.is_finite() && *s > 0.0)
+                    .ok_or_else(|| format!("bad number of seconds {s}"))?;
+            }
+            "--keys" => keys = value("--keys")?,
+            "--profile" => profile = value("--profile")?,
+            "--jobs" => {
+                let n = value("--jobs")?;
+                jobs = n.parse().map_err(|_| format!("bad number of jobs {n}"))?;
+            }
+            "--out" => out = Some(PathBuf::from(value("--out")?)),
+            other if other.starts_with("--") => {
+                return Err(format!("unknown argument {other}\n{USAGE}"));
+            }
+            other if dir.is_none() => dir = Some(PathBuf::from(other)),
+            other => return Err(format!("give one folder, not also {other}\n{USAGE}")),
+        }
+    }
+    let dir = dir.ok_or_else(|| format!("compat needs a folder of JARs\n{USAGE}"))?;
+    let options = compat::Options {
+        out: out.unwrap_or_else(|| target_dir(&default_root()).join("compat")),
+        dir,
+        seconds,
+        keys,
+        profile,
+        jobs,
+    };
+    compat::run(&options)
 }
 
 /// Cargo's target folder: `CARGO_TARGET_DIR`, else the folder this
