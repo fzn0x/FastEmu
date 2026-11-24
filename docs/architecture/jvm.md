@@ -484,7 +484,10 @@ Implemented in Rust (`src/lang`): `Object`, `Class` (`getName`,
 constructor and method, with UTF-8, ISO-8859-1, US-ASCII and
 windows-1251), `StringBuffer` and `StringBuilder`, `Math`, `Integer`,
 `Long`, `Short`, `Byte`, `Boolean`, `Character`, `Float`, `Double`
-(parsing and printing as Java does), `Number`, `System`, `Runtime`,
+(parsing as Java does, and printing with the `FloatingDecimal` algorithm
+of Java before 19, which phones ran: `1e23` prints as
+`9.999999999999999E22`, where Java 19 and later print `1.0E23`),
+`Number`, `System`, `Runtime`,
 `Thread`, `Runnable`, `Throwable` and the exceptions, `ref.Reference` and
 `ref.WeakReference`, and from `java.io` `InputStream`,
 `ByteArrayInputStream`, `OutputStream` and `PrintStream`. A few Java SE
