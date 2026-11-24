@@ -12,5 +12,6 @@ mod conformance_support;
 #[path = "../support/mod.rs"]
 mod support;
 
+mod events;
 mod resources;
 mod suites;
