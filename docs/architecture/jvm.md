@@ -473,8 +473,13 @@ while clock.elapsed() < due {
     // instant_at gives the host deadline the run time reaches `due` at
     // if no pause comes first; a pause wakes the wait with Wake::Paused,
     // and yield_now, a safepoint, parks until the resume.
-    if ctx.wait_until(clock.instant_at(due))? == Wake::Paused {
-        ctx.yield_now()?;
+    match ctx.wait_until(clock.instant_at(due))? {
+        Wake::Paused => ctx.yield_now()?,
+        // The flag stays set, so a wait would return at once and the
+        // loop would spin with the lock held: stop waiting, or call
+        // take_interrupt() and go on, as Timer's thread does.
+        Wake::Interrupted => break,
+        Wake::Notified | Wake::TimedOut => {}
     }
 }
 ```
