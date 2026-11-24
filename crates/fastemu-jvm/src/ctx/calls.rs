@@ -26,6 +26,13 @@ impl Ctx<'_> {
     }
 
     fn invoke_unrooted(&mut self, method: &Arc<Method>, args: &[Value]) -> JResult<Value> {
+        // A native that loops around calls into Java passes here on each
+        // turn, so this is its safepoint. Without it, a loop over methods
+        // that hold no backward branch never sees the stop flag and keeps
+        // the VM lock for ever.
+        if self.shared.is_stopping() {
+            return Err(Throw::Stop);
+        }
         let top = self.thread.top();
         let slots = args
             .iter()
