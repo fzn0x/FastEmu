@@ -42,11 +42,33 @@ impl Default for KeyBindings {
         for (key, digit) in Key::ALL[..10].iter().zip('0'..='9') {
             bind(*key, &[digit.to_string().as_str()]);
         }
-        Self { keys }
+        let mut bindings = Self { keys };
+        if cfg!(target_os = "android") {
+            bindings.bind_android_keys();
+        }
+        bindings
     }
 }
 
 impl KeyBindings {
+    /// Adds the keys Android names its own way: a D-pad's centre and a
+    /// gamepad's A button fire, the soft and menu keys, and the call keys
+    /// of phones with a keypad.
+    fn bind_android_keys(&mut self) {
+        for (key, host) in [
+            (Key::Fire, "dpadcenter"),
+            (Key::Fire, "buttona"),
+            (Key::SoftLeft, "softleft"),
+            (Key::SoftLeft, "menu"),
+            (Key::SoftRight, "softright"),
+            (Key::Clear, "clear"),
+            (Key::Send, "call"),
+            (Key::End, "endcall"),
+        ] {
+            self.bind(key, host);
+        }
+    }
+
     /// The host keys bound to `key`, in the order they were added.
     pub fn hosts(&self, key: Key) -> &[String] {
         self.keys.get(&key).map_or(&[], Vec::as_slice)
@@ -259,6 +281,16 @@ mod tests {
         assert_eq!(b.key_for("/"), Some(Key::Pound));
         assert_eq!(b.key_for("backspace"), Some(Key::Clear));
         assert_eq!(b.key_for("q"), None);
+    }
+
+    #[test]
+    fn android_names_press_their_phone_keys() {
+        let mut b = KeyBindings::default();
+        b.bind_android_keys();
+        assert_eq!(b.key_for("dpadcenter"), Some(Key::Fire));
+        assert_eq!(b.key_for("menu"), Some(Key::SoftLeft));
+        assert_eq!(b.key_for("endcall"), Some(Key::End));
+        assert_eq!(b.key_for("enter"), Some(Key::Fire), "the rest stay");
     }
 
     #[test]
