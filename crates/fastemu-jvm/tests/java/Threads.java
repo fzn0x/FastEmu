@@ -26,6 +26,21 @@ public class Threads {
         }
     }
 
+    static class SlowInit {
+        static int runs;
+        static int value;
+
+        static {
+            runs++;
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                value = -1;
+            }
+            value = 42;
+        }
+    }
+
     static int shared;
     static int staticShared;
     static final Object LOCK = new Object();
@@ -178,6 +193,23 @@ public class Threads {
             ring[i].join();
         }
         System.out.println("ring " + order[0] + " " + order[1] + " " + order[2]);
+        final int[] seen = new int[3];
+        Thread[] readers = new Thread[3];
+        for (int i = 0; i < readers.length; i++) {
+            final int me = i;
+            readers[i] = new Thread() {
+                public void run() {
+                    seen[me] = SlowInit.value;
+                }
+            };
+        }
+        for (int i = 0; i < readers.length; i++) {
+            readers[i].start();
+        }
+        for (int i = 0; i < readers.length; i++) {
+            readers[i].join();
+        }
+        System.out.println("init once " + SlowInit.runs + " seen " + seen[0] + " " + seen[1] + " " + seen[2]);
         Thread late = new Thread() {
             public void run() {
                 try {
