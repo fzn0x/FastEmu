@@ -1,0 +1,455 @@
+name: Release
+
+# A tag vX.Y.Z on the merged release commit builds FastEmu for every system
+# it ships for and publishes the release: the version's section of
+# CHANGELOG.md, the downloads of .github/release-notes.md, every file and
+# SHA256SUMS. The release is published (never a draft) and marked latest.
+#
+# Run by hand, it builds an existing tag again (the tag input), or the
+# branch it runs on when no tag is given. With dry_run, the default, it
+# builds every file and the notes and keeps them as the run's artifacts,
+# publishing nothing; ## [Unreleased] stands in for the version's section.
+# Run the dry run on main before tagging a release: it needs no secrets.
+#
+# The Android app is signed with the release key from the repository's
+# secrets FASTEMU_ANDROID_KEYSTORE (a base64 PKCS12 keystore whose key's
+# alias is fastemu) and FASTEMU_ANDROID_KEYSTORE_PASSWORD. A dry run
+# without them signs with a debug key and its notes say so; a release
+# without them fails, as no later APK could ever install over that one.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: An existing tag to build again, such as v0.2.0. Empty builds the branch the run is on.
+        required: false
+        default: ""
+      dry_run:
+        description: Build every file and the notes as the run's artifacts, and publish nothing.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # What every job checks out: the pushed tag, the tag to build again, or
+  # the branch of a dry run.
+  REF: ${{ inputs.tag || github.ref }}
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+
+jobs:
+  check:
+    name: Check the version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      unreleased: ${{ steps.version.outputs.unreleased }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REF }}
+      - name: The tag is the workspace's version, and CHANGELOG.md has its section
+        id: version
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="$(awk '
+            /^\[/ { section = $0 }
+            section == "[workspace.package]" && /^version *=/ {
+              sub(/^version *= *"/, ""); sub(/".*$/, ""); print; exit
+            }
+          ' Cargo.toml)"
+          if [ -z "$version" ]; then
+            echo "::error::Cargo.toml has no version in [workspace.package]"
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            tag="$GITHUB_REF_NAME"
+          elif [ -n "$TAG_INPUT" ]; then
+            tag="$TAG_INPUT"
+          elif [ "$DRY_RUN" = true ]; then
+            # No tag yet: the one this commit would get.
+            tag=""
+          else
+            echo "::error::A release needs a tag: give the tag to build again, or run a dry run."
+            exit 1
+          fi
+          if [ -n "$tag" ] && [ "$tag" != "v$version" ]; then
+            echo "::error::The tag $tag is not v$version, the version in Cargo.toml's [workspace.package]."
+            exit 1
+          fi
+          unreleased=false
+          if [ -z "$tag" ]; then
+            # A dry run of a branch: ## [Unreleased] stands in for the
+            # section the release commit will add.
+            tag="v$version"
+            unreleased=true
+            grep -q '^## \[Unreleased\]$' CHANGELOG.md || {
+              echo "::error::CHANGELOG.md has no ## [Unreleased] section."
+              exit 1
+            }
+          else
+            pattern="^## \[${version//./\\.}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            grep -Eq "$pattern" CHANGELOG.md || {
+              echo "::error::CHANGELOG.md has no \"## [$version] - YYYY-MM-DD\" section: run cargo xtask changelog --release $version in the release commit."
+              exit 1
+            }
+          fi
+          echo "FastEmu $version, tag $tag, dry run: $DRY_RUN, notes from Unreleased: $unreleased"
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "unreleased=$unreleased"
+          } >> "$GITHUB_OUTPUT"
+      - name: Rust toolchain
+        run: bash packaging/retry.sh rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch the crates
+        run: bash packaging/retry.sh cargo fetch --locked
+      - name: The changelog's fragments are valid
+        run: cargo xtask changelog --check
+
+  windows:
+    name: Windows x64
+    needs: check
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REF }}
+      - name: Rust toolchain
+        shell: bash
+        run: bash packaging/retry.sh rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch the crates
+        shell: bash
+        run: bash packaging/retry.sh cargo fetch --locked
+      # crates/fastemu/build.rs embeds the icon and the version information.
+      - name: Build
+        run: cargo build --release -p fastemu --locked
+      - name: It runs
+        shell: bash
+        run: |
+          out="$(target/release/fastemu.exe --version)"
+          echo "$out"
+          test "$out" = "fastemu $VERSION"
+      - name: Package
+        shell: pwsh
+        run: ./packaging/windows/package.ps1 -Version $env:VERSION -Exe target/release/fastemu.exe -OutDir "$env:RUNNER_TEMP/release"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows-x64
+          path: ${{ runner.temp }}/release/fastemu-*.zip
+          if-no-files-found: error
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04's older glibc, so the program runs on older systems too.
+          # The .deb is built here.
+          - { arch: x64, os: ubuntu-22.04, deb: "--deb" }
+          - { arch: arm64, os: ubuntu-24.04-arm, deb: "" }
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REF }}
+      - uses: ./.github/actions/linux-deps
+        with:
+          gui: "true"
+      - name: Rust toolchain
+        run: bash packaging/retry.sh rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch the crates
+        run: bash packaging/retry.sh cargo fetch --locked
+      - name: Build
+        run: cargo build --release -p fastemu --locked
+      - name: It runs
+        run: |
+          out="$(target/release/fastemu --version)"
+          echo "$out"
+          test "$out" = "fastemu $VERSION"
+      - name: Package
+        run: bash packaging/linux/package.sh "$VERSION" ${{ matrix.arch }} target/release/fastemu "$RUNNER_TEMP/release" ${{ matrix.deb }}
+      # apt resolves every dependency the package names, or fails.
+      - name: The .deb installs
+        if: matrix.deb != ''
+        run: |
+          bash packaging/retry.sh sudo apt-get install -y --no-install-recommends "$RUNNER_TEMP/release/fastemu-$VERSION-linux-x64.deb"
+          test "$(/usr/bin/fastemu --version)" = "fastemu $VERSION"
+          test -f /usr/share/applications/dev.functionx.fastemu.desktop
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/release/fastemu-*
+          if-no-files-found: error
+
+  macos:
+    name: macOS universal
+    needs: check
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      # The oldest macOS the app runs on, as Info.plist says.
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REF }}
+      # GPUI compiles its Metal shaders with Xcode's Metal toolchain, which
+      # newer Xcode versions download separately. Older ones fail here and
+      # have it built in, so a failure is not retried.
+      - name: Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain || true
+      - name: Rust toolchain
+        run: |
+          bash packaging/retry.sh rustup toolchain install
+          bash packaging/retry.sh rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch the crates
+        run: bash packaging/retry.sh cargo fetch --locked
+      - name: Build for Apple silicon and Intel
+        run: |
+          cargo build --release -p fastemu --locked --target aarch64-apple-darwin
+          cargo build --release -p fastemu --locked --target x86_64-apple-darwin
+      - name: It runs
+        run: |
+          out="$(target/aarch64-apple-darwin/release/fastemu --version)"
+          echo "$out"
+          test "$out" = "fastemu $VERSION"
+      - name: Package
+        run: |
+          bash packaging/macos/package.sh "$VERSION" \
+            target/aarch64-apple-darwin/release/fastemu \
+            target/x86_64-apple-darwin/release/fastemu \
+            "$RUNNER_TEMP/release"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-macos-universal
+          path: ${{ runner.temp }}/release/fastemu-*.zip
+          if-no-files-found: error
+
+  # The Rust library for both ABIs with cargo-ndk, then the APK around it
+  # with Gradle, as docs/building-android.md does it.
+  android:
+    name: Android
+    needs: check
+    runs-on: ubuntu-latest
+    outputs:
+      signing: ${{ steps.key.outputs.signing }}
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REF }}
+      - name: The release key
+        id: key
+        env:
+          FASTEMU_ANDROID_KEYSTORE: ${{ secrets.FASTEMU_ANDROID_KEYSTORE }}
+          FASTEMU_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.FASTEMU_ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "$FASTEMU_ANDROID_KEYSTORE" ]; then
+            if [ -z "$FASTEMU_ANDROID_KEYSTORE_PASSWORD" ]; then
+              echo "::error::FASTEMU_ANDROID_KEYSTORE is set but FASTEMU_ANDROID_KEYSTORE_PASSWORD is not."
+              exit 1
+            fi
+            keystore="$RUNNER_TEMP/fastemu-release.p12"
+            printf '%s' "$FASTEMU_ANDROID_KEYSTORE" | base64 -d > "$keystore"
+            echo "FASTEMU_ANDROID_KEYSTORE_FILE=$keystore" >> "$GITHUB_ENV"
+            echo "signing=release" >> "$GITHUB_OUTPUT"
+          elif [ "$DRY_RUN" = true ]; then
+            echo "::warning::The release key is not in the repository's secrets: this dry run's APK is signed with a debug key, and its notes say so."
+            echo "signing=debug" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::FASTEMU_ANDROID_KEYSTORE and FASTEMU_ANDROID_KEYSTORE_PASSWORD are not in the repository's secrets. An APK signed with any other key could never be updated in place by a later release: add the release key, then run the release again."
+            exit 1
+          fi
+      - uses: ./.github/actions/linux-deps
+        with:
+          gui: "true"
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      # The runner's preinstalled SDK and NDK are used where there are,
+      # and this action adds the command-line tools and licenses.
+      - uses: android-actions/setup-android@v4
+      - name: Rust toolchain
+        run: |
+          bash packaging/retry.sh rustup toolchain install
+          bash packaging/retry.sh rustup target add aarch64-linux-android x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo-ndk
+        run: command -v cargo-ndk || bash packaging/retry.sh cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Fetch the crates
+        run: bash packaging/retry.sh cargo fetch --locked
+      - name: Build the native library
+        run: |
+          cargo ndk -t arm64-v8a -t x86_64 -P 31 \
+            -o android/app/src/main/jniLibs \
+            build --release -p fastemu-android --locked
+      # Gradle downloads itself and its plugins, which may fail and be tried
+      # again; the library is already built, so the APK build is quick.
+      - name: Build the release APK
+        working-directory: android
+        env:
+          FASTEMU_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.FASTEMU_ANDROID_KEYSTORE_PASSWORD }}
+        run: bash ../packaging/retry.sh ./gradlew --no-daemon --console=plain -Pfastemu.skipCargo assembleRelease
+      - name: Remove the key
+        if: always()
+        run: |
+          if [ -n "${FASTEMU_ANDROID_KEYSTORE_FILE:-}" ]; then
+            rm -f "$FASTEMU_ANDROID_KEYSTORE_FILE"
+          fi
+      - name: Check its signature, version and libraries, and name it
+        env:
+          SIGNING: ${{ steps.key.outputs.signing }}
+        run: |
+          set -euo pipefail
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          tools="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          "$tools/apksigner" verify --print-certs "$apk" | tee "$RUNNER_TEMP/certs.txt"
+          if [ "$SIGNING" = release ] && grep -q "CN=Android Debug" "$RUNNER_TEMP/certs.txt"; then
+            echo "::error::The APK is signed with the debug key, not the release key."
+            exit 1
+          fi
+          "$tools/aapt2" dump badging "$apk" | grep -E "^package: " | tee "$RUNNER_TEMP/badging.txt"
+          grep -q "versionName='$VERSION'" "$RUNNER_TEMP/badging.txt" || {
+            echo "::error::The APK's version is not $VERSION."
+            exit 1
+          }
+          for abi in arm64-v8a x86_64; do
+            unzip -l "$apk" "lib/$abi/libfastemu_android.so" > /dev/null || {
+              echo "::error::The APK has no library for $abi."
+              exit 1
+            }
+          done
+          mkdir -p "$RUNNER_TEMP/release"
+          cp "$apk" "$RUNNER_TEMP/release/fastemu-$VERSION-android.apk"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-android
+          path: ${{ runner.temp }}/release/fastemu-*.apk
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [check, windows, linux, macos, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      TAG: ${{ needs.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REF }}
+          fetch-depth: 0 # the earlier tags, for the Full Changelog link
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+      - name: Every file, and SHA256SUMS
+        working-directory: release
+        run: |
+          set -euo pipefail
+          expected=(
+            "fastemu-$VERSION-windows-x64.zip"
+            "fastemu-$VERSION-linux-x64.tar.gz"
+            "fastemu-$VERSION-linux-x64.deb"
+            "fastemu-$VERSION-linux-arm64.tar.gz"
+            "fastemu-$VERSION-macos-universal.zip"
+            "fastemu-$VERSION-android.apk"
+          )
+          for file in "${expected[@]}"; do
+            test -s "$file" || { echo "::error::$file is missing."; exit 1; }
+          done
+          if [ "$(ls | wc -l)" -ne "${#expected[@]}" ]; then
+            echo "::error::The builds made files the release does not list:"
+            ls
+            exit 1
+          fi
+          sha256sum -- "${expected[@]}" > SHA256SUMS
+          cat SHA256SUMS
+          ls -l
+      - name: Rust toolchain
+        run: bash packaging/retry.sh rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch the crates
+        run: bash packaging/retry.sh cargo fetch --locked
+      - name: Release notes
+        env:
+          UNRELEASED: ${{ needs.check.outputs.unreleased }}
+          SIGNING: ${{ needs.android.outputs.signing }}
+        run: |
+          set -euo pipefail
+          args=(--version "$VERSION" --tag "$TAG" --repo "$GITHUB_REPOSITORY" --out "$RUNNER_TEMP/notes.md")
+          if [ "$UNRELEASED" = true ]; then
+            # The tag does not exist yet: the link ends at this commit.
+            previous="$(git describe --tags --abbrev=0 --match 'v*' HEAD 2>/dev/null || true)"
+            args+=(--unreleased --head "$(git rev-parse HEAD)")
+          else
+            previous="$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)"
+          fi
+          args+=(--previous-tag "$previous")
+          if [ "$SIGNING" != release ]; then
+            args+=(--debug-apk)
+          fi
+          cargo xtask release-notes "${args[@]}"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ] || ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            echo "::error::The release notes are empty."
+            exit 1
+          fi
+          # Every file has its download link.
+          for file in release/fastemu-*; do
+            grep -qF "$(basename "$file")" "$RUNNER_TEMP/notes.md" || {
+              echo "::error::The notes do not name $(basename "$file"): update .github/release-notes.md."
+              exit 1
+            }
+          done
+          cat "$RUNNER_TEMP/notes.md"
+          cp "$RUNNER_TEMP/notes.md" release-notes.md
+      - name: Keep the notes and checksums of the dry run
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: notes
+          path: |
+            release-notes.md
+            release/SHA256SUMS
+          if-no-files-found: error
+      - name: Publish the release
+        if: env.DRY_RUN != 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.TAG }}
+          name: FastEmu ${{ env.TAG }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          make_latest: "true"
+          fail_on_unmatched_files: true
+          files: release/*
