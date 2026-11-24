@@ -256,14 +256,19 @@ impl Player {
         })
     }
 
-    /// Sends a MIDI channel message to a MIDI player's synthesizer, as
-    /// `MIDIControl.shortMidiEvent`: a status byte from 0x80 to 0xEF and
-    /// two data bytes up to 127.
+    /// Sends a short MIDI message to a MIDI player's synthesizer, as
+    /// `MIDIControl.shortMidiEvent`: a status byte from 0x80 to 0xFF
+    /// except the system exclusive bytes 0xF0 and 0xF7, and two data
+    /// bytes up to 127. Channel messages reach the synthesizer; system
+    /// common and real-time messages are accepted and change nothing.
+    /// The player must be prefetched or started.
     pub fn midi_short_event(&self, status: i32, data1: i32, data2: i32) -> Result<(), AudioError> {
         if self.format != Format::Midi {
             return Err(AudioError::InvalidState("not a MIDI player".into()));
         }
-        if !(0x80..=0xEF).contains(&status)
+        if !(0x80..=0xFF).contains(&status)
+            || status == 0xF0
+            || status == 0xF7
             || !(0..=127).contains(&data1)
             || !(0..=127).contains(&data2)
         {
@@ -272,9 +277,17 @@ impl Player {
             )));
         }
         self.with(|mixer, _| {
-            self.voice(mixer)
-                .source
-                .midi_message(status as u8, data1 as u8, data2 as u8);
+            let voice = self.voice(mixer);
+            if voice.state == PlayerState::Realized {
+                return Err(AudioError::InvalidState(
+                    "MIDI messages need a prefetched player".into(),
+                ));
+            }
+            if status < 0xF0 {
+                voice
+                    .source
+                    .midi_message(status as u8, data1 as u8, data2 as u8);
+            }
             Ok(())
         })
     }

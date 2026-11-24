@@ -4,7 +4,7 @@
 mod common;
 
 use common::{engine, kinds, midi, render, soundfont};
-use fastemu_audio::{Engine, Format, Group, Player, PlayerEventKind, SoundFont};
+use fastemu_audio::{AudioError, Engine, Format, Group, Player, PlayerEventKind, SoundFont};
 
 const RATE: u32 = 16_000;
 
@@ -147,13 +147,24 @@ fn midi_control_messages_reach_the_synthesizer() {
         &[0x00, 0xC0, 73, 0x00, 0x90, 69, 100, 0x83, 0x00, 0x80, 69, 0],
     );
     let player = group.create_player(&data, None).unwrap();
+    // JSR-135 wants the player prefetched first.
+    assert!(matches!(
+        player.midi_short_event(0xB0, 7, 20),
+        Err(AudioError::InvalidState(_))
+    ));
     player.start().unwrap();
     let loud = common::peak(&render(&engine, 4000)[2000..]);
     // Channel volume down through MIDIControl.
     player.midi_short_event(0xB0, 7, 20).unwrap();
     let quiet = common::peak(&render(&engine, 4000)[2000..]);
     assert!(quiet < loud * 0.1, "{quiet} {loud}");
+    // Any status from 0x80 to 0xFF but the two system exclusive bytes;
+    // system messages change nothing here.
     assert!(player.midi_short_event(0xF0, 0, 0).is_err());
+    assert!(player.midi_short_event(0xF7, 0, 0).is_err());
+    assert!(player.midi_short_event(0x7F, 0, 0).is_err());
+    player.midi_short_event(0xF8, 0, 0).unwrap();
+    player.midi_short_event(0xFF, 0, 0).unwrap();
     assert!(player.midi_short_event(0x90, 128, 0).is_err());
 }
 
