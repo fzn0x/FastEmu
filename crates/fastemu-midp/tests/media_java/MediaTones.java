@@ -88,6 +88,11 @@ public class MediaTones extends MediaUtil {
         } catch (IllegalArgumentException e) {
             threw("duration 0", e);
         }
+        // A 10 ms tone lasts long enough to hear.
+        Pump.advance(300);
+        Manager.playTone(69, 10, 100);
+        Pump.advance(30);
+        say("short tone still heard at 30 ms", Pump.peak(10) > 0);
         System.out.println("done");
     }
 }

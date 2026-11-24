@@ -18,6 +18,11 @@ const MEDIA_EXCEPTION: &str = super::api::MEDIA_EXCEPTION;
 /// and bare resource paths all read it).
 const PROTOCOLS: &[&str] = &["device", "file", "resource"];
 
+/// The shortest tone `playTone` plays, in milliseconds. Karma Studios
+/// games beep for 10 ms, which is hardly heard; freej2me-plus lengthens
+/// tones to 50 ms for them (`docs/compat/notes/07-sound.md`).
+const MIN_TONE_MS: i32 = 50;
+
 /// The format to play `bytes` as: the one the bytes show, since games
 /// often pass the wrong type, or else the one the declared type names.
 /// `None` when FastEmu plays neither.
@@ -164,6 +169,7 @@ fn play_tone(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     if let Some(group) = events::group(ctx) {
         // Only a closed group (the instance ending) refuses, and then
         // silence is right.
+        let duration = duration.max(MIN_TONE_MS);
         let _ = group.play_tone(note, duration, volume.clamp(0, 100));
     }
     Ok(Value::Void)

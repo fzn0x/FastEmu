@@ -131,8 +131,9 @@ sequences for `device`, and nothing for other protocols.
 those that give the type asked about.
 
 `Manager.playTone` checks the note (0 to 127) and the duration (above
-0), clamps the volume and plays through `Group::play_tone`; without a
-group it does nothing. It never blocks.
+0), clamps the volume, lengthens tones shorter than 50 ms to 50 ms (as
+freej2me-plus does for games that beep for 10 ms) and plays through
+`Group::play_tone`; without a group it does nothing. It never blocks.
 
 `Manager.createPlayer(DataSource)` connects and starts the game's
 source, reads its first stream through the game's `read` method and

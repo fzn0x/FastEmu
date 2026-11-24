@@ -177,6 +177,7 @@ fn tone_sequences_and_play_tone() {
         note 128: java.lang.IllegalArgumentException
         note -1: java.lang.IllegalArgumentException
         duration 0: java.lang.IllegalArgumentException
+        short tone still heard at 30 ms: true
         ",
     );
 }
