@@ -19,6 +19,13 @@ pub fn save_png(frame: &Frame, path: &Path) -> Result<(), String> {
     writer.finish().map_err(|e| e.to_string())
 }
 
+/// Whether `name` is one of the files a [`Recorder`] saves.
+fn is_frame_name(name: &str) -> bool {
+    name.strip_prefix("frame-")
+        .and_then(|rest| rest.strip_suffix(".png"))
+        .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Saves every Nth presented frame into a folder as `frame-000001.png`,
 /// `frame-000002.png` and so on, numbered in the order they were saved so
 /// video tools can read them as a sequence.
@@ -33,8 +40,20 @@ pub struct Recorder {
 
 impl Recorder {
     /// Records into `dir`, which is made if missing; `every` is at least 1.
+    /// A folder that already holds recorded frames is refused: a shorter
+    /// run would leave the older run's later frames at the end of the
+    /// sequence.
     pub fn new(dir: PathBuf, every: u64) -> Result<Self, String> {
-        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let failed = |e: std::io::Error| format!("{}: {e}", dir.display());
+        std::fs::create_dir_all(&dir).map_err(failed)?;
+        for entry in std::fs::read_dir(&dir).map_err(failed)? {
+            if is_frame_name(&entry.map_err(failed)?.file_name().to_string_lossy()) {
+                return Err(format!(
+                    "{} already holds recorded frames; record into an empty folder",
+                    dir.display()
+                ));
+            }
+        }
         let every = every.max(1);
         Ok(Self {
             dir,
@@ -114,5 +133,23 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(recorder.saved(), 4);
+    }
+
+    #[test]
+    fn a_folder_with_frames_of_an_earlier_run_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut first = Recorder::new(dir.path().to_path_buf(), 1).unwrap();
+        for serial in 1..=3 {
+            first
+                .offer(&Frame::filled(1, 1, 0xFF00_0000, serial))
+                .unwrap();
+        }
+        let err = Recorder::new(dir.path().to_path_buf(), 1).unwrap_err();
+        assert!(err.contains("already holds recorded frames"), "{err}");
+
+        let other = tempfile::tempdir().unwrap();
+        std::fs::write(other.path().join("notes.txt"), "kept").unwrap();
+        std::fs::write(other.path().join("frame-cover.png"), "kept").unwrap();
+        assert!(Recorder::new(other.path().to_path_buf(), 1).is_ok());
     }
 }

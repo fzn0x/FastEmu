@@ -71,7 +71,7 @@ shows nothing. The options:
 | `--frames N` | Stops after N frames of the screen, 60 a second, counted from the game's first picture (default 300) |
 | `--seconds S` | Stops after S seconds instead |
 | `--screenshot PATH` | Saves the last picture as a PNG |
-| `--record DIR` | Saves the pictures the game draws in DIR as `frame-000001.png`, `frame-000002.png` and on |
+| `--record DIR` | Saves the pictures the game draws in DIR as `frame-000001.png`, `frame-000002.png` and on; a DIR that holds frames of an earlier run is refused |
 | `--every N` | With `--record`, saves every Nth picture the game draws (default 1) |
 | `--keys SCRIPT` | Presses keys and touches the screen while the game runs |
 | `--encoding NAME` | The game's text encoding (default `ISO-8859-1`) |

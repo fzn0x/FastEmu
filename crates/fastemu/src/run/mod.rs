@@ -41,7 +41,8 @@ Options:
                     the game's first picture (default 300)
   --seconds S       Stop after S seconds instead
   --screenshot PATH Save the last frame as a PNG
-  --record DIR      Save presented frames in DIR as frame-000001.png and on
+  --record DIR      Save presented frames in DIR as frame-000001.png and on;
+                    DIR must hold no frames of an earlier run
   --every N         With --record, save every Nth presented frame (default 1)
   --keys SCRIPT     Press keys while the game runs (see below)
   --encoding NAME   The game's text encoding (default ISO-8859-1)
