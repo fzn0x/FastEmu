@@ -1035,7 +1035,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                                 || ctx.shared.is_paused()
                             {
                                 sync!();
-                                tri!(ctx.safepoint());
+                                tri!(ctx.safepoint_after_native());
                             }
                         }
                         Err(f) => break Err(f),

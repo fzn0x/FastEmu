@@ -116,6 +116,31 @@ impl<'vm> Ctx<'vm> {
         Ok(())
     }
 
+    /// The safepoint after a native method returned. It does what
+    /// [`Ctx::safepoint`] does, and also throws `OutOfMemoryError` when a
+    /// collection it had to run leaves more live data than the heap
+    /// holds.
+    ///
+    /// A native cannot collect while it runs, since it may hold
+    /// references the collector does not see, so what natives allocate
+    /// (or grow, with [`Ctx::recount`]) is counted at once and judged
+    /// here, after the collection has freed the garbage. Only the thread
+    /// that ran the native is told: the check follows its own call, with
+    /// the lock held since the native allocated, and a thread whose
+    /// native allocated nothing asks for no collection and gets no error.
+    pub(crate) fn safepoint_after_native(&mut self) -> JResult<()> {
+        let mut over_limit = false;
+        if self.state.heap.gc_requested() && !self.shared.is_stopping() {
+            self.collect();
+            over_limit = self.state.heap.used() > self.state.heap.limit();
+        }
+        self.safepoint()?;
+        if over_limit {
+            return Err(self.out_of_memory());
+        }
+        Ok(())
+    }
+
     /// Runs `f` with the VM lock released, for slow work that does not
     /// touch the virtual machine (file and network I/O, decoding). Other
     /// Java threads run meanwhile and may collect: keep only rooted
