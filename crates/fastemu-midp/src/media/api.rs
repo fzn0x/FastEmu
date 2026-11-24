@@ -200,6 +200,7 @@ fn controls() -> Vec<NativeClass> {
             "VideoControl",
             gui,
             &[
+                ("initDisplayMode", "(ILjava/lang/Object;)Ljava/lang/Object;"),
                 ("setDisplayLocation", "(II)V"),
                 ("getDisplayX", "()I"),
                 ("getDisplayY", "()I"),
