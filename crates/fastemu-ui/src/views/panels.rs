@@ -365,7 +365,7 @@ impl FastEmuView {
 
     /// Applies `change` to a game's settings, saves the library, and sets
     /// the new volume on its running copies at once.
-    fn update_game_settings(
+    pub(super) fn update_game_settings(
         &mut self,
         id: EntryId,
         cx: &mut Context<'_, Self>,

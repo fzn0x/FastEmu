@@ -556,3 +556,65 @@ fn opened_files_are_added_and_started(cx: &mut TestAppContext) {
     assert_eq!(h.launcher.count(), 2, "each open starts a copy");
     assert_eq!(h.read(|v| v.library.entries().len()), 1, "and adds it once");
 }
+
+#[gpui::test]
+fn every_layout_and_dialog_renders(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar", "tetris.jar"]);
+    for _ in 0..3 {
+        h.launch_first();
+    }
+    for i in 0..3 {
+        h.launcher.instance(i).show(1);
+    }
+    let entry = h.read(|v| v.library.entries()[1].id);
+    type Step = Box<dyn Fn(&mut FastEmuView, &mut Context<'_, FastEmuView>)>;
+    let steps: Vec<Step> = vec![
+        Box::new(FastEmuView::toggle_layout),
+        Box::new(|v, cx| v.update_settings(cx, |s| s.keypad = false)),
+        Box::new(FastEmuView::toggle_log),
+        Box::new(|v, cx| v.open_dialog(Dialog::Settings(SettingsTab::General), cx)),
+        Box::new(|v, cx| v.open_dialog(Dialog::Settings(SettingsTab::Keys), cx)),
+        Box::new(move |v, cx| v.open_dialog(Dialog::Game(entry), cx)),
+        Box::new(|v, cx| {
+            v.close_dialog(cx);
+            v.toggle_layout(cx);
+            v.sidebar_open = false;
+            v.confirm_remove = Some(v.library.entries()[0].id);
+        }),
+    ];
+    for step in steps {
+        h.view.update(h.cx, |v, cx| step(v, cx));
+        h.redraw();
+    }
+    let drawn = h.read(|v| {
+        v.tiles
+            .iter()
+            .filter(|t| t.screen.borrow().drawn().is_some())
+            .count()
+    });
+    assert_eq!(drawn, 3, "every tile drew its screen");
+}
+
+#[gpui::test]
+fn game_settings_apply_to_the_next_start(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    let id = h.read(|v| v.library.entries()[0].id);
+    h.view.update(h.cx, |v, cx| {
+        v.update_game_settings(id, cx, |s| {
+            s.profile = Some("nokia-s40-128x160".into());
+            s.network = true;
+            "windows-1251".clone_into(&mut s.encoding);
+            s.step_volume(-0.5);
+        });
+    });
+    h.launch_first();
+    let request = h.launcher.request(0);
+    assert_eq!(request.profile.screen_width, 128);
+    assert_eq!(request.settings.encoding, "windows-1251");
+    assert_eq!(request.settings.network, fastemu_core::NetworkPolicy::Allow);
+    assert!((request.settings.volume - 0.5).abs() < 1e-6);
+    let saved = Store::new(h.dir.path().join("config")).load_library().value;
+    assert_eq!(saved.entries()[0].settings.encoding, "windows-1251");
+}
