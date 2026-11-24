@@ -309,3 +309,43 @@ fn get_property(ctx: &mut Ctx<'_>, key: Value, default: Value) -> JResult<Value>
         None => Ok(default),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::value::Value;
+    use crate::{MemorySource, Vm, VmConfig};
+
+    /// Rule 13 of `docs/compat/emulator-notes.md`: host properties read as
+    /// `null`, so a game never sees the machine it runs on.
+    #[test]
+    fn host_properties_are_null() {
+        let source = std::sync::Arc::new(MemorySource::new());
+        let vm = Vm::new(VmConfig::default(), source, Vec::new());
+        let values = vm.attach("test", |ctx| {
+            let keys = [
+                "os.name",
+                "os.arch",
+                "java.version",
+                "java.vendor",
+                "user.home",
+                "user.dir",
+                "user.name",
+                "file.separator",
+                "line.separator",
+                "java.class.path",
+                "microedition.configuration",
+            ];
+            keys.map(|key| {
+                let k = ctx.new_string(key).unwrap();
+                let desc = "(Ljava/lang/String;)Ljava/lang/String;";
+                let v = ctx
+                    .call_static("java/lang/System", "getProperty", desc, &[Value::from(k)])
+                    .unwrap();
+                ctx.opt_string(v).unwrap()
+            })
+        });
+        let (host, cldc) = values.split_at(values.len() - 1);
+        assert!(host.iter().all(Option::is_none), "{host:?}");
+        assert_eq!(cldc, [Some("CLDC-1.1".to_owned())]);
+    }
+}

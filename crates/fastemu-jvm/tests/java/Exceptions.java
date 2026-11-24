@@ -166,5 +166,12 @@ public class Exceptions {
             log.append("relocked");
         }
         System.out.println(log);
+        System.out.println(new ArrayIndexOutOfBoundsException(-3).getMessage());
+        System.out.println(new StringIndexOutOfBoundsException(9).getMessage());
+        java.io.InterruptedIOException timeout = new java.io.InterruptedIOException("t");
+        timeout.bytesTransferred = 12;
+        System.out.println(timeout.getMessage() + " " + timeout.bytesTransferred);
+        Error vm = new OutOfMemoryError("full");
+        System.out.println((vm instanceof VirtualMachineError) + " " + vm.getMessage());
     }
 }

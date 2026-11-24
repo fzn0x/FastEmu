@@ -479,8 +479,37 @@ const HIERARCHY: &[(&str, &str)] = &[
     ("java/io/UTFDataFormatException", "java/io/IOException"),
 ];
 
+/// A constructor taking an index, which says it in the message as Java's
+/// `ArrayIndexOutOfBoundsException(int)` does: `"<what> out of range: 5"`.
+fn index_constructor(class: NativeClass, sup: &str, what: &'static str) -> NativeClass {
+    let sup = sup.to_owned();
+    class.method("<init>", "(I)V", move |ctx, a| {
+        let message = ctx.new_string(&format!("{what} out of range: {}", a[1].int()))?;
+        let args = [message.into()];
+        ctx.call_special(&sup, this(a), "<init>", "(Ljava/lang/String;)V", &args)?;
+        Ok(Value::Void)
+    })
+}
+
+/// The members a few throwables have beyond the usual constructors.
+fn refine(name: &str, sup: &str, class: NativeClass) -> NativeClass {
+    match name {
+        "java/lang/ArrayIndexOutOfBoundsException" => index_constructor(class, sup, "Array index"),
+        "java/lang/StringIndexOutOfBoundsException" => {
+            index_constructor(class, sup, "String index")
+        }
+        "java/lang/VirtualMachineError" => class.abstract_class(),
+        "java/io/InterruptedIOException" => class.field("bytesTransferred", "I"),
+        _ => class,
+    }
+}
+
 pub(crate) fn classes() -> Vec<NativeClass> {
     let mut all = vec![throwable()];
-    all.extend(HIERARCHY.iter().map(|&(name, sup)| subclass(name, sup)));
+    all.extend(
+        HIERARCHY
+            .iter()
+            .map(|&(name, sup)| refine(name, sup, subclass(name, sup))),
+    );
     all
 }
