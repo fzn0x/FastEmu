@@ -228,11 +228,13 @@ The interpreter's allocation instructions are safepoints: they collect
 first when the heap is full and throw `OutOfMemoryError` if it still has
 no room. Natives allocate without that check (an allocation that alone
 exceeds the heap throws `OutOfMemoryError`), and the collection follows
-when they return. `Ctx::set_payload` counts the change in the object's
-size the same way, so a native that fills in an object after making it
-(an image's pixels, a string's characters) brings the next collection
-closer; a payload that grows in place is measured again at the next
-collection. `System.gc()` and `Ctx::gc()` collect at once.
+when they return. A string counts its characters, however it is made
+(`Ctx::new_string`, a constructor, `StringBuffer.toString`).
+`Ctx::set_payload` counts the change in the object's size the same way,
+so a native that fills in an object after making it (an image's pixels)
+brings the next collection closer; a payload that grows in place is
+measured again at the next collection. `System.gc()` and `Ctx::gc()`
+collect at once.
 
 ## Rules for native code
 

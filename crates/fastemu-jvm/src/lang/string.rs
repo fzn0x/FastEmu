@@ -33,13 +33,16 @@ pub(crate) fn hash(chars: &[u16]) -> i32 {
         .fold(0i32, |h, &c| h.wrapping_mul(31).wrapping_add(i32::from(c)))
 }
 
-/// A new string object.
+/// A new string object, its characters counted toward the heap.
 pub(crate) fn new_string(state: &mut VmState, chars: Vec<u16>) -> ObjRef {
     let obj = state.alloc_instance(state.wk.string);
-    state.heap.get_mut(obj).payload = Some(Box::new(JString {
-        chars: chars.into(),
-        hash: 0,
-    }));
+    state.heap.set_payload(
+        obj,
+        Box::new(JString {
+            chars: chars.into(),
+            hash: 0,
+        }),
+    );
     obj
 }
 

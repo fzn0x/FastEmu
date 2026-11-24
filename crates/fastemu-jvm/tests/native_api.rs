@@ -366,6 +366,29 @@ fn a_payload_set_after_allocation_counts_toward_a_collection() {
 }
 
 #[test]
+fn a_new_string_counts_its_characters_toward_a_collection() {
+    let vm = vm_with(VmConfig {
+        heap_bytes: 1024 * 1024,
+        ..VmConfig::default()
+    });
+    // A hundred strings of 32,768 characters, 64 KB each, of garbage, as
+    // StringBuffer.toString and substring make them.
+    vm.attach("main", |ctx| {
+        for _ in 0..100 {
+            ctx.local_frame(|ctx| {
+                ctx.new_string_utf16(vec![u16::from(b'x'); 32 * 1024])
+                    .map(drop)
+            })
+            .expect("a string");
+            ctx.yield_now().expect("a safepoint");
+        }
+    });
+    let stats = vm.heap_stats();
+    assert!(stats.collections >= 5, "{stats:?}");
+    assert!(stats.used_bytes <= stats.limit_bytes, "{stats:?}");
+}
+
+#[test]
 fn recursion_through_natives_ends_in_stack_overflow_error() {
     let vm = vm();
     let results: Arc<Mutex<Vec<String>>> = Arc::default();
