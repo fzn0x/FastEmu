@@ -21,7 +21,8 @@ No. FastEmu has its own virtual machine for Java ME.
 
 ## Which systems does it run on?
 
-Windows, Linux, macOS and Android.
+Windows on x64, Linux on x64 and arm64, macOS 11 or later on Apple
+silicon and Intel, and Android 12 or later with a Vulkan driver.
 
 ## Why many games at once?
 
@@ -35,6 +36,17 @@ Check the game's log first. Then try another device profile with the
 screen size the game was made for. See
 [Compatibility](/docs/compatibility/).
 
+## A game does not react to clicks or taps on its screen.
+
+Its phone has no touch screen. Turn on **Touch screen** in the game's
+settings, or pick the touch profile, then restart the game. See
+[Settings](/docs/settings/).
+
+## Does it run 3D games?
+
+Not yet. Games that need Mobile 3D Graphics (JSR-184) do not run, or
+draw nothing. See [Compatibility](/docs/compatibility/).
+
 ## Text shows as wrong characters.
 
 Change the encoding in the game's settings. See
@@ -42,9 +54,12 @@ Change the encoding in the game's settings. See
 
 ## Where are my saves?
 
-Each game has its own record stores in FastEmu's data folder, next to
-its settings. Copy the folder to back it up or move it to another
-computer.
+Each running copy of a game has its own record stores, in a `games`
+folder of FastEmu's data folder.
+[Settings](/docs/settings/#where-fastemu-keeps-its-files) says where that
+is on each system. Each game's folder is named after its number in the
+library, so back up or move the `games` folder together with
+`library.json`.
 
 ## Can a game use the internet?
 

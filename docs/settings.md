@@ -102,6 +102,10 @@ connection then fails the way it would on a phone with no signal. Turn
 **Allow network access** on for a game that needs it. Only allow games
 you trust, since a game with network access can send data out.
 
+Text messages are never sent, with or without network access. A game
+that sends an SMS, often a paid one, is told the send failed, and the
+attempt shows in its log.
+
 This setting does not cover a web page the game asks to open. That
 page opens in your browser, and only when you choose **Open**. Read the
 whole address first: a game can put data in it.
