@@ -11,6 +11,8 @@ mod keypad;
 mod library;
 mod panels;
 mod screen;
+#[cfg(test)]
+mod tests;
 mod tiles;
 mod widgets;
 
