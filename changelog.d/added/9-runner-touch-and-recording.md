@@ -4,3 +4,5 @@
   profile a touch screen (#9).
 - `fastemu run --data DIR` keeps the game's saves in DIR, so a later run
   continues from them (#9).
+- `fastemu run --record DIR --every N` saves every Nth frame the game
+  draws as a numbered PNG, for videos and pictures of real play (#9).

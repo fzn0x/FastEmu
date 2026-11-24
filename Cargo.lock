@@ -2016,6 +2016,7 @@ dependencies = [
  "gpui",
  "gpui_platform",
  "png 0.18.1",
+ "tempfile",
 ]
 
 [[package]]

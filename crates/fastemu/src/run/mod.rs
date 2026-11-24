@@ -6,6 +6,7 @@
 //! asked, and exits with 1 when the game crashed or stopped presenting
 //! frames. No GPUI code runs on this path.
 
+mod record;
 mod script;
 
 use std::ffi::OsString;
@@ -14,11 +15,12 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use fastemu_core::{
-    DeviceProfile, Frame, Instance, InstanceSettings, InstanceStatus, LaunchRequest, Launcher,
-    LogLevel, builtin_profiles, default_profile,
+    DeviceProfile, Instance, InstanceSettings, InstanceStatus, LaunchRequest, Launcher, LogLevel,
+    builtin_profiles, default_profile,
 };
 use fastemu_midp::MidpLauncher;
 
+use self::record::{Recorder, save_png};
 use self::script::{Script, Step};
 
 pub const USAGE: &str = "\
@@ -33,6 +35,8 @@ Options:
   --frames N        Stop after N frames (default 300)
   --seconds S       Stop after S seconds instead
   --screenshot PATH Save the last frame as a PNG
+  --record DIR      Save presented frames in DIR as frame-000001.png and on
+  --every N         With --record, save every Nth presented frame (default 1)
   --keys SCRIPT     Press keys while the game runs (see below)
   --encoding NAME   The game's text encoding (default ISO-8859-1)
   --data DIR        Keep the game's record stores in DIR (default: a
@@ -75,6 +79,8 @@ pub struct Options {
     pub profile: DeviceProfile,
     pub limit: Limit,
     pub screenshot: Option<PathBuf>,
+    /// Where `--record` saves frames, and every how many presented frames.
+    pub record: Option<(PathBuf, u64)>,
     pub keys: Vec<Step>,
     pub encoding: Option<String>,
     /// Where the game keeps its record stores; `None` for a temporary
@@ -100,6 +106,8 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, String
     let mut frames = None;
     let mut seconds = None;
     let mut screenshot = None;
+    let mut record = None;
+    let mut every = None;
     let mut keys = Vec::new();
     let mut encoding = None;
     let mut data = None;
@@ -144,6 +152,16 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, String
             Some("--screenshot") => {
                 screenshot = Some(PathBuf::from(value(&mut args, "--screenshot")?));
             }
+            Some("--record") => record = Some(PathBuf::from(value(&mut args, "--record")?)),
+            Some("--every") => {
+                let n = value(&mut args, "--every")?;
+                every = Some(
+                    n.parse::<u64>()
+                        .ok()
+                        .filter(|&n| n > 0)
+                        .ok_or_else(|| format!("--every takes a number from 1, not {n}"))?,
+                );
+            }
             Some("--keys") => {
                 let script = value(&mut args, "--keys")?;
                 let text = if Path::new(&script).is_file() {
@@ -166,6 +184,11 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, String
     if touch {
         profile.touch = true;
     }
+    let record = match (record, every) {
+        (Some(dir), every) => Some((dir, every.unwrap_or(1))),
+        (None, Some(_)) => return Err("--every goes with --record".to_owned()),
+        (None, None) => None,
+    };
     let limit = match (frames, seconds) {
         (Some(_), Some(_)) => return Err("give --frames or --seconds, not both".to_owned()),
         (_, Some(s)) => Limit::Seconds(s),
@@ -177,24 +200,11 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, String
         profile,
         limit,
         screenshot,
+        record,
         keys,
         encoding,
         data,
     })
-}
-
-/// Writes `frame` as a PNG.
-fn save_png(frame: &Frame, path: &Path) -> Result<(), String> {
-    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    let mut encoder =
-        png::Encoder::new(std::io::BufWriter::new(file), frame.width(), frame.height());
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
-    writer
-        .write_image_data(&frame.to_rgba8())
-        .map_err(|e| e.to_string())?;
-    writer.finish().map_err(|e| e.to_string())
 }
 
 /// Prints the game's new log lines: what it printed to `System.out` on
@@ -239,6 +249,16 @@ pub fn run(options: &Options, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
         let _ = writeln!(err, "fastemu: {}: {e}", data_dir.display());
         return 1;
     }
+    let mut recorder = match &options.record {
+        Some((dir, every)) => match Recorder::new(dir.clone(), *every) {
+            Ok(recorder) => Some(recorder),
+            Err(e) => {
+                let _ = writeln!(err, "fastemu: could not record: {e}");
+                return 1;
+            }
+        },
+        None => None,
+    };
     let mut settings = InstanceSettings::default();
     if let Some(encoding) = &options.encoding {
         settings.encoding.clone_from(encoding);
@@ -256,7 +276,7 @@ pub fn run(options: &Options, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
             return 1;
         }
     };
-    let code = drive(options, &*instance, out, err);
+    let code = drive(options, &*instance, recorder.as_mut(), out, err);
     let errors = instance.error_count();
     let frames = instance.frame().map_or(0, |f| f.serial());
     let last = instance.frame();
@@ -270,6 +290,14 @@ pub fn run(options: &Options, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
         let _ = std::fs::remove_dir_all(&data_dir);
     }
     let _ = writeln!(out, "ran {frames} frames, {errors} errors");
+    if let Some(recorder) = &recorder {
+        let _ = writeln!(
+            out,
+            "recorded {} frames in {}",
+            recorder.saved(),
+            recorder.dir().display()
+        );
+    }
     let mut code = code;
     if let Some(path) = &options.screenshot {
         match last {
@@ -297,11 +325,12 @@ pub fn run(options: &Options, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     code
 }
 
-/// Runs the game until its limit, a crash, its exit or a stall, and
-/// returns the exit code so far.
+/// Runs the game until its limit, a crash, its exit or a stall, saving
+/// frames into `recorder` as they come, and returns the exit code so far.
 fn drive(
     options: &Options,
     instance: &dyn Instance,
+    mut recorder: Option<&mut Recorder>,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> u8 {
@@ -329,6 +358,12 @@ fn drive(
         {
             serial = frame.serial();
             changed = now;
+            if let Some(recorder) = recorder.as_deref_mut()
+                && let Err(e) = recorder.offer(&frame)
+            {
+                let _ = writeln!(err, "fastemu: could not record: {e}");
+                return 1;
+            }
         }
         if serial > 0 {
             script.advance(instance, now);
@@ -406,11 +441,20 @@ mod tests {
             "--data",
             "saves",
             "--touch",
+            "--record",
+            "frames",
+            "--every",
+            "4",
         ])
         .unwrap();
         assert_eq!(options.midlet, 1);
         assert_eq!(options.profile.screen_width, 128);
         assert!(options.profile.touch, "--touch counts after --profile too");
+        assert_eq!(options.record, Some((PathBuf::from("frames"), 4)));
+        assert_eq!(
+            parse_strs(&["a.jar", "--record", "all"]).unwrap().record,
+            Some((PathBuf::from("all"), 1))
+        );
         assert_eq!(options.limit, Limit::Seconds(1.5));
         assert_eq!(options.screenshot, Some(PathBuf::from("out.png")));
         assert_eq!(options.encoding.as_deref(), Some("UTF-8"));
@@ -430,6 +474,8 @@ mod tests {
         );
         assert!(parse_strs(&["a.jar", "--frames"]).is_err());
         assert!(parse_strs(&["a.jar", "--fast"]).is_err());
+        assert!(parse_strs(&["a.jar", "--every", "2"]).is_err());
+        assert!(parse_strs(&["a.jar", "--record", "out", "--every", "0"]).is_err());
     }
 
     /// A JAR of stored entries, enough for the runner to open.

@@ -27,6 +27,9 @@ gpui_platform = { git = "https://github.com/Dylanmurzello/zed-android-port", rev
 # The headless runner's screenshots.
 png = "0.18"
 
+[dev-dependencies]
+tempfile = "3"
+
 [lints]
 workspace = true
 

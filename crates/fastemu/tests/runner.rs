@@ -234,3 +234,43 @@ fn script_steps_press_keys_and_touch_the_screen() {
         keys_only.out
     );
 }
+
+#[test]
+fn record_saves_every_nth_frame() {
+    let Some(jar) = probe_jar() else {
+        return;
+    };
+    let frames = scratch("record").join("frames");
+    let run = run(
+        jar,
+        &[
+            "--frames",
+            "30",
+            "--record",
+            path_arg(&frames),
+            "--every",
+            "10",
+        ],
+    );
+    assert_eq!(run.code, Some(0), "{}{}", run.out, run.err);
+    let mut names: Vec<String> = std::fs::read_dir(&frames)
+        .expect("the frames folder")
+        .map(|e| {
+            e.expect("an entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    names.sort();
+    assert!(
+        names.len() >= 3 && names[0] == "frame-000001.png",
+        "{names:?}"
+    );
+    assert!(
+        run.out
+            .contains(&format!("recorded {} frames in", names.len())),
+        "{}",
+        run.out
+    );
+}
