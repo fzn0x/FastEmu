@@ -20,13 +20,15 @@ MIDlet-1: Keys, , t.GameKeys\r\n\
 MIDlet-2: Open, , t.GameKeysOpen\r\n\
 MIDlet-3: Flush, , t.GameFlush\r\n\
 MIDlet-4: Layers, , t.GameLayers\r\n\
-MIDlet-5: Scene, , t.GameScene\r\n";
+MIDlet-5: Scene, , t.GameScene\r\n\
+MIDlet-6: Bars, , t.GameBars\r\n";
 
 const KEYS: usize = 0;
 const OPEN: usize = 1;
 const FLUSH: usize = 2;
 const LAYERS: usize = 3;
 const SCENE: usize = 4;
+const BARS: usize = 5;
 
 const RED: u32 = 0xFF_0000;
 const GREEN: u32 = 0x00_FF00;
@@ -280,6 +282,26 @@ fn game_layers_follow_the_spec() {
     }
     assert_eq!(printed.len(), expected.len(), "{}", lines.join("\n"));
     assert_eq!(run.instance.error_count(), 0);
+}
+
+#[test]
+fn game_flushes_stop_at_the_soft_key_bar() {
+    let Some(jar) = suite("bars") else { return };
+    let mut run = Running::launch(&jar, BARS);
+    let line = run.wait_log("bars height ");
+    let height: u32 = line["bars height ".len()..]
+        .split(' ')
+        .next()
+        .and_then(|h| h.parse().ok())
+        .expect("a height");
+    assert!(height < 320, "the bar takes some height: {line}");
+    assert!(line.ends_with(" buffer 240x320"), "{line}");
+    let frame = run.wait_frame(|f| rgb(f, 10, 10) == RED);
+    assert_eq!(rgb(&frame, 239, height - 1), RED, "the canvas's last row");
+    for y in height..320 {
+        assert_ne!(rgb(&frame, 120, y), RED, "row {y} is the soft key bar");
+    }
+    assert_eq!(run.instance.error_count(), 0, "{}", run.dump());
 }
 
 #[test]
