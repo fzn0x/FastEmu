@@ -381,6 +381,22 @@ Calls return `Err(Throw::Exception(e))` when Java throws; the exception is
 rooted, so the native can inspect it (`ctx.describe_exception(e)`,
 `ctx.stack_trace(e)`), return it to rethrow, or drop it to swallow it.
 
+When the Java original of a native calls another overridable method of
+its own class (`Stack.pop` calls `size`, `peek` and `removeElementAt`),
+the native makes the same call, so a game's override sees it, but keeps
+its Rust code for the objects whose class does not override it.
+`ctx.is_overridden(obj, class, name, desc)` says whether a virtual call
+on `obj` would run anything other than what `class` has for that method
+(it answers `true` when it cannot tell); `ctx.call_if_overridden(obj,
+class, name, desc, args)` makes that call and returns `Some(result)` if
+so, `None` for the native to go on in Rust:
+
+```rust
+if ctx.call_if_overridden(ht, "java/util/Hashtable", "rehash", "()V", &[])?.is_none() {
+    rehash(ctx, ht)?; // nothing overrides it: the library's own code
+}
+```
+
 ### Fields, arrays and strings
 
 - `ctx.field_id(class, name, desc)` resolves an instance field once

@@ -185,6 +185,31 @@ fn natives_call_overrides_of_game_subclasses() {
     assert_eq!(results, Ok((4201, 4202, 2)));
 }
 
+/// A native whose Java original calls its own overridable methods asks
+/// whether the object's class overrides them.
+#[test]
+fn natives_tell_which_methods_a_subclass_overrides() {
+    let vm = vm();
+    let results = vm.attach("test", |ctx| -> JResult<_> {
+        let game = ctx.construct("Game", "()V", &[])?;
+        let widget = "demo/Widget";
+        let value = ctx.is_overridden(game, widget, "value", "()I");
+        let click = ctx.is_overridden(game, widget, "click", "()I");
+        let unknown = ctx.is_overridden(game, "demo/NotLoaded", "click", "()I");
+        let called = ctx.call_if_overridden(game, widget, "value", "()I", &[])?;
+        let skipped = ctx.call_if_overridden(game, widget, "click", "()I", &[])?;
+        // An object of the class itself overrides nothing.
+        let object = ctx.construct("java/lang/Object", "()V", &[])?;
+        let own = ctx.is_overridden(object, "java/lang/Object", "hashCode", "()I");
+        let clicks = ctx.payload::<Clicks>(game)?.count;
+        Ok((value, click, unknown, called, skipped, own, clicks))
+    });
+    assert_eq!(
+        results,
+        Ok((true, false, true, Some(Value::Int(42)), None, false, 0))
+    );
+}
+
 #[test]
 fn abstract_natives_refuse_instantiation() {
     let vm = vm();

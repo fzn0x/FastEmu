@@ -190,6 +190,55 @@ impl Ctx<'_> {
         self.invoke(&method, &Self::with_this(obj, args))
     }
 
+    /// Whether a virtual call of `name` with `desc` on `obj` would run
+    /// code other than what class `class` (an internal name) has for it:
+    /// the override of a subclass, a game's most often.
+    ///
+    /// A native method whose Java original calls another overridable
+    /// method of its class (`Stack.pop` calls `removeElementAt`) asks this
+    /// first: through [`Ctx::call_virtual`] when it is overridden, so the
+    /// game's code sees the call as on Java, and in Rust when it is not.
+    /// Answers `true` when it cannot tell, such as for a class not loaded,
+    /// so the caller takes the call that is always right.
+    pub fn is_overridden(&self, obj: ObjRef, class: &str, name: &str, desc: &str) -> bool {
+        let classes = &self.state.classes;
+        let own = self.class_of(obj);
+        let Some(base) = classes.lookup(class) else {
+            return true;
+        };
+        if own == base {
+            return false;
+        }
+        let Some(selector) = classes.find_selector(name, desc) else {
+            return true;
+        };
+        match (
+            classes.get(own).virtual_method(selector),
+            classes.get(base).virtual_method(selector),
+        ) {
+            (Some(called), Some(own_method)) => !Arc::ptr_eq(called, own_method),
+            _ => true,
+        }
+    }
+
+    /// Calls `name` with `desc` on `obj` through virtual dispatch if a
+    /// subclass overrides what class `class` has for it (see
+    /// [`Ctx::is_overridden`]), and returns its result; `None` if nothing
+    /// overrides it, for the caller to run the class's own code.
+    pub fn call_if_overridden(
+        &mut self,
+        obj: ObjRef,
+        class: &str,
+        name: &str,
+        desc: &str,
+        args: &[Value],
+    ) -> JResult<Option<Value>> {
+        if !self.is_overridden(obj, class, name, desc) {
+            return Ok(None);
+        }
+        self.call_virtual(obj, name, desc, args).map(Some)
+    }
+
     /// Calls interface method `name` with descriptor `desc` on `obj`, as
     /// `invokeinterface` does (a `Runnable`'s `run`, a listener's
     /// callback). Interface methods dispatch like virtual ones here, so
