@@ -219,7 +219,7 @@ pub(crate) fn attach<R>(shared: &VmShared, name: &str, f: impl FnOnce(&mut Ctx<'
     let tid = register(shared, &mut guard, object, name.to_owned());
     let mut ctx = Ctx::enter(shared, guard, tid);
     // An attached thread runs on a host stack of unknown size.
-    ctx.thread.max_native_depth = ctx.thread.max_native_depth.min(32);
+    ctx.thread.max_native_depth = ctx.thread.max_native_depth.min(16);
     let outcome = catch_unwind(AssertUnwindSafe(|| f(&mut ctx)));
     ctx.finish();
     match outcome {

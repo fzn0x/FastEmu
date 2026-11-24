@@ -28,6 +28,18 @@ public class Recursion {
         return ackermann(m - 1, ackermann(m, n - 1));
     }
 
+    static class Nest {
+        final int depth;
+
+        Nest(int depth) {
+            this.depth = depth;
+        }
+
+        public String toString() {
+            return depth == 0 ? "x" : "(" + new Nest(depth - 1) + ")";
+        }
+    }
+
     static void forever() {
         depth++;
         forever();
@@ -46,6 +58,8 @@ public class Recursion {
         System.out.println(fib(24));
         System.out.println(ackermann(2, 300));
         System.out.println(hanoi(4, 'A', 'C', 'B'));
+        String nested = new Nest(150).toString();
+        System.out.println(nested.length() + " " + nested.substring(0, 5) + " " + nested.substring(148, 153));
         try {
             forever();
         } catch (StackOverflowError e) {

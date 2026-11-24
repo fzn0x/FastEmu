@@ -116,14 +116,40 @@ fn npes() -> Vec<u8> {
     c.build()
 }
 
+/// `demo/Recur.down(n)` calls back into `Bounce.up(n)`, which calls
+/// `down(n - 1)`: recursion that alternates between Rust and Java.
+fn recur() -> NativeClass {
+    NativeClass::new("demo/Recur").static_method("down", "(I)I", |ctx, a| {
+        ctx.call_static("Bounce", "up", "(I)I", &[a[0]])
+    })
+}
+
+/// `class Bounce { static int up(int n) { return n == 0 ? 0 : demo.Recur.down(n - 1) + 1; } }`
+fn bounce() -> Vec<u8> {
+    let mut c = ClassBuilder::new("Bounce", "java/lang/Object", 49, 0);
+    let down = c.method_ref("demo/Recur", "down", "(I)I");
+    let [h, l] = idx(down);
+    #[rustfmt::skip]
+    let code = [
+        0x1a, 0x9a, 0x00, 0x05,       // iload_0 ifne 5
+        0x03, 0xac,                   // iconst_0 ireturn
+        0x1a, 0x04, 0x64,             // 6: iload_0 iconst_1 isub
+        0xb8, h, l,                   // invokestatic down
+        0x04, 0x60, 0xac,             // iconst_1 iadd ireturn
+    ];
+    c.method(STATIC, "up", "(I)I", 2, 1, &code, &[]);
+    c.build()
+}
+
 fn vm_with(config: VmConfig) -> Vm {
     let source = support::source(&[
         ("Game", game()),
         ("Spin", spin()),
         ("Missing", missing()),
         ("Npes", npes()),
+        ("Bounce", bounce()),
     ]);
-    Vm::new(config, Arc::new(source), vec![widget()])
+    Vm::new(config, Arc::new(source), vec![widget(), recur()])
 }
 
 fn vm() -> Vm {
@@ -266,6 +292,30 @@ fn exceptions_the_interpreter_raises_are_not_kept_alive() {
     assert!(
         used < 512 * 1024,
         "{used} bytes still in use after the loop"
+    );
+}
+
+#[test]
+fn recursion_through_natives_ends_in_stack_overflow_error() {
+    let vm = vm();
+    let results: Arc<Mutex<Vec<String>>> = Arc::default();
+    let out = Arc::clone(&results);
+    vm.spawn("deep", move |ctx| {
+        for n in [200, 100_000] {
+            let text = match ctx.call_static("Bounce", "up", "(I)I", &[Value::Int(n)]) {
+                Ok(v) => v.int().to_string(),
+                Err(Throw::Exception(e)) => ctx.describe_exception(e),
+                Err(Throw::Stop) => "stopped".to_owned(),
+            };
+            out.lock().unwrap().push(text);
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert!(vm.wait_finished(Some(Duration::from_secs(10))));
+    assert_eq!(
+        *results.lock().unwrap(),
+        ["200", "java.lang.StackOverflowError"]
     );
 }
 
