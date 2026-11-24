@@ -60,7 +60,9 @@ pub(crate) struct ClassTable {
     source: Arc<dyn ClassSource>,
     /// Classes being loaded on this path, to catch circular superclasses.
     loading: Vec<Arc<str>>,
-    selectors: HashMap<Box<str>, Selector>,
+    /// Selectors by method name, then descriptor.
+    selectors: HashMap<Arc<str>, HashMap<Arc<str>, Selector>>,
+    selector_count: u32,
     /// Static field storage of every class.
     pub(crate) statics: Vec<Value>,
     /// Initialization state, by class.
@@ -78,6 +80,7 @@ impl ClassTable {
             source,
             loading: Vec::new(),
             selectors: HashMap::new(),
+            selector_count: 0,
             statics: Vec::new(),
             init: Vec::new(),
             mirrors: Vec::new(),
@@ -100,16 +103,21 @@ impl ClassTable {
 
     /// The interned selector of `name` and `desc`.
     pub(crate) fn selector(&mut self, name: &str, desc: &str) -> Selector {
-        let key = format!("{name}{desc}");
-        let next = Selector(self.selectors.len() as u32);
-        *self.selectors.entry(key.into_boxed_str()).or_insert(next)
+        if let Some(sel) = self.find_selector(name, desc) {
+            return sel;
+        }
+        let sel = Selector(self.selector_count);
+        self.selector_count += 1;
+        self.selectors
+            .entry(name.into())
+            .or_default()
+            .insert(desc.into(), sel);
+        sel
     }
 
     /// The selector of `name` and `desc` if any method has it.
     pub(crate) fn find_selector(&self, name: &str, desc: &str) -> Option<Selector> {
-        self.selectors
-            .get(format!("{name}{desc}").as_str())
-            .copied()
+        self.selectors.get(name)?.get(desc).copied()
     }
 
     /// Loads, links and returns the class named `name` (an internal name
