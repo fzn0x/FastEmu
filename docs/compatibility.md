@@ -58,9 +58,9 @@ most of the games that stop here stop on one of them.
 | [Retro Snake, Block Fall, Brick Buster, Pixel Jumper, Traffic Dash, Tower Guard, Star Defender, Dungeon Quest, Rock Blaster, Ladder Loot](https://github.com/agneay/j2me-100-games) (J2ME 100 Games) | MIT | Plays | Nothing in this run |
 | [Tetris](https://github.com/MarkLagodych/j2me-tetris) by Mark Lagodych | WTFPL | Plays | Nothing in this run |
 | [3D Moto 2](https://github.com/mrlordkaj/j2me-3dmoto) by Thinh Pham | GPL-3.0-or-later | Stays on its "Fetching Data.." screen | `DateField`, in its loading thread; it also asks for `GameCanvas`, and it needs Mobile 3D Graphics (JSR-184) to play |
-| [JTube](https://github.com/shinovon/JTube) by Arman Jussupgaliyev | MIT | Shows its splash screen, then stops drawing | `GameCanvas`, in its interface thread |
+| [JTube](https://github.com/shinovon/JTube) by Arman Jussupgaliyev | MIT | Shows its splash screen, then stops drawing | `GameCanvas`, in its interface thread; its menu and settings also use `Form` and `List` |
 | [Stick Fight](https://github.com/Dahmalahi/STICK-FIGHT-OFFICIEL-REPO) by Dash Animation V2 | MIT | Stops at start | `GameCanvas` |
-| [Lines](https://github.com/mrlordkaj/j2me-lines) by Thinh Pham | GPL-3.0-or-later | Stops at start | `GameCanvas`; it is played with a touch screen |
+| [Lines](https://github.com/mrlordkaj/j2me-lines) by Thinh Pham | GPL-3.0-or-later | Stops at start | `GameCanvas`; its menu is a `Form`, and it is played with a touch screen |
 | [Pixelus](https://github.com/mrlordkaj/j2me-pixelus) by Thinh Pham | GPL-3.0-or-later | Stops at start | `GameCanvas`; it is played with a touch screen |
 | [mobapp-game](https://github.com/vipaoL/mobapp-game) by vipaoL | GPL-3.0-only | Stops at start | `GameCanvas` |
 | [Shooter](https://github.com/RehanSaeed/Shooter) by Muhammad Rehan Saeed | MIT | Stops at start | `List`; it also uses `GameCanvas` and the layers |
