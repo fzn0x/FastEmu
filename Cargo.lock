@@ -1744,9 +1744,11 @@ dependencies = [
  "dirs 7.0.0",
  "embed-resource",
  "fastemu-core",
+ "fastemu-midp",
  "fastemu-ui",
  "gpui",
  "gpui_platform",
+ "png 0.18.1",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 //! The command line: `fastemu [FILE...]` opens the window, `--version` and
-//! `--help` print and exit. Subcommands go first; `run` is reserved for the
-//! headless runner.
+//! `--help` print and exit. Subcommands go first; `run` starts the
+//! headless runner, which parses its own arguments.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -8,14 +8,14 @@ use std::path::PathBuf;
 
 pub const USAGE: &str = "\
 Usage: fastemu [FILE...]
-       fastemu run [ARGS...]
+       fastemu run SUITE [OPTIONS]
        fastemu --version | --help
 
 Opens the FastEmu window. Each .jar or .jad FILE is added to the library
 and started.
 
 Commands:
-  run         Run a game without a window (not available in this build)
+  run         Run a game without a window (fastemu run --help)
 
 Options:
   -V, --version   Print the version and exit

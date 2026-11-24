@@ -1,9 +1,11 @@
 //! The FastEmu desktop app: parses the command line, picks the launcher
 //! and the folders, and opens the window. Everything inside the window
-//! lives in `fastemu-ui`, which the Android app shares.
+//! lives in `fastemu-ui`, which the Android app shares. `fastemu run`
+//! runs a game without a window (see `run`).
 
 mod cli;
 mod paths;
+mod run;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -40,10 +42,7 @@ fn main() -> ExitCode {
             print!("{}", cli::USAGE);
             ExitCode::SUCCESS
         }
-        Ok(Command::Run { .. }) => {
-            eprintln!("fastemu: the headless runner is not part of this build yet");
-            ExitCode::from(2)
-        }
+        Ok(Command::Run { args }) => run::main(args),
         Err(err) => {
             eprintln!("fastemu: {err}\n\n{}", cli::USAGE);
             ExitCode::from(2)
