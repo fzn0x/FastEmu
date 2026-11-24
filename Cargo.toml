@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "tools/xtask"]
 # Plain `cargo build`, `test` and `clippy` cover the emulator itself, which
 # builds in seconds. The GPUI apps (fastemu-ui, fastemu, fastemu-android)
 # pull in a large dependency tree: build them with `-p fastemu` or

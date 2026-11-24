@@ -1,0 +1,4 @@
+[alias]
+# Repository tasks, such as `cargo xtask changelog --check`. The code is in
+# tools/xtask.
+xtask = "run --quiet --package xtask --"
