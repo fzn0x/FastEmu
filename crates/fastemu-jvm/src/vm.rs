@@ -222,6 +222,25 @@ pub struct Vm {
     pub(crate) shared: Arc<VmShared>,
 }
 
+/// A handle that does not keep its virtual machine alive, for state the
+/// machine itself owns (an extension, a native's closure) that needs to
+/// reach it: a [`Vm`] there would be a cycle and leak the machine.
+#[derive(Clone)]
+pub struct WeakVm(Weak<VmShared>);
+
+impl WeakVm {
+    /// The machine, if anything still holds it.
+    pub fn upgrade(&self) -> Option<Vm> {
+        self.0.upgrade().map(|shared| Vm { shared })
+    }
+}
+
+impl fmt::Debug for WeakVm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("WeakVm")
+    }
+}
+
 impl fmt::Debug for Vm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Vm").field("id", &self.shared.id).finish()
@@ -313,6 +332,11 @@ impl Vm {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         });
         Vm { shared }
+    }
+
+    /// A handle that does not keep the machine alive.
+    pub fn downgrade(&self) -> WeakVm {
+        WeakVm(Arc::downgrade(&self.shared))
     }
 
     /// Runs `f` on the calling OS thread as a Java thread named `name`,

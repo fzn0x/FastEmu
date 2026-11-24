@@ -320,6 +320,31 @@ fn recursion_through_natives_ends_in_stack_overflow_error() {
 }
 
 #[test]
+fn a_stopped_vm_frees_everything() {
+    let vm = vm();
+    let weak = vm.downgrade();
+    vm.spawn("worker", |ctx| {
+        let game = ctx.construct("Game", "()V", &[])?;
+        ctx.call_virtual(game, "click", "()I", &[])?;
+        ctx.call_static("Bounce", "up", "(I)I", &[Value::Int(20)])?;
+        let global = ctx.new_global(game);
+        ctx.set_extension(global);
+        ctx.call_static("Spin", "spin", "()V", &[])?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(eventually(|| vm.thread_count() == 1));
+    vm.stop();
+    assert!(vm.wait_finished(Some(Duration::from_secs(5))));
+    drop(vm);
+    // The OS thread may still be returning after it left the table.
+    assert!(
+        eventually(|| weak.upgrade().is_none()),
+        "nothing keeps a finished VM alive"
+    );
+}
+
+#[test]
 fn global_roots_keep_objects_alive_until_dropped() {
     let vm = vm();
     let global = vm.attach("make", |ctx| {

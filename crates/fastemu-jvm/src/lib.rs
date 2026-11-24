@@ -33,4 +33,4 @@ pub use native::{NativeClass, NativeFn};
 pub use source::{ClassSource, DirSource, MemorySource};
 pub use thread::ThreadId;
 pub use value::{ObjRef, Value};
-pub use vm::{Diagnostic, DiagnosticSink, LogSink, Task, Vm, VmConfig};
+pub use vm::{Diagnostic, DiagnosticSink, LogSink, Task, Vm, VmConfig, WeakVm};
