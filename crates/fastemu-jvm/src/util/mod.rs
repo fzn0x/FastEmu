@@ -1,6 +1,6 @@
 //! The CLDC 1.1 `java.util` classes, implemented in Rust: the
-//! collections and their `Enumeration`, `Random`, and `Date`, `TimeZone`
-//! and `Calendar`.
+//! collections and their `Enumeration`, `Random`, `Date`, `TimeZone`
+//! and `Calendar`, and MIDP's `Timer` and `TimerTask`.
 
 mod calendar;
 mod date;
@@ -8,6 +8,7 @@ mod hashtable;
 mod keys;
 mod random;
 mod time;
+mod timer;
 mod timezone;
 mod vector;
 
@@ -27,5 +28,6 @@ pub(crate) fn classes() -> Vec<NativeClass> {
     all.extend(date::classes());
     all.extend(timezone::classes());
     all.extend(calendar::classes());
+    all.extend(timer::classes());
     all
 }
