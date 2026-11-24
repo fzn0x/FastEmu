@@ -1,7 +1,7 @@
 //! The class table: loading by name, array classes, member resolution and
 //! subtype checks.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::{ArrayType, Class, ClassId, ClassKind, Field, Method, Selector};
@@ -374,23 +374,43 @@ impl ClassTable {
     }
 
     /// Field resolution (JVMS 5.4.3.2): the class, its superinterfaces,
-    /// then its superclass, recursively.
+    /// then its superclass, each of them searched the same way.
+    ///
+    /// A class is searched once however many paths lead to it, so the
+    /// search takes time linear in the size of the interface graph. A
+    /// class reached a second time was searched already and without a
+    /// hit, or the search would have ended there.
     pub(crate) fn resolve_field(
         &self,
         class: ClassId,
         name: &str,
         desc: &str,
     ) -> Option<(ClassId, &Field)> {
-        let c = self.get(class);
-        if let Some(f) = c.declared_field(name, desc) {
+        if let Some(f) = self.get(class).declared_field(name, desc) {
             return Some((class, f));
         }
-        for &iface in &c.interfaces {
-            if let Some(found) = self.resolve_field(iface, name, desc) {
-                return Some(found);
+        let mut seen = HashSet::from([class]);
+        let mut todo = Vec::new();
+        self.push_supers(class, &mut todo);
+        while let Some(id) = todo.pop() {
+            if !seen.insert(id) {
+                continue;
             }
+            if let Some(f) = self.get(id).declared_field(name, desc) {
+                return Some((id, f));
+            }
+            self.push_supers(id, &mut todo);
         }
-        c.superclass.and_then(|s| self.resolve_field(s, name, desc))
+        None
+    }
+
+    /// Puts the superclass of `class`, then its interfaces last to first,
+    /// on `todo`, so that popping gives the interfaces in order and the
+    /// superclass after all of them.
+    fn push_supers(&self, class: ClassId, todo: &mut Vec<ClassId>) {
+        let c = self.get(class);
+        todo.extend(c.superclass);
+        todo.extend(c.interfaces.iter().rev());
     }
 
     /// The method `invokespecial` runs (JVMS 6.5.invokespecial): a call
@@ -524,6 +544,35 @@ mod tests {
         let mut all = vec![NativeClass::new("java/lang/Object")];
         all.extend(natives);
         ClassTable::new(Arc::new(MemorySource::new()), all)
+    }
+
+    #[test]
+    fn field_lookup_searches_interfaces_before_the_superclass() {
+        let mut t = table_of(vec![
+            NativeClass::interface("a/I").static_field("x", "I"),
+            NativeClass::interface("a/J").implements("a/I"),
+            NativeClass::interface("a/K")
+                .static_field("x", "I")
+                .static_field("k", "I"),
+            NativeClass::new("a/S")
+                .static_field("x", "I")
+                .static_field("s", "I"),
+            NativeClass::new("a/C")
+                .extends("a/S")
+                .implements("a/J")
+                .implements("a/K"),
+        ]);
+        let c = t.load("a/C").unwrap();
+        let owner = |t: &ClassTable, name: &str| {
+            let (owner, _) = t.resolve_field(c, name, "I")?;
+            Some(t.get(owner).name.to_string())
+        };
+        // `a/J` comes first and its superinterface `a/I` before `a/K`.
+        assert_eq!(owner(&t, "x").as_deref(), Some("a/I"));
+        assert_eq!(owner(&t, "k").as_deref(), Some("a/K"));
+        assert_eq!(owner(&t, "s").as_deref(), Some("a/S"));
+        assert_eq!(owner(&t, "none"), None);
+        assert_eq!(t.resolve_field(c, "x", "J").map(|_| ()), None);
     }
 
     #[test]
