@@ -346,6 +346,18 @@ fn refreshes(time: Duration) -> u64 {
     (time.as_secs_f64() * REFRESH_RATE) as u64
 }
 
+/// The frames a run that went on for `time` after the first picture
+/// reports. The runner notices a frame limit only between its polls, a
+/// refresh or more late on a busy machine, but the run stops at the
+/// limit, so it never reports more.
+fn counted(time: Duration, limit: Limit) -> u64 {
+    let frames = refreshes(time);
+    match limit {
+        Limit::Frames(n) => frames.min(n),
+        Limit::Seconds(_) => frames,
+    }
+}
+
 /// Runs the game until its limit, a crash, its exit or a start that
 /// shows nothing, saving pictures into `recorder` as they come.
 fn drive(
@@ -361,7 +373,7 @@ fn drive(
     let mut first: Option<Instant> = None;
     let ran = |code, first: Option<Instant>| Ran {
         code,
-        frames: first.map_or(0, |first| refreshes(first.elapsed())),
+        frames: first.map_or(0, |first| counted(first.elapsed(), options.limit)),
     };
     loop {
         print_log(instance, out, err);
@@ -484,6 +496,18 @@ mod tests {
         assert_eq!(options.screenshot, Some(PathBuf::from("out.png")));
         assert_eq!(options.encoding.as_deref(), Some("UTF-8"));
         assert_eq!(options.data, Some(PathBuf::from("saves")));
+    }
+
+    #[test]
+    fn a_frame_limit_noticed_late_still_reports_the_limit() {
+        let late = Duration::from_millis(2_040);
+        assert_eq!(refreshes(late), 122);
+        assert_eq!(counted(late, Limit::Frames(120)), 120);
+        assert_eq!(
+            counted(Duration::from_millis(1_000), Limit::Frames(120)),
+            60
+        );
+        assert_eq!(counted(late, Limit::Seconds(2.0)), 122);
     }
 
     #[test]
