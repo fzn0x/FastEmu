@@ -1,0 +1,12 @@
+// Compile-time stub: FastEmu implements this interface in Rust.
+package javax.microedition.media.control;
+
+import javax.microedition.media.Control;
+
+public interface StopTimeControl extends Control {
+    long RESET = Long.MAX_VALUE;
+
+    void setStopTime(long stopTime);
+
+    long getStopTime();
+}

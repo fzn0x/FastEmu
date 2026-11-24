@@ -17,6 +17,11 @@ pub(crate) const PLAYER_LISTENER: &str = "javax/microedition/media/PlayerListene
 pub(crate) const TIME_BASE: &str = "javax/microedition/media/TimeBase";
 pub(crate) const MEDIA_EXCEPTION: &str = "javax/microedition/media/MediaException";
 
+pub(crate) const VOLUME_CONTROL: &str = "javax/microedition/media/control/VolumeControl";
+pub(crate) const TONE_CONTROL: &str = "javax/microedition/media/control/ToneControl";
+pub(crate) const MIDI_CONTROL: &str = "javax/microedition/media/control/MIDIControl";
+pub(crate) const STOP_TIME_CONTROL: &str = "javax/microedition/media/control/StopTimeControl";
+
 /// The descriptor of `PlayerListener.playerUpdate`.
 pub(crate) const PLAYER_UPDATE: &str =
     "(Ljavax/microedition/media/Player;Ljava/lang/String;Ljava/lang/Object;)V";
