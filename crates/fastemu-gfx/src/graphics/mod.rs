@@ -8,6 +8,7 @@
 //! surface is passed, so a mismatch cannot write out of bounds.
 
 mod curves;
+mod images;
 mod shapes;
 
 use crate::anchor::AnchorPolicy;

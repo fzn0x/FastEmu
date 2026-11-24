@@ -261,10 +261,11 @@ impl Surface {
         if width == 0 || height == 0 {
             return Ok(());
         }
-        let rows = array_rows(out.len(), offset, scanlength, width, height)?;
+        check_array_rows(out.len(), offset, scanlength, width, height)?;
         let w = width as usize;
-        for (r, start) in rows.enumerate() {
-            let src = self.row_slice(x as usize, y as usize + r, w);
+        for r in 0..height {
+            let start = (i64::from(offset) + i64::from(r) * i64::from(scanlength)) as usize;
+            let src = self.row_slice(x as usize, (y + r) as usize, w);
             for (d, &s) in out[start..start + w].iter_mut().zip(src) {
                 *d = s as i32;
             }
@@ -302,26 +303,25 @@ impl Surface {
     }
 }
 
-/// The start index in a Java array of each of `height` rows of `width`
-/// entries, the first at `offset`, each `scanlength` after the last.
-/// Fails with `ArrayIndexOutOfBoundsException` if any entry falls outside
-/// an array of `len`. `width` and `height` must be positive.
-pub(crate) fn array_rows(
+/// Checks that `height` rows of `width` entries of a Java array of `len`,
+/// the first at `offset` and each `scanlength` after the last, all lie in
+/// the array, failing with `ArrayIndexOutOfBoundsException` otherwise.
+/// `width` and `height` must be positive.
+pub(crate) fn check_array_rows(
     len: usize,
     offset: i32,
     scanlength: i32,
     width: i32,
     height: i32,
-) -> Result<impl Iterator<Item = usize>> {
+) -> Result<()> {
     let offset = i64::from(offset);
-    let scan = i64::from(scanlength);
-    let last_row = offset + (i64::from(height) - 1) * scan;
+    let last_row = offset + (i64::from(height) - 1) * i64::from(scanlength);
     let first = offset.min(last_row);
     let last = offset.max(last_row) + i64::from(width) - 1;
     if first < 0 || last >= len as i64 {
         return Err(GfxError::ArrayIndexOutOfBounds);
     }
-    Ok((0..i64::from(height)).map(move |r| (offset + r * scan) as usize))
+    Ok(())
 }
 
 #[cfg(test)]
