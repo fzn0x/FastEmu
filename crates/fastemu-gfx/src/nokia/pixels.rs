@@ -130,18 +130,18 @@ impl Region {
     /// Fails with `ArrayIndexOutOfBoundsException` unless every pixel lies
     /// in an array of `len` elements.
     fn check(&self, format: Format, len: usize) -> Result<()> {
-        // The last pixel has the largest index. A packed format counts it
-        // in bits, which overflows i64 for the largest Java arguments, so
-        // it is worked out in 128 bits here; every position `position`
-        // computes afterwards is then below `len` bytes in bits.
+        // The last pixel has the largest index. It is worked out here in
+        // 128 bits, the same way `position` does: a packed format counts
+        // it in bits, which overflows i64 for the largest Java arguments,
+        // and `position` narrows to usize, which would wrap on 32-bit
+        // targets. Every index `position` returns afterwards is then at
+        // most this one, so below `len`.
+        let (offset, scan) = (i128::from(self.offset), i128::from(self.scan));
+        let (col, row) = (i128::from(self.width - 1), i128::from(self.height - 1));
         let last = match format {
-            Format::Packed { bits, .. } => {
-                let pixel = i128::from(self.offset)
-                    + i128::from(self.height - 1) * i128::from(self.scan)
-                    + i128::from(self.width - 1);
-                pixel * i128::from(bits) / 8
-            }
-            _ => self.position(format, self.width - 1, self.height - 1).0 as i128,
+            Format::Vertical => ((offset / scan + row) >> 3) * scan + offset % scan + col,
+            Format::Packed { bits, .. } => (offset + row * scan + col) * i128::from(bits) / 8,
+            Format::Int { .. } | Format::Short(_) => offset + row * scan + col,
         };
         if last < len as i128 {
             Ok(())
@@ -856,6 +856,37 @@ mod tests {
                 g.get_pixels_byte(&s, &mut out, None, 0, i32::MAX, 0, 0, 1, i32::MAX, format);
             assert_eq!(read, oob, "{format}");
         }
+        // The last index here is 2^32 exactly, which a 32-bit usize would
+        // wrap to zero and wave through.
+        let oob = Err(GfxError::ArrayIndexOutOfBounds);
+        let ints = g.draw_pixels_int(
+            &mut s,
+            &[0; 16],
+            false,
+            0,
+            1 << 30,
+            0,
+            0,
+            1,
+            5,
+            0,
+            TYPE_INT_888_RGB,
+        );
+        assert_eq!(ints, oob);
+        let vertical = g.draw_pixels_byte(
+            &mut s,
+            &[0; 16],
+            None,
+            0,
+            1 << 30,
+            0,
+            0,
+            1,
+            33,
+            0,
+            TYPE_BYTE_1_GRAY_VERTICAL,
+        );
+        assert_eq!(vertical, oob);
     }
 
     #[test]
