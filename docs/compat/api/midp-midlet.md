@@ -122,6 +122,6 @@ also knows) are passed through like any other.
 
 ## Cross-check
 
-Every member above comes from the spec javadoc. The script that writes this file compared it with the stub and implementation sources listed under Sources: constant values, member lists and `static` flags. What differs is listed here; a class not listed matched everywhere it appears.
+Every member above comes from the spec javadoc. The script that writes this file compared it with the stub and implementation sources listed under Sources: constant values, member lists and `static` flags. Member lists are compared only where the parsed source holds the implementation's whole class hierarchy. What differs is listed here; a class not listed matched everywhere it was compared.
 
 No differences.
