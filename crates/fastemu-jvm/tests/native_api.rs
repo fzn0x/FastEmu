@@ -93,8 +93,36 @@ fn missing() -> Vec<u8> {
     c.build()
 }
 
+/// `class Npes { static void npes(int n) { for (i = 0; i < n; i++) try {
+/// null.hashCode(); } catch (NullPointerException e) {} } }`
+fn npes() -> Vec<u8> {
+    let mut c = ClassBuilder::new("Npes", "java/lang/Object", 49, 0);
+    let hash = c.method_ref("java/lang/Object", "hashCode", "()I");
+    let npe = c.class("java/lang/NullPointerException");
+    let [h, l] = idx(hash);
+    #[rustfmt::skip]
+    let code = [
+        0x03, 0x3c,                 // iconst_0 istore_1
+        0x1b, 0x1a,                 // 2: iload_1 iload_0
+        0xa2, 0x00, 0x12,           // if_icmpge 22
+        0x01, 0xb6, h, l, 0x57,     // 7: aconst_null invokevirtual hashCode pop
+        0xa7, 0x00, 0x04,           // 12: goto 16
+        0x4d,                       // 15: astore_2 (the handler)
+        0x84, 0x01, 0x01,           // 16: iinc 1 1
+        0xa7, 0xff, 0xef,           // goto 2
+        0xb1,                       // 22: return
+    ];
+    c.method(STATIC, "npes", "(I)V", 2, 3, &code, &[(7, 12, 15, npe)]);
+    c.build()
+}
+
 fn vm_with(config: VmConfig) -> Vm {
-    let source = support::source(&[("Game", game()), ("Spin", spin()), ("Missing", missing())]);
+    let source = support::source(&[
+        ("Game", game()),
+        ("Spin", spin()),
+        ("Missing", missing()),
+        ("Npes", npes()),
+    ]);
     Vm::new(config, Arc::new(source), vec![widget()])
 }
 
@@ -224,6 +252,21 @@ fn posted_tasks_run_on_an_event_thread() {
     assert_eq!(ran, [6, 16, 26, 36, 46]);
     vm.stop();
     assert!(vm.wait_finished(Some(Duration::from_secs(2))));
+}
+
+#[test]
+fn exceptions_the_interpreter_raises_are_not_kept_alive() {
+    let vm = vm();
+    let used = vm.attach("main", |ctx| {
+        ctx.call_static("Npes", "npes", "(I)V", &[Value::Int(200_000)])
+            .expect("every exception is caught");
+        ctx.gc();
+        ctx.heap_usage().1
+    });
+    assert!(
+        used < 512 * 1024,
+        "{used} bytes still in use after the loop"
+    );
 }
 
 #[test]

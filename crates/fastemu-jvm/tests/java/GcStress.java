@@ -38,6 +38,19 @@ public class GcStress {
                 tree[k] = new byte[100 + k];
             }
         }
+        int thrown = 0;
+        for (int i = 0; i < 100000; i++) {
+            try {
+                if (i % 10 == 0) {
+                    throw new IllegalStateException("round " + i);
+                }
+                Object none = null;
+                none.hashCode();
+            } catch (RuntimeException e) {
+                thrown++;
+            }
+        }
+        System.out.println("exceptions thrown and dropped " + thrown);
         long total = 0;
         int count = 0;
         for (Node n = live; n != null; n = n.next) {

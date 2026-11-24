@@ -340,8 +340,14 @@ fn catch_class(ctx: &mut Ctx<'_>, pool: &RtPool, index: u16) -> Option<ClassId> 
 
 /// Runs the interpreter until the frame stack is back to `base` frames,
 /// returning the value the frame at index `base` returned.
+///
+/// Everything the interpreter holds lives in its frames, so references
+/// rooted as native locals while it runs (exceptions it creates, results
+/// of static initializers) are dropped again once they are on a frame or
+/// returned; the caller roots what this returns.
 pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
     let mut budget = YIELD_INTERVAL;
+    let locals_mark = ctx.thread.locals.len();
     loop {
         let fi = ctx.thread.frames.len() - 1;
         let method = Arc::clone(&ctx.thread.frames[fi].method);
@@ -1183,6 +1189,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                     let _ = ctx.monitor_exit(obj);
                 }
                 if ctx.thread.frames.len() == base {
+                    ctx.thread.locals.truncate(locals_mark);
                     return Ok(v);
                 }
                 let t = &mut *ctx.thread;
@@ -1206,7 +1213,9 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
             }
             Err(fault) => {
                 sync!();
-                match fault.into_throw(ctx) {
+                let thrown = fault.into_throw(ctx);
+                ctx.thread.locals.truncate(locals_mark);
+                match thrown {
                     Throw::Stop => {
                         ctx.thread.frames.truncate(base);
                         return Err(Throw::Stop);
