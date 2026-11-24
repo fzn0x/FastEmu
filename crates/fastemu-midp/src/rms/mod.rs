@@ -1,5 +1,13 @@
 //! `javax.microedition.rms`: record stores, saved in the instance's
 //! folder.
+//!
+//! Each store is one file under `<data_dir>/rms/`, written atomically on
+//! every change, so a game's saves survive a crash and two instances (two
+//! data folders) never share them. `docs/architecture/rms.md` describes
+//! the files, the names and what is guaranteed.
+//!
+//! The modules [`name`], [`format`] and [`disk`] are public so tools can
+//! read, back up and move saves outside a running game.
 
 mod api;
 pub mod disk;
