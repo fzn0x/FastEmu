@@ -198,7 +198,7 @@ pub(crate) fn warn_silent(ctx: &mut Ctx<'_>, what: &str, data: &[u8]) {
 /// The event thread's body.
 fn run(ctx: &mut Ctx<'_>, receiver: &Receiver<Note>) -> JResult<()> {
     loop {
-        let next = ctx.local_frame(|ctx| timers(ctx, Instant::now()))?;
+        let next = carry_on(ctx, |ctx| timers(ctx, Instant::now()))?.flatten();
         let wait = next.map_or(IDLE, |at| {
             at.saturating_duration_since(Instant::now()).min(IDLE)
         });
@@ -218,7 +218,24 @@ fn run(ctx: &mut Ctx<'_>, receiver: &Receiver<Note>) -> JResult<()> {
             .into_iter()
             .chain(receiver.try_iter().collect::<Vec<_>>())
         {
-            ctx.local_frame(|ctx| handle(ctx, note))?;
+            carry_on(ctx, |ctx| handle(ctx, note))?;
+        }
+    }
+}
+
+/// Runs one piece of the event thread's work in its own local frame. A
+/// Java exception from it (an `OutOfMemoryError` making event data) is
+/// logged and the thread goes on; only a stopping VM ends it.
+fn carry_on<R>(
+    ctx: &mut Ctx<'_>,
+    f: impl FnOnce(&mut Ctx<'_>) -> JResult<R>,
+) -> JResult<Option<R>> {
+    match ctx.local_frame(f) {
+        Ok(value) => Ok(Some(value)),
+        Err(Throw::Stop) => Err(Throw::Stop),
+        Err(Throw::Exception(exception)) => {
+            report_exception(ctx, "the media event thread", exception);
+            Ok(None)
         }
     }
 }
@@ -328,9 +345,10 @@ fn deliver(ctx: &mut Ctx<'_>, serial: u64, event: Event) -> JResult<()> {
     }
 }
 
-/// Logs an exception a listener threw; the event thread carries on.
-pub(crate) fn report_listener_exception(ctx: &mut Ctx<'_>, callback: &str, exception: ObjRef) {
-    ctx.log(LogLevel::Err, format!("Exception in {callback}:"));
+/// Logs an exception thrown in `place` (a listener); the event thread
+/// carries on.
+fn report_exception(ctx: &mut Ctx<'_>, place: &str, exception: ObjRef) {
+    ctx.log(LogLevel::Err, format!("Exception in {place}:"));
     let _ = ctx.call_virtual(exception, "printStackTrace", "()V", &[]);
 }
 
@@ -347,7 +365,7 @@ pub(crate) fn call_listener(
         Ok(_) => Ok(()),
         Err(Throw::Stop) => Err(Throw::Stop),
         Err(Throw::Exception(exception)) => {
-            report_listener_exception(ctx, callback, exception);
+            report_exception(ctx, callback, exception);
             Ok(())
         }
     }
