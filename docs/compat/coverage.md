@@ -75,19 +75,7 @@ the other kinds can break a game. The stubs that test MIDlets compile
 against (`cargo xtask stubs`) follow FastEmu, so a test MIDlet declares
 such an override public.
 
-- `javax/microedition/midlet/MIDlet.startApp()V` (tier 1): public, the inventory says protected
-- `javax/microedition/midlet/MIDlet.pauseApp()V` (tier 1): public, the inventory says protected
-- `javax/microedition/midlet/MIDlet.destroyApp(Z)V` (tier 1): public, the inventory says protected
-- `javax/microedition/lcdui/Canvas.paint(Ljavax/microedition/lcdui/Graphics;)V` (tier 1): public, the inventory says protected
-- `javax/microedition/lcdui/CustomItem.TRAVERSE_HORIZONTAL:I` (tier 3): public, the inventory says protected
-- `javax/microedition/lcdui/CustomItem.TRAVERSE_VERTICAL:I` (tier 3): public, the inventory says protected
-- `javax/microedition/lcdui/CustomItem.KEY_PRESS:I` (tier 3): public, the inventory says protected
-- `javax/microedition/lcdui/CustomItem.KEY_RELEASE:I` (tier 3): public, the inventory says protected
-- `javax/microedition/lcdui/CustomItem.KEY_REPEAT:I` (tier 3): public, the inventory says protected
-- `javax/microedition/lcdui/CustomItem.POINTER_PRESS:I` (tier 3): public, the inventory says protected
-- `javax/microedition/lcdui/CustomItem.POINTER_RELEASE:I` (tier 3): public, the inventory says protected
-- `javax/microedition/lcdui/CustomItem.POINTER_DRAG:I` (tier 3): public, the inventory says protected
-- `javax/microedition/lcdui/CustomItem.NONE:I` (tier 3): public, the inventory says protected
+None.
 
 ## By package
 
