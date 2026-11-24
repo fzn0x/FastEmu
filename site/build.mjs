@@ -169,10 +169,15 @@ function checkLinks() {
   };
   for (const file of files) {
     const html = readFileSync(join(out, file), 'utf8');
+    // Relative links (`settings.md`, `#install`) resolve against the page's
+    // own URL, as a browser would, so they are checked too. Absolute links
+    // to the site itself are checked like root-relative ones.
+    const page = new URL(file.replace(/(^|\/)index\.html$/, '$1'), `${SITE}/`);
     for (const [, href] of html.matchAll(/(?:href|src)="([^"]+)"/g)) {
-      if (!href.startsWith('/') || href.startsWith('//')) continue;
-      const [pathPart, hash] = href.split('#');
-      const clean = pathPart.split('?')[0];
+      const url = new URL(href.replaceAll('&amp;', '&'), page);
+      if (url.origin !== SITE) continue;
+      const hash = decodeURIComponent(url.hash.slice(1));
+      const clean = decodeURIComponent(url.pathname);
       const target = clean.endsWith('/') ? `${clean.slice(1)}index.html` : clean.slice(1);
       if (!existsSync(join(out, target))) {
         problems.push(`${file}: ${href} does not exist`);
