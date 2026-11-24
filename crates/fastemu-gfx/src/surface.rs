@@ -293,6 +293,13 @@ impl Surface {
         let start = y * self.width as usize + x;
         &self.pixels[start..start + len]
     }
+
+    /// Mutable pixels for the rasterizer, which keeps the opacity flag
+    /// right: drawing onto an opaque surface leaves it opaque, and a
+    /// translucent surface stays flagged as one.
+    pub(crate) fn pixels_mut(&mut self) -> &mut [u32] {
+        &mut self.pixels
+    }
 }
 
 /// The start index in a Java array of each of `height` rows of `width`
