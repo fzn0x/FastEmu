@@ -8,8 +8,10 @@
 //!   and the Android app. See [`icons`].
 //! * `release-notes`: write a GitHub release's notes. See
 //!   [`release_notes`].
-//! * `coverage`: compare the classes the runtime registers with the API
-//!   inventory and write `docs/compat/coverage.md`. See [`coverage`].
+//! * `stubs`: write Java stubs of every class the runtime registers and
+//!   compile them into a jar for test MIDlets. See [`api::stubs`].
+//! * `coverage`: compare those classes with the API inventory and write
+//!   `docs/compat/coverage.md`. See [`coverage`].
 
 mod api;
 mod changelog;
@@ -18,7 +20,7 @@ mod icons;
 mod release_notes;
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "\
@@ -27,6 +29,7 @@ Usage: cargo xtask changelog [--root DIR] <--check | --print | --release VERSION
        cargo xtask release-notes [--root DIR] --version X.Y.Z --tag TAG --repo OWNER/NAME
                                  [--previous-tag TAG] [--head REF] [--unreleased] [--debug-apk]
                                  [--out FILE]
+       cargo xtask stubs [--root DIR] [--out DIR]
        cargo xtask coverage [--root DIR] [--out FILE]
 
 changelog:
@@ -48,6 +51,12 @@ release-notes:
   --unreleased         take the Unreleased section, with the fragments, instead
   --debug-apk          say that the APK is signed with a debug key
   --out FILE           write the notes there (default: standard output)
+
+stubs:
+  writes a Java stub of every class FastEmu registers, with throws clauses
+  from docs/compat/api, and compiles them with the JDK's javac into
+  fastemu-stubs.jar, for test MIDlets to compile against
+  --out DIR            the folder (default: fastemu-stubs in the target folder)
 
 coverage:
   compares the classes FastEmu registers with docs/compat/api and writes
@@ -72,6 +81,7 @@ fn run(args: &[String]) -> Result<(), String> {
         Some("changelog") => run_changelog(&args[1..]),
         Some("icons") => run_icons(&args[1..]),
         Some("release-notes") => run_release_notes(&args[1..]),
+        Some("stubs") => run_stubs(&args[1..]),
         Some("coverage") => run_coverage(&args[1..]),
         _ => Err(USAGE.to_string()),
     }
@@ -171,6 +181,40 @@ fn run_release_notes(args: &[String]) -> Result<(), String> {
     }
 }
 
+fn run_stubs(args: &[String]) -> Result<(), String> {
+    let mut root = default_root();
+    let mut out = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        let mut value = |name: &str| {
+            iter.next()
+                .cloned()
+                .ok_or_else(|| format!("{name} needs a value\n{USAGE}"))
+        };
+        match arg.as_str() {
+            "--root" => root = PathBuf::from(value("--root")?),
+            "--out" => out = Some(PathBuf::from(value("--out")?)),
+            other => return Err(format!("unknown argument {other}\n{USAGE}")),
+        }
+    }
+    let out = out.unwrap_or_else(|| target_dir(&root).join("fastemu-stubs"));
+    let built = api::stubs::build(&out, &root.join("docs/compat/api"))?;
+    for warning in &built.warnings {
+        eprintln!("warning: {warning}");
+    }
+    let what = if built.compiled {
+        "compiled"
+    } else {
+        "unchanged"
+    };
+    println!(
+        "{} stub classes, {what}: {}",
+        built.classes,
+        built.jar.display()
+    );
+    Ok(())
+}
+
 fn run_coverage(args: &[String]) -> Result<(), String> {
     let mut root = default_root();
     let mut out = None;
@@ -189,6 +233,18 @@ fn run_coverage(args: &[String]) -> Result<(), String> {
     }
     let out = out.unwrap_or_else(|| root.join("docs/compat/coverage.md"));
     coverage::run(&root, &out)
+}
+
+/// Cargo's target folder: `CARGO_TARGET_DIR`, else the folder this
+/// program was built in, else `target` in the workspace.
+fn target_dir(root: &Path) -> PathBuf {
+    if let Some(dir) = std::env::var_os("CARGO_TARGET_DIR") {
+        return PathBuf::from(dir);
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.parent()?.to_path_buf()))
+        .unwrap_or_else(|| root.join("target"))
 }
 
 /// The workspace root: two levels above this crate's manifest.

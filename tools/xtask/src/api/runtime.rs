@@ -60,6 +60,16 @@ impl Class {
         self.flags & access::ABSTRACT != 0
     }
 
+    /// The package part of the name, `""` in the default package.
+    pub fn package(&self) -> &str {
+        self.name.rsplit_once('/').map_or("", |(p, _)| p)
+    }
+
+    /// The name without its package.
+    pub fn simple_name(&self) -> &str {
+        self.name.rsplit_once('/').map_or(&self.name, |(_, n)| n)
+    }
+
     /// The field this class itself declares as `name` with `desc`.
     pub fn field(&self, name: &str, desc: &str) -> Option<&Field> {
         self.fields
@@ -186,6 +196,14 @@ impl Runtime {
             || self.all_interfaces(name).iter().any(|c| c.name == ancestor)
     }
 
+    /// Whether `name` is a checked exception: a `Throwable` that is
+    /// neither a `RuntimeException` nor an `Error`.
+    pub fn is_checked_exception(&self, name: &str) -> bool {
+        self.is_subtype(name, "java/lang/Throwable")
+            && !self.is_subtype(name, "java/lang/RuntimeException")
+            && !self.is_subtype(name, "java/lang/Error")
+    }
+
     /// The field a `getfield` or `getstatic` of `class.name:desc` links
     /// to: the class, its superinterfaces, then its superclass, as JVMS
     /// 5.4.3.2 orders the search.
@@ -256,10 +274,11 @@ mod tests {
     }
 
     #[test]
-    fn subtypes_follow_classes_and_interfaces() {
+    fn exceptions_are_sorted_into_checked_and_not() {
         let rt = runtime();
-        assert!(rt.is_subtype("a/Oops", "java/lang/Throwable"));
-        assert!(!rt.is_subtype("a/Square", "java/lang/Throwable"));
+        assert!(rt.is_checked_exception("java/io/IOException"));
+        assert!(!rt.is_checked_exception("a/Oops"));
+        assert!(!rt.is_checked_exception("a/Square"));
         assert!(rt.is_subtype("a/Big", "a/Shape"));
     }
 }

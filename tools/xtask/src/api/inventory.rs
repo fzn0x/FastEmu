@@ -1,6 +1,6 @@
 //! The API inventory in `docs/compat/api/*.md`, parsed: every class with
 //! its tier, and every field, constructor and method with its tier,
-//! descriptor, flags and constant value.
+//! descriptor, flags, constant value and the exceptions it throws.
 //!
 //! The files have two layouts. Most give each class a declaration line,
 //! a `Tier N.` line, and member tables whose header names the kind
@@ -33,6 +33,9 @@ pub struct Member {
     pub flags: String,
     /// The Value column of a field, as written.
     pub value: String,
+    /// The simple or qualified names of the exceptions the Throws column
+    /// names.
+    pub throws: Vec<String>,
     /// Listed under "Added by a later edition", which the file's own
     /// member counts leave out.
     pub later: bool,
@@ -94,6 +97,25 @@ fn tier_in(text: &str) -> Option<u8> {
     rest.chars().next()?.to_digit(10).map(|d| d as u8)
 }
 
+/// The exceptions a Throws cell names: each backticked name that ends in
+/// `Exception` or `Error`.
+fn exceptions(cell: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (i, part) in cell.split('`').enumerate() {
+        let name = part.trim();
+        let is_name = i % 2 == 1
+            && !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '$'))
+            && (name.ends_with("Exception") || name.ends_with("Error"));
+        if is_name && !out.iter().any(|n| n == name) {
+            out.push(name.to_owned());
+        }
+    }
+    out
+}
+
 fn declaration(line: &str, file: &str) -> Option<Class> {
     let decl = code(line);
     let words: Vec<&str> = decl.split_whitespace().collect();
@@ -141,6 +163,7 @@ fn member(header: &[String], cells: &[String]) -> Option<Member> {
     };
     let tier = cells.first()?.parse().ok()?;
     let flags = column("Flags");
+    let throws = exceptions(&column("Throws"));
     let method = |descriptor: &str| {
         let open = descriptor.find('(')?;
         let name = &descriptor[..open];
@@ -155,6 +178,7 @@ fn member(header: &[String], cells: &[String]) -> Option<Member> {
             desc: descriptor[open..].to_owned(),
             flags: flags.clone(),
             value: String::new(),
+            throws: throws.clone(),
             later: false,
         })
     };
@@ -166,6 +190,7 @@ fn member(header: &[String], cells: &[String]) -> Option<Member> {
             desc: code(&column("Type")).to_owned(),
             flags,
             value: column("Value"),
+            throws,
             later: false,
         }),
         "Constructor" | "Method" => method(code(&column("Descriptor"))),
@@ -185,6 +210,7 @@ fn member(header: &[String], cells: &[String]) -> Option<Member> {
                     .split_once('=')
                     .map(|(_, v)| v.trim().to_owned())
                     .unwrap_or_default(),
+                throws,
                 later: false,
             })
         }
@@ -307,6 +333,19 @@ impl Inventory {
         }
         Ok(Self { classes, problems })
     }
+
+    /// The class named `name` (internal), if the inventory has it.
+    pub fn class(&self, name: &str) -> Option<&Class> {
+        self.classes.iter().find(|c| c.name == name)
+    }
+
+    /// The member `name` with `desc` of class `class`.
+    pub fn member(&self, class: &str, name: &str, desc: &str) -> Option<&Member> {
+        self.class(class)?
+            .members
+            .iter()
+            .find(|m| m.name == name && m.desc == desc)
+    }
 }
 
 /// The files the README's index lists, in order: the first link of every
@@ -390,6 +429,7 @@ Tier 1. Since MIDP 2.0.
         assert_eq!(code(&fire.value), "256");
         let paint = &game.members[1];
         assert_eq!(paint.desc, "(Ljavax/microedition/lcdui/Graphics;)V");
+        assert_eq!(paint.throws, ["NullPointerException", "IOException"]);
         let track = &classes[1];
         assert_eq!(track.tier, 3);
         assert_eq!(code(&track.members[0].value), "256");
