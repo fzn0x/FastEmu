@@ -86,6 +86,16 @@ pub fn run(root: &Path, mode: &Mode, date: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+/// `## [Unreleased]` of the repository at `root` with the fragments folded
+/// in, as the next release will have it: what `--print` prints.
+pub fn unreleased(root: &Path) -> Result<String, String> {
+    let fragments = read_fragments(&root.join("changelog.d"))
+        .map_err(|errors| format!("invalid fragments:\n{}", errors.join("\n")))?;
+    let file = root.join("CHANGELOG.md");
+    let changelog = fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+    fold(&changelog, &fragments).map(|(_, notes)| notes)
+}
+
 /// Reads and checks the fragments of `dir`: section by section, each in the
 /// order of the issue number its name starts with. `dir` may also hold a
 /// `README.md`, and may be missing.
