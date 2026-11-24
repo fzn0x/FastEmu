@@ -19,6 +19,12 @@
 
 ---
 
+![Enam game J2ME berjalan di FastEmu: pertarungan manusia lidi, pesawat jet di atas padang rumput, labirin pengebom, mobil di jalan raya, peta tower defense, dan barisan penyerbu luar angkasa](docs/images/games.png)
+
+<sub>Stick Fight, Shooter, BombMan, Traffic Dash, Tower Guard, dan Star
+Defender, game gratis yang direkam di FastEmu dengan
+`fastemu run --record`. Lihat [Penghargaan](#penghargaan).</sub>
+
 FastEmu menjalankan game Java ME, yaitu file `.jar` dan `.jad` buatan
 untuk ponsel tahun 2000-an, di Windows, Linux, macOS, dan Android. FastEmu
 mengimplementasikan CLDC 1.1 dan MIDP 2.0 dengan mesin virtual sendiri,
@@ -158,9 +164,18 @@ Antarmukanya dibangun dengan [GPUI](https://github.com/zed-industries/zed),
 kerangka UI editor Zed. GPUI di Android berjalan di atas port Zed untuk
 Android oleh Dylan Murzello.
 
-Crate Rust dan font yang dipakai FastEmu, beserta lisensinya, tercantum di
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Orang-orang yang membantu
-ada di [CONTRIBUTORS.md](CONTRIBUTORS.md).
+Gambar di bagian atas menampilkan game gratis, semuanya berlisensi MIT:
+[Stick Fight](https://github.com/Dahmalahi/STICK-FIGHT-OFFICIEL-REPO)
+oleh Dash Animation V2, [Shooter](https://github.com/RehanSaeed/Shooter)
+oleh Muhammad Rehan Saeed,
+[BombMan](https://github.com/yaricom/bombman-RL-AI-J2ME) oleh Iaroslav
+Omelianenko, serta Traffic Dash, Tower Guard, dan Star Defender dari
+[J2ME 100 Games](https://github.com/agneay/j2me-100-games) oleh Agneay B
+Nair dan kontributor J2ME Game Archive.
+
+Crate Rust, font, dan frame game yang dipakai FastEmu, beserta
+lisensinya, tercantum di [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Orang-orang yang membantu ada di [CONTRIBUTORS.md](CONTRIBUTORS.md).
 
 ## Lisensi
 

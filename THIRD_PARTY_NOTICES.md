@@ -56,7 +56,9 @@ games themselves.
 | Traffic Dash, Tower Guard, Star Defender and Block Fall, from [J2ME 100 Games](https://github.com/agneay/j2me-100-games) | Agneay B Nair and the J2ME Game Archive contributors | MIT |
 
 `site/src/games/*.webp` hold the frames of the website's first two
-cards. The MIT License texts, with each game's copyright line, are in
+cards, and `docs/images/games.png`, the picture at the top of the README,
+shows Stick Fight, Shooter, BombMan, Traffic Dash, Tower Guard and Star
+Defender. The MIT License texts, with each game's copyright line, are in
 [site/src/games/LICENSES.txt](site/src/games/LICENSES.txt), which the
 website publishes beside the frames.
 
