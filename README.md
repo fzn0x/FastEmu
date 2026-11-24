@@ -85,38 +85,49 @@ highlighted one large with the others in a strip beside it.
 | Clear | Backspace |
 
 Every binding can be changed in the settings. Each game also has a phone
-keypad under its screen, held by the mouse or a finger, and games on a
-touch phone profile get clicks, taps and drags on their screen. While a
+keypad under its screen, held by the mouse or a finger. Games on a touch
+screen get clicks, taps and drags on their screen: pick a touch phone
+profile, or turn on **Touch screen** in the game's settings. While a
 game shows a text box, typing goes into it as text; on Android a dialog
 with the system keyboard opens. The key codes a game sees come from its
 phone profile, because phone makers used different codes: Nokia, Siemens
 and Motorola layouts are built in.
 
 **Without a window.** `fastemu run` runs a game for tests and scripts,
-presses keys and touches the screen from a script, and saves pictures:
+presses keys and touches the screen from a script, and saves the last
+picture or every picture the game draws:
 
 ```sh
 fastemu run snake.jar --frames 300 --keys "wait:1500 5" --screenshot snake.png
 ```
 
-The [documentation](https://fastemu.functionx.dev) has the full list of
-keys and shortcuts, the settings, the phone profiles, where saves live and
-every option of `fastemu run`.
+The [documentation](https://fastemu.functionx.dev/docs/) has the full
+list of keys and shortcuts, the settings, the phone profiles, where saves
+live and every option of `fastemu run`.
 
 ## Supported APIs
 
 FastEmu targets the platform that games of that time were written for:
 
 - CLDC 1.1 and its `java.lang`, `java.util` and `java.io` subset
-- MIDP 2.0: the `lcdui` screens and the `Canvas`, record stores, the
-  Generic Connection Framework, and the MIDlet life cycle
+- MIDP 2.0: the `Canvas`, the high-level screens (`Form` and its items,
+  `List`, `TextBox`, `Alert` and `Ticker`), record stores and the MIDlet
+  life cycle
 - The MIDP 2.0 game API
-- Mobile Media API (MMAPI, JSR 135) for sound and MIDI
-- Nokia UI API
+- The Generic Connection Framework: HTTP, HTTPS, sockets and datagrams,
+  for the games you allow network access, which is off by default. Text
+  messages are never sent: a game that sends one is told it failed.
+- Mobile Media API (MMAPI, JSR 135): tones, WAV, MIDI, MP3 and AMR
+- Nokia UI API: `FullCanvas`, `DirectGraphics`, `DirectUtils`,
+  `DeviceControl` and `Sound`, on the Nokia, Sony Ericsson and generic
+  phone profiles
+- Siemens' game and colour game packages on the Siemens profile, and
+  Motorola's backlight class on the Motorola profile
 
-Which games work is tracked in the
-[compatibility list](https://fastemu.functionx.dev), built from the
-reports people send. A game that does not work belongs in a
+3D games (JSR-184), file connections (JSR-75), Bluetooth and the rarer
+vendor APIs do not work yet. The
+[compatibility page](docs/compatibility.md) has the details and the free
+games FastEmu was run with. A game that does not work belongs in a
 [game report](https://github.com/fzn0x/FastEmu/issues/new?template=game_report.yml).
 
 ## Building from source
@@ -131,13 +142,15 @@ cargo test            # the emulator crates
 cargo run -p fastemu  # the desktop app
 ```
 
-On Linux the desktop app also needs a C compiler and the development
-packages of GPUI: fontconfig, xkbcommon, Wayland, X11 and Vulkan. On
-macOS it needs Xcode, whose Metal toolchain compiles GPUI's shaders. The
-virtual machine's tests compare its results with a real JDK, so install JDK
-8 or newer for them. [CONTRIBUTING.md](CONTRIBUTING.md) has the exact
-packages, and [docs/building-android.md](docs/building-android.md) the
-Android app's steps.
+On Linux every crate needs `pkg-config` and the ALSA headers, and the
+desktop app also needs a C compiler and the development packages of GPUI:
+fontconfig, xkbcommon, Wayland, X11 and Vulkan. On macOS the desktop app
+needs Xcode, whose Metal toolchain compiles GPUI's shaders. Many tests
+compile small Java programs, and the virtual machine's tests compare its
+results with a real JVM's, so install a JDK 9 or newer; CI uses 17.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the exact packages, and
+[docs/building-android.md](docs/building-android.md) the Android app's
+steps.
 
 ## How it is built
 
@@ -145,9 +158,10 @@ A Rust workspace of small crates. `fastemu-core` holds the types that the
 runtime and the apps share: frames, input events, device profiles and the
 launcher that starts a game. `fastemu-jvm` is the virtual machine and its
 class libraries, `fastemu-gfx` the 2D graphics, `fastemu-audio` sound and
-MIDI, and `fastemu-midp` the MIDP, game, media and Nokia APIs that games
-call. `fastemu-ui` is the GPUI interface that the desktop program
-`fastemu` and the Android app `fastemu-android` both use.
+MIDI, and `fastemu-midp` the MIDP, game, media, network and vendor APIs
+that games call. `fastemu-ui` is the GPUI interface that the desktop
+program `fastemu` and the Android app `fastemu-android` both use, and
+`gpui_android` is GPUI's Android backend.
 
 ## Credits
 

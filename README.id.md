@@ -87,23 +87,24 @@ disorot dalam ukuran besar dengan yang lain di jalur sampingnya.
 | Clear | Backspace |
 
 Semua pemetaan bisa diubah di pengaturan. Setiap game juga punya keypad
-ponsel di bawah layarnya, yang ditahan dengan mouse atau jari, dan game
-dengan profil ponsel layar sentuh menerima klik, ketukan, dan geseran di
-layarnya. Saat game menampilkan kotak teks, ketikan masuk sebagai teks; di
+ponsel di bawah layarnya, yang ditahan dengan mouse atau jari. Game dengan
+layar sentuh menerima klik, ketukan, dan geseran di layarnya: pilih profil
+ponsel layar sentuh, atau nyalakan **Touch screen** di pengaturan game
+itu. Saat game menampilkan kotak teks, ketikan masuk sebagai teks; di
 Android terbuka dialog dengan keyboard sistem. Kode tombol yang dilihat
 game berasal dari profil ponselnya, karena pembuat ponsel memakai kode
 berbeda: tata letak Nokia, Siemens, dan Motorola sudah tersedia.
 
 **Tanpa jendela.** `fastemu run` menjalankan game untuk pengujian dan
 skrip, menekan tombol dan menyentuh layar dari skrip, dan menyimpan
-gambar:
+gambar terakhir atau setiap gambar yang digambar game:
 
 ```sh
 fastemu run snake.jar --frames 300 --keys "wait:1500 5" --screenshot snake.png
 ```
 
-[Dokumentasi](https://fastemu.functionx.dev) memuat daftar tombol dan
-pintasan lengkap, pengaturan, profil ponsel, lokasi data simpanan, dan
+[Dokumentasi](https://fastemu.functionx.dev/docs/) memuat daftar tombol
+dan pintasan lengkap, pengaturan, profil ponsel, lokasi data simpanan, dan
 semua opsi `fastemu run`.
 
 ## API yang didukung
@@ -111,15 +112,25 @@ semua opsi `fastemu run`.
 FastEmu menargetkan platform yang dipakai game pada masanya:
 
 - CLDC 1.1 dan subset `java.lang`, `java.util`, dan `java.io`-nya
-- MIDP 2.0: layar `lcdui` dan `Canvas`, record store, Generic Connection
-  Framework, dan siklus hidup MIDlet
+- MIDP 2.0: `Canvas`, layar tingkat tinggi (`Form` beserta item-itemnya,
+  `List`, `TextBox`, `Alert`, dan `Ticker`), record store, dan siklus
+  hidup MIDlet
 - Game API MIDP 2.0
-- Mobile Media API (MMAPI, JSR 135) untuk suara dan MIDI
-- Nokia UI API
+- Generic Connection Framework: HTTP, HTTPS, socket, dan datagram, untuk
+  game yang Anda izinkan mengakses jaringan, yang mati secara bawaan.
+  Pesan teks tidak pernah dikirim: game yang mengirimnya diberi tahu
+  bahwa pengiriman gagal.
+- Mobile Media API (MMAPI, JSR 135): nada, WAV, MIDI, MP3, dan AMR
+- Nokia UI API: `FullCanvas`, `DirectGraphics`, `DirectUtils`,
+  `DeviceControl`, dan `Sound`, pada profil ponsel Nokia, Sony Ericsson,
+  dan generik
+- Paket game dan color game Siemens pada profil Siemens, serta kelas
+  lampu latar Motorola pada profil Motorola
 
-Game mana yang berjalan dicatat di
-[daftar kompatibilitas](https://fastemu.functionx.dev), yang disusun dari
-laporan pengguna. Game yang tidak berjalan sebaiknya dilaporkan lewat
+Game 3D (JSR-184), koneksi file (JSR-75), Bluetooth, dan API vendor yang
+lebih jarang belum berjalan. [Halaman kompatibilitas](docs/compatibility.md)
+memuat rinciannya dan game gratis yang sudah dicoba di FastEmu. Game yang
+tidak berjalan sebaiknya dilaporkan lewat
 [laporan game](https://github.com/fzn0x/FastEmu/issues/new?template=game_report.yml).
 
 ## Build dari sumber
@@ -134,13 +145,15 @@ cargo test            # crate emulator
 cargo run -p fastemu  # aplikasi desktop
 ```
 
-Di Linux, aplikasi desktop juga butuh compiler C dan paket pengembangan
-GPUI: fontconfig, xkbcommon, Wayland, X11, dan Vulkan. Di macOS butuh
-Xcode, yang toolchain Metal-nya mengompilasi shader GPUI. Tes mesin virtual
-membandingkan hasilnya dengan JDK asli, jadi pasang JDK 8 atau lebih baru
-untuk itu. [CONTRIBUTING.md](CONTRIBUTING.md) memuat daftar paket yang
-tepat, dan [docs/building-android.md](docs/building-android.md) memuat
-langkah aplikasi Android.
+Di Linux, setiap crate butuh `pkg-config` dan header ALSA, dan aplikasi
+desktop juga butuh compiler C dan paket pengembangan GPUI: fontconfig,
+xkbcommon, Wayland, X11, dan Vulkan. Di macOS, aplikasi desktop butuh
+Xcode, yang toolchain Metal-nya mengompilasi shader GPUI. Banyak tes
+mengompilasi program Java kecil, dan tes mesin virtual membandingkan
+hasilnya dengan JVM asli, jadi pasang JDK 9 atau lebih baru; CI memakai
+17. [CONTRIBUTING.md](CONTRIBUTING.md) memuat daftar paket yang tepat, dan
+[docs/building-android.md](docs/building-android.md) memuat langkah
+aplikasi Android.
 
 ## Cara FastEmu dibuat
 
@@ -148,9 +161,10 @@ Workspace Rust berisi crate-crate kecil. `fastemu-core` memuat tipe yang
 dipakai bersama oleh runtime dan aplikasi: frame, event input, profil
 perangkat, dan peluncur yang menjalankan game. `fastemu-jvm` adalah mesin
 virtual beserta pustaka kelasnya, `fastemu-gfx` grafis 2D, `fastemu-audio`
-suara dan MIDI, dan `fastemu-midp` API MIDP, game, media, dan Nokia yang
-dipanggil game. `fastemu-ui` adalah antarmuka GPUI yang dipakai bersama
-oleh program desktop `fastemu` dan aplikasi Android `fastemu-android`.
+suara dan MIDI, dan `fastemu-midp` API MIDP, game, media, jaringan, dan
+vendor yang dipanggil game. `fastemu-ui` adalah antarmuka GPUI yang
+dipakai bersama oleh program desktop `fastemu` dan aplikasi Android
+`fastemu-android`, dan `gpui_android` adalah backend Android untuk GPUI.
 
 ## Penghargaan
 
