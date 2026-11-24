@@ -264,7 +264,10 @@ fn screens_custom_item_gets_its_callbacks() {
     run.wait_log("show");
     run.wait_log("size 60x30");
     run.wait_log("paint 60x30");
-    run.wait_log("traverse 0 visible 60x30");
+    // Callbacks run on the event thread, even for setCurrentItem from
+    // startApp.
+    run.wait_log("traverse 0 visible 60x30 on event");
+    assert!(!run.has("on MIDlet"), "{}", run.dump());
     let frame = run.wait_frame(|f| count(f, 0xFF_0000) >= 60 * 30);
     assert_eq!(
         count(&frame, 0xFF_0000),

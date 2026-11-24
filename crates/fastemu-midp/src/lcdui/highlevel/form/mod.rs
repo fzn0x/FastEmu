@@ -402,7 +402,9 @@ fn first_focus(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<Option<ObjRef>> {
 }
 
 /// `Display.setCurrentItem(item)`: shows the item's form with the focus
-/// on it.
+/// on it. The focus moves on the event thread, since moving it calls
+/// the items' `traverseOut` and `traverse`, which MIDP serializes with
+/// every other callback; the game may call this from any thread.
 pub(crate) fn set_current_item(ctx: &mut Ctx<'_>, item: ObjRef) -> JResult<()> {
     let d = item::data(ctx, item)?;
     let (owner, in_alert) = (d.owner, d.in_alert);
@@ -419,7 +421,17 @@ pub(crate) fn set_current_item(ctx: &mut Ctx<'_>, item: ObjRef) -> JResult<()> {
         );
     }
     if item::focusable(ctx, item)? {
-        move_focus(ctx, owner, Some(item), 0)?;
+        let (form, item) = (ctx.new_global(owner), ctx.new_global(item));
+        ctx.post(move |ctx| {
+            let (form, item) = (form.get(ctx), item.get(ctx));
+            // The game may have moved the item since.
+            if item::data(ctx, item)?.owner != Some(form) {
+                return Ok(());
+            }
+            callback(ctx, "setCurrentItem", |ctx| {
+                move_focus(ctx, form, Some(item), 0)
+            })
+        });
     } else {
         let f = form_mut(ctx, owner)?;
         f.reveal = true;

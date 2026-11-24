@@ -7,13 +7,18 @@ import javax.microedition.lcdui.Graphics;
 import javax.microedition.lcdui.TextField;
 import javax.microedition.midlet.MIDlet;
 
-/** A form with a game-drawn item above a text field. */
+/**
+ * A form with a game-drawn item above a text field, given the focus
+ * from startApp, off the event thread.
+ */
 public class Customs extends MIDlet {
     protected void startApp() {
         Form form = new Form("Custom");
-        form.append(new Box());
+        Box box = new Box();
+        form.append(box);
         form.append(new TextField("Below", "", 5, TextField.ANY));
         Display.getDisplay(this).setCurrent(form);
+        Display.getDisplay(this).setCurrentItem(box);
     }
 
     protected void pauseApp() {}
@@ -53,7 +58,8 @@ class Box extends CustomItem {
     }
 
     protected boolean traverse(int dir, int viewportWidth, int viewportHeight, int[] visRect) {
-        System.out.println("traverse " + dir + " visible " + visRect[2] + "x" + visRect[3]);
+        System.out.println("traverse " + dir + " visible " + visRect[2] + "x" + visRect[3]
+                + " on " + Thread.currentThread().getName());
         return false;
     }
 
