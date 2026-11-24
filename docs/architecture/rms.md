@@ -95,7 +95,9 @@ and decodes back to the exact name, unpaired surrogates included. Only
 the canonical stem of a name is accepted when the folder is listed, so
 names and files match one to one; other files in the folder are ignored.
 `listRecordStores` returns the names in UTF-16 code unit order (the
-order of `String.compareTo`), or `null` when there are none.
+order of `String.compareTo`), or `null` when there are none. An empty
+name or one of more than 32 code units throws `IllegalArgumentException`,
+as MIDP says; J2ME Loader cuts long names to 32 characters instead.
 
 ## File format
 
