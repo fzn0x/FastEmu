@@ -156,8 +156,8 @@ pub enum TextRendering {
     /// Smooth edges blended into the background.
     #[default]
     Antialiased,
-    /// Hard edges: a pixel is drawn when the glyph covers at least half of
-    /// it, as on phones without font smoothing.
+    /// Hard edges: a pixel is drawn when the glyph covers at least three
+    /// eighths of it, as on phones without font smoothing.
     Aliased,
 }
 

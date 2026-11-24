@@ -16,6 +16,11 @@ use crate::surface::{Surface, java_range};
 /// above the baseline.
 const ITALIC_RISE: i64 = 4;
 
+/// The coverage from which an aliased glyph pixel is drawn. Half (128)
+/// drops the thin stems of small unhinted glyphs; three eighths keeps them
+/// without making text heavy.
+const ALIASED_THRESHOLD: u8 = 96;
+
 impl Graphics {
     /// `drawString(str, x, y, anchor)` in the current font and colour.
     /// The anchor takes `LEFT`, `HCENTER` or `RIGHT` with `TOP`,
@@ -173,7 +178,7 @@ fn draw_glyph(canvas: &mut Canvas<'_>, glyph: &Glyph, pen: i64, style: &GlyphSty
         let run = canvas.row(y, x0 + first, x0 + last);
         for (dst, &c) in run.iter_mut().zip(&coverage[first as usize..last as usize]) {
             let c = if style.aliased {
-                if c >= 128 { 255 } else { 0 }
+                if c >= ALIASED_THRESHOLD { 255 } else { 0 }
             } else {
                 c
             };
