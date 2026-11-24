@@ -525,12 +525,21 @@ fn pause_resume_and_stop_control_running_java() {
     .unwrap();
     assert!(eventually(|| spin_count(&vm) > 1000));
     vm.pause();
-    std::thread::sleep(Duration::from_millis(20));
+    // `pause` returns at once, and the spinner parks at its next
+    // safepoint. The interpreter reaches one every 4096 backward jumps
+    // (`YIELD_INTERVAL` in src/interp/exec.rs), one turn of this loop
+    // each, so the count moves that much at most after `pause` returns,
+    // however late the spinner gets there. Running, it turns far more
+    // often than that in 100 ms.
     let paused_at = spin_count(&vm);
-    std::thread::sleep(Duration::from_millis(50));
-    assert_eq!(spin_count(&vm), paused_at, "a paused thread does not run");
+    std::thread::sleep(Duration::from_millis(100));
+    let later = spin_count(&vm);
+    assert!(
+        later - paused_at <= 4096,
+        "a paused thread does not run: {paused_at} then {later}"
+    );
     vm.resume();
-    assert!(eventually(|| spin_count(&vm) > paused_at));
+    assert!(eventually(|| spin_count(&vm) > later));
     vm.stop();
     assert!(
         vm.wait_finished(Some(Duration::from_secs(2))),
