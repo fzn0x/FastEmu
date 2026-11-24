@@ -439,9 +439,16 @@ calling one throws `AbstractMethodError`.
 
 Methods decode on their first call into an instruction array with
 resolved branch targets; constants the pool can give are inlined.
+Decoding also checks the operand stack, as a small part of a verifier:
+every reachable instruction must have one stack height however it is
+reached, stay within `max_stack`, never pop an empty stack, never run
+past the end of the code, and name constant pool entries of the right
+kind. Code that fails throws `VerifyError` on its first call; javac and
+ProGuard output always passes. There is no type verifier beyond that.
 Constant pool references resolve lazily, on first execution, into
 per-class caches; a failed resolution is not cached and throws again.
-`invokeinterface` caches the last receiver class per call site.
+`invokeinterface` caches the last receiver class per constant pool
+entry.
 
 Initialization follows JVMS 5.5: on first active use (`new`, a static
 field, a static call, `Class.forName`, a subclass's initialization), the
@@ -478,8 +485,8 @@ code has none. Exception messages follow HotSpot's where it matters
 print as HotSpot prints them, with line numbers from `LineNumberTable`.
 
 Speed, from the benchmark (`cargo test -p fastemu-jvm --release --test
-bench -- --ignored --nocapture`): about 540 million bytecodes per second
-on a tight arithmetic loop and 185 million with a static call in every
+bench -- --ignored --nocapture`): about 590 million bytecodes per second
+on a tight arithmetic loop and 190 million with a static call in every
 iteration, on the development machine. Phones ran 1 to 20 million.
 
 ## The class library
