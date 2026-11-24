@@ -255,6 +255,26 @@ fn input_keeps_its_place_among_pause_resume_and_stop() {
 }
 
 #[test]
+fn a_key_let_go_just_before_a_pause_is_released_in_the_game() {
+    let Some(jar) = suite("release-pause") else {
+        return;
+    };
+    let mut run = Running::launch(&jar, midlet::KEYS);
+    run.wait_log("shown pointer");
+    // The first press throws; the event thread logs it and carries on.
+    run.tap(Key::Num5);
+    run.wait_log("released 53");
+    run.key(Key::Num1, KeyAction::Press);
+    run.wait_log("pressed 49");
+    // The apps let go of every key, then pause, back to back.
+    run.key(Key::Num1, KeyAction::Release);
+    run.instance.pause();
+    run.wait_status(|s| *s == InstanceStatus::Paused);
+    assert!(run.has("released 49"), "{}", run.dump());
+    assert_eq!(run.instance.error_count(), 1, "{}", run.dump());
+}
+
+#[test]
 fn service_repaints_on_a_game_thread_paints_before_returning() {
     let Some(jar) = suite("threads") else { return };
     let mut run = Running::launch(&jar, midlet::THREADS);
