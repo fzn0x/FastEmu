@@ -738,6 +738,9 @@ pub fn build(out: &Path, api_dir: &Path) -> Result<Built, String> {
     }
     let javac = jdk_tool("javac").ok_or("no javac in JAVA_HOME or on the PATH")?;
     let jar_tool = jdk_tool("jar").ok_or("no jar tool in JAVA_HOME or on the PATH")?;
+    // Gone until the new one is packed, so a build that fails part way is
+    // never taken for an up-to-date one.
+    let _ = fs::remove_file(&jar);
     let classes = out.join("classes");
     let _ = fs::remove_dir_all(&classes);
     fs::create_dir_all(&classes).map_err(|e| format!("{}: {e}", classes.display()))?;
@@ -758,7 +761,6 @@ pub fn build(out: &Path, api_dir: &Path) -> Result<Built, String> {
         .arg(&classes)
         .arg(format!("@{}", list.display()));
     run(&mut javac_command, "javac on the stubs")?;
-    let _ = fs::remove_file(&jar);
     let mut jar_command = Command::new(&jar_tool);
     jar_command
         .arg("cf")
