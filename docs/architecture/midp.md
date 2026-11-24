@@ -312,12 +312,19 @@ NativeClass::new("javax/microedition/lcdui/Form")
    `GlobalRef`s (wrapped in `Arc` when several places need them), never
    `ObjRef`s. Root references read from payloads or arrays before calling
    Java (`ctx.root`).
-3. Run UI callbacks through `lcdui::event::callback`, never directly from
+3. Never hold the lock of an `Image`'s surface across a call into Java
+   or anything else that can collect (rule 3 of
+   `docs/architecture/jvm.md` lists them). The lock is not reentrant, and
+   the collector locks every image's surface to count its bytes
+   (`ImageData::heap_bytes`), so the thread would wait on itself. For the
+   same reason a `ScreenHandler`'s `paint` must not lock its screen's
+   buffer again: `target.surface` is that buffer, already locked.
+4. Run UI callbacks through `lcdui::event::callback`, never directly from
    another thread. Read the instance through `env::env(ctx)`.
-4. Throw what the spec names; `lcdui::throw_gfx` turns a `GfxError` into
+5. Throw what the spec names; `lcdui::throw_gfx` turns a `GfxError` into
    its exception. Log with `ctx.log`, and use
    `lcdui::state::warn_once` for warnings a game could trigger every frame.
-5. Test it beside the code, and through the launcher with a small MIDlet:
+6. Test it beside the code, and through the launcher with a small MIDlet:
    `tests/support` compiles the Java under `tests/java` with stubs of the
    MIDP classes (signatures and constant values from the inventory; javac
    inlines constants), packs JARs and drives an instance.

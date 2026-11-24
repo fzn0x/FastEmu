@@ -70,6 +70,11 @@ pub struct KeyEvent {
 /// Where a screen paints: a surface the size of its content area, cleared
 /// to the theme's background before each paint, and what it needs to draw
 /// the way the runtime does.
+///
+/// `surface` is the screen's buffer, locked for the whole paint: never
+/// lock that buffer again from the hook (`canvas::buffer` of the screen
+/// gives the same lock, which is not reentrant), and never hold an
+/// image's surface lock while calling into Java.
 pub struct ScreenTarget<'a> {
     pub surface: &'a mut Surface,
     pub width: i32,
