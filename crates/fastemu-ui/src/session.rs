@@ -348,9 +348,13 @@ impl Session {
 }
 
 /// Whether `url` is an `http` or `https` link, the only kind the app
-/// opens. The runtime hands over nothing else; this guards against an
-/// instance that would.
+/// opens, in printable ASCII, so the link the user reads is the page
+/// that opens. The runtime hands over nothing else; this guards against
+/// an instance that would.
 fn is_web_link(url: &str) -> bool {
+    if !url.bytes().all(|b| b.is_ascii_graphic()) {
+        return false;
+    }
     ["http://", "https://"].iter().any(|scheme| {
         url.get(..scheme.len())
             .is_some_and(|start| start.eq_ignore_ascii_case(scheme))
@@ -440,6 +444,16 @@ mod tests {
         assert!(is_web_link("HTTPS://example.com/a"));
         for other in ["https://", "tel:123", "file:///x", "javascript:x", "", "h"] {
             assert!(!is_web_link(other), "{other}");
+        }
+        // What the user reads is what opens: no spaces, line breaks or
+        // characters that reorder the text.
+        for hidden in [
+            "https://example.com/\u{202e}moc.elpmaxe",
+            "https://example.com/\nhttps://other.example/",
+            "https://example.com/a b",
+            "https://ex\u{0430}mple.com/",
+        ] {
+            assert!(!is_web_link(hidden), "{hidden:?}");
         }
     }
 
