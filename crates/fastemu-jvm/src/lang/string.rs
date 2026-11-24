@@ -384,7 +384,10 @@ pub(crate) fn classes() -> Vec<NativeClass> {
                     if o.is_empty() {
                         return Ok(a[0]);
                     }
-                    let mut s = this_units(ctx, a).to_vec();
+                    let total = this_units(ctx, a).len().saturating_add(o.len());
+                    ctx.check_alloc(string_bytes(total))?;
+                    let mut s = Vec::with_capacity(total);
+                    s.extend_from_slice(this_units(ctx, a));
                     s.extend_from_slice(&o);
                     string_result(ctx, s)
                 },
