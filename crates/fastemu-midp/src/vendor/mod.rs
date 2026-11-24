@@ -1,5 +1,6 @@
-//! The vendor APIs of Siemens, Samsung, Motorola and LG, and which maker
-//! a device profile imitates.
+//! The vendor APIs of Siemens, Samsung, Motorola and LG, which maker a
+//! device profile imitates, and the lights, vibration and sound clips they
+//! share.
 //!
 //! Games detect the phone they run on with `Class.forName`
 //! (`docs/compat/emulator-notes.md`, rule 13): a game that finds
@@ -10,6 +11,9 @@
 
 mod clip;
 pub(crate) mod device;
+pub mod lg;
+pub mod motorola;
+pub mod samsung;
 pub mod siemens;
 
 use fastemu_core::DeviceProfile;
@@ -68,12 +72,12 @@ impl Vendor {
 pub fn classes(vendor: Vendor) -> Vec<NativeClass> {
     match vendor {
         Vendor::Siemens => siemens::classes(),
-        Vendor::Generic
-        | Vendor::Nokia
-        | Vendor::SonyEricsson
-        | Vendor::Samsung
-        | Vendor::Motorola
-        | Vendor::Lg => Vec::new(),
+        Vendor::Samsung => samsung::classes(),
+        Vendor::Motorola => motorola::classes(),
+        Vendor::Lg => lg::classes(),
+        // Sony Ericsson shipped standard JSRs and Nokia's UI API; its own
+        // Capuchin (Flash) API is rare in games.
+        Vendor::Generic | Vendor::Nokia | Vendor::SonyEricsson => Vec::new(),
     }
 }
 

@@ -22,6 +22,9 @@ fn expected(id: &str) -> String {
     let found = match maker {
         "generic" | "nokia" | "sonyericsson" => NOKIA,
         "siemens" => SIEMENS,
+        "samsung" => "com.samsung.util.Vibration com.samsung.util.AudioClip",
+        "motorola" => "com.motorola.multimedia.Lighting",
+        "lg" => "mmpp.media.BackLight",
         _ => "",
     };
     format!("found: {found}").trim_end().to_owned()
