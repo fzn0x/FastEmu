@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use fastemu_core::{DeviceProfile, InstanceId, InstanceSettings, SuiteInfo, default_profile};
-use fastemu_jvm::Ctx;
+use fastemu_jvm::{ClassSource, Ctx, MemorySource};
 
 /// The instance a virtual machine runs for: its phone, its settings, its
 /// suite, its folder and its sound. The launcher stores one in the VM as an
@@ -24,19 +24,26 @@ pub struct InstanceEnv {
     /// The instance's sound, when the app runs an audio engine. `None` means
     /// silence: players still work and report their state, but play nothing.
     pub audio: Option<fastemu_audio::Group>,
+    /// The suite's classes and resources, the same source the VM loads
+    /// from, for natives that read resources by name (`Image.createImage`,
+    /// `Manager.createPlayer` with a `resource:` locator). Read it inside
+    /// `Ctx::without_lock`: it may inflate.
+    pub source: Arc<dyn ClassSource>,
 }
 
 impl InstanceEnv {
     /// An environment for tests: the default profile and settings, an
-    /// empty suite, the given folder and no sound.
+    /// empty suite and source, the given folder and no sound.
     pub fn for_tests(data_dir: impl Into<PathBuf>) -> Self {
+        let id = InstanceId::next();
         Self {
-            id: InstanceId::next(),
+            id,
             profile: default_profile(),
             settings: InstanceSettings::default(),
             suite: Arc::new(SuiteInfo::default()),
             data_dir: data_dir.into(),
             audio: None,
+            source: Arc::new(MemorySource::new()),
         }
     }
 }
