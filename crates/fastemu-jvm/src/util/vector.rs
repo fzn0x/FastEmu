@@ -72,15 +72,22 @@ fn get(ctx: &mut Ctx<'_>, v: &View, index: i32) -> JResult<Option<ObjRef>> {
     }
 }
 
-/// `elementData[index] = e`, with Java's array bounds check.
+/// `elementData[index] = e`, with Java's array checks: the bounds, and
+/// the element type of an array a subclass put there in place of an
+/// `Object[]`.
 fn set(ctx: &mut Ctx<'_>, v: &View, index: i32, e: Option<ObjRef>) -> JResult<()> {
-    match usize::try_from(index).ok().filter(|&i| i < v.capacity) {
-        Some(i) => {
-            ctx.array_mut::<Option<ObjRef>>(v.data)?[i] = e;
-            Ok(())
-        }
-        None => Err(bad_index(ctx, i64::from(index), v.capacity)),
+    let Some(i) = usize::try_from(index).ok().filter(|&i| i < v.capacity) else {
+        return Err(bad_index(ctx, i64::from(index), v.capacity));
+    };
+    if let Some(e) = e
+        && let Some(elem) = ctx.array_element_class(ctx.class_of(v.data))
+        && !ctx.is_instance(e, elem)
+    {
+        let name = ctx.class_name(ctx.class_of(e)).replace('/', ".");
+        return throw(ctx, "java/lang/ArrayStoreException", &name);
     }
+    ctx.array_mut::<Option<ObjRef>>(v.data)?[i] = e;
+    Ok(())
 }
 
 fn object_class(ctx: &mut Ctx<'_>) -> JResult<ClassId> {

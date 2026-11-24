@@ -407,6 +407,8 @@ fn hashtable_class() -> NativeClass {
             }
             let d = entry(ctx, e)?;
             let (key, value) = (d.key, d.value);
+            // The key's toString may remove the entry, so hold both.
+            let (key, value) = (key.map(|k| ctx.root(k)), value.map(|v| ctx.root(v)));
             for (part, sep) in [(key, "="), (value, "")] {
                 if part == Some(ht) {
                     text.push_str("(this Map)");

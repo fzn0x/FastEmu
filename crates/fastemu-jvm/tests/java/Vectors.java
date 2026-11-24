@@ -16,6 +16,11 @@ public class Vectors {
         String raw() {
             return elementCount + "/" + elementData.length + "/" + capacityIncrement;
         }
+
+        void retype() {
+            elementData = new String[4];
+            elementCount = 0;
+        }
     }
 
     static void vectors() {
@@ -68,6 +73,13 @@ public class Vectors {
         peek.addElement("b");
         peek.addElement("c");
         System.out.println(peek.raw());
+        peek.retype();
+        peek.addElement("text");
+        try {
+            peek.addElement(new Integer(1));
+        } catch (ArrayStoreException e) {
+            System.out.println("ArrayStoreException " + e.getMessage() + " " + peek.raw());
+        }
     }
 
     static void vectorErrors() {
