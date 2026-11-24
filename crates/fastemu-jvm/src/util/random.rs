@@ -31,9 +31,11 @@ fn scramble(seed: i64) -> i64 {
 }
 
 /// Java's `next(bits)`: one step of the generator, and its top `bits`.
+/// A subclass may pass any `bits`; the shift count wraps to 0..63 as
+/// Java's `>>>` on a `long` does.
 fn step(seed: &mut i64, bits: i32) -> i32 {
     *seed = (seed.wrapping_mul(MULTIPLIER).wrapping_add(ADDEND)) & MASK;
-    (*seed as u64 >> (48 - bits)) as i32
+    (*seed as u64).wrapping_shr(48i32.wrapping_sub(bits) as u32) as i32
 }
 
 fn is_plain(ctx: &Ctx<'_>, obj: ObjRef) -> bool {
@@ -136,6 +138,27 @@ mod tests {
         assert_eq!(step(&mut seed, 32), -1_170_105_035);
         let mut seed = scramble(-7);
         assert_eq!(step(&mut seed, 32), 1_155_869_324);
+    }
+
+    /// `next` is protected, so a subclass can ask it for any number of
+    /// bits; Java masks the shift count instead of failing.
+    #[test]
+    fn any_bit_count_shifts_as_java_does() {
+        let draw = |bits| step(&mut scramble(42), bits);
+        // The state after one step, whose low 32 bits a shift of 0 gives.
+        let mut state = scramble(42);
+        step(&mut state, 32);
+        // 48 - bits, masked to 0..63: a shift of 48 or more leaves 0.
+        for bits in [0, 49, 60, 64, -1] {
+            assert_eq!(draw(bits), 0, "{bits}");
+        }
+        for bits in [-16, 112] {
+            assert_eq!(draw(bits), state as i32, "{bits}");
+        }
+        assert_eq!(draw(16), (state >> 32) as i32);
+        // The extremes do not overflow the subtraction.
+        draw(i32::MIN);
+        draw(i32::MAX);
     }
 
     #[test]
