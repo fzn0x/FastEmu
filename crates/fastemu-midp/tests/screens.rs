@@ -225,6 +225,22 @@ fn screens_popup_emptied_while_open_takes_keys() {
 }
 
 #[test]
+fn screens_gauge_at_the_largest_maximum_moves() {
+    let Some(jar) = suite("edges-gauge") else {
+        return;
+    };
+    let mut run = Running::launch(&jar, midlet::EDGES);
+    run.wait_log("edges shown");
+    run.wait_frame(|f| count(f, HIGHLIGHT) > 0);
+    // Down to the gauge, which is full: right stays, left steps back.
+    run.tap(Key::Down);
+    run.tap(Key::Right);
+    run.tap(Key::Left);
+    run.wait_log("gauge 2040109465");
+    assert_eq!(run.instance.error_count(), 0, "{}", run.dump());
+}
+
+#[test]
 fn screens_custom_item_gets_its_callbacks() {
     let Some(jar) = suite("custom") else { return };
     let mut run = Running::launch(&jar, midlet::CUSTOMS);

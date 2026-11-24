@@ -222,7 +222,8 @@ pub(super) fn key(ctx: &mut Ctx<'_>, item: ObjRef, event: KeyEvent) -> JResult<H
         keys::RIGHT => step(g.max),
         _ => return Ok(Handled::No),
     };
-    let next = (g.value + delta).clamp(0, g.max);
+    // A maximum near `Integer.MAX_VALUE` must not overflow.
+    let next = g.value.saturating_add(delta).clamp(0, g.max);
     if next == g.value {
         return Ok(Handled::Yes);
     }
