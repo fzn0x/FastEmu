@@ -480,10 +480,10 @@ pub(crate) fn classes() -> Vec<NativeClass> {
                 string_result(ctx, replaced)
             })
             .method("toLowerCase", "()Ljava/lang/String;", |ctx, a| {
-                map_case(ctx, a, to_lower)
+                map_case(ctx, a, to_lower, str::to_lowercase)
             })
             .method("toUpperCase", "()Ljava/lang/String;", |ctx, a| {
-                map_case(ctx, a, to_upper)
+                map_case(ctx, a, to_upper, str::to_uppercase)
             })
             .method("trim", "()Ljava/lang/String;", |ctx, a| {
                 let s = this_units(ctx, a);
@@ -622,9 +622,20 @@ fn substring(ctx: &mut Ctx<'_>, a: &[Value], begin: i32, end: i32) -> JResult<Va
     string_result(ctx, part)
 }
 
-fn map_case(ctx: &mut Ctx<'_>, a: &[Value], f: fn(u16) -> u16) -> JResult<Value> {
+/// `toLowerCase` and `toUpperCase`: the full Unicode mapping (sharp s
+/// upper-cases to `SS`, as in Java), or one character at a time when the
+/// string holds unpaired surrogates.
+fn map_case(
+    ctx: &mut Ctx<'_>,
+    a: &[Value],
+    per_char: fn(u16) -> u16,
+    full: fn(&str) -> String,
+) -> JResult<Value> {
     let s = this_units(ctx, a);
-    let mapped: Vec<u16> = s.iter().map(|&c| f(c)).collect();
+    let mapped: Vec<u16> = match String::from_utf16(s) {
+        Ok(text) => full(&text).encode_utf16().collect(),
+        Err(_) => s.iter().map(|&c| per_char(c)).collect(),
+    };
     if mapped == s {
         return Ok(a[0]);
     }
