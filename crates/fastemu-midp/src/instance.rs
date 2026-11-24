@@ -19,6 +19,12 @@
 //! - stop: `destroyApp(true)` on a lifecycle thread, waited for up to a
 //!   second, then every thread of the VM stops and the sound group closes.
 //!
+//! A game thread can hold the VM lock for ever, in a native that loops
+//! around calls into Java or in a loop with no safepoint. The control
+//! thread does not wait for the lock longer than a second at a time: a
+//! lifecycle call or input that cannot start in that time is dropped, and
+//! a stop sets the VM's stop flag before it waits for anything.
+//!
 //! `notifyDestroyed` ends the instance the same way without `destroyApp`.
 //! A crash (the MIDlet class missing, its constructor or `startApp`
 //! throwing, an internal error of the VM) calls `destroyApp(true)` if
@@ -227,10 +233,15 @@ impl Controller {
     }
 
     /// Ends every thread of the VM and the instance's sound.
+    ///
+    /// The VM is told to stop first, before anything waits for its lock:
+    /// a thread wedged in a native that loops around calls into Java holds
+    /// the lock for ever, but ends at its next call. Each wait for the
+    /// lock after that gives up in time.
     fn finish(self, status: InstanceStatus) {
-        self.vm.flush_output();
         self.vm.stop();
         self.vm.resume();
+        self.vm.flush_output();
         self.vm.wait_finished(Some(STOP_TIMEOUT));
         if let Some(group) = &self.group {
             group.close();
