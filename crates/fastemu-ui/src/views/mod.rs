@@ -116,6 +116,9 @@ pub(crate) struct Tile {
     screen: screen::SharedScreen,
     /// A restart is under way; the old instance is stopped.
     restarting: bool,
+    /// The app paused the game when it went to the background, and
+    /// resumes it when it comes back.
+    paused_by_app: bool,
 }
 
 /// Which dialog covers the workspace, if any.
@@ -277,6 +280,24 @@ impl FastEmuView {
         }
         view.refresh_library(window, cx);
         view
+    }
+
+    /// Pauses every running game while the app is in the background, as a
+    /// phone pauses its game for a call, and resumes those when the app is
+    /// back. Games the user paused stay paused.
+    pub fn set_background(&mut self, background: bool, cx: &mut Context<'_, Self>) {
+        for tile in &mut self.tiles {
+            if background && tile.session.is_running() {
+                tile.session.release_everything();
+                tile.session.instance.pause();
+                tile.paused_by_app = true;
+            } else if !background && tile.paused_by_app {
+                tile.session.instance.resume();
+                tile.paused_by_app = false;
+            }
+            tile.session.poll();
+        }
+        cx.notify();
     }
 
     /// Stops every running game. The app calls this on quit; it is safe to

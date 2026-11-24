@@ -842,6 +842,27 @@ fn a_game_that_cannot_start_shows_why_in_its_tile(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_background_pauses_running_games_only(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    h.launch_first();
+    let (playing, paused) = (h.launcher.instance(0), h.launcher.instance(1));
+    h.view.update(h.cx, |v, cx| {
+        v.tiles[1].session.toggle_pause();
+        v.set_background(true, cx);
+    });
+    assert_eq!(playing.status(), InstanceStatus::Paused);
+    h.view.update(h.cx, |v, cx| v.set_background(false, cx));
+    assert_eq!(playing.status(), InstanceStatus::Running);
+    assert_eq!(
+        paused.status(),
+        InstanceStatus::Paused,
+        "the game the user paused stays paused"
+    );
+}
+
+#[gpui::test]
 fn opened_files_are_added_and_started(cx: &mut TestAppContext) {
     let mut h = open(cx);
     let paths = vec![h.dir.path().join("snake.jar")];

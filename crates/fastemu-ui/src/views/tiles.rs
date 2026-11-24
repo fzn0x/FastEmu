@@ -145,6 +145,7 @@ impl FastEmuView {
             session: Session::new(entry, slot, request, instance),
             screen: Rc::default(),
             restarting: false,
+            paused_by_app: false,
         });
         self.focus_tile(id, cx);
     }
