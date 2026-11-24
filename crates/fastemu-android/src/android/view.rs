@@ -91,11 +91,15 @@ impl EmulatorView {
         }
     }
 
-    /// Starts the game in `suite`, replacing the one that runs.
+    /// Starts the game in `suite`, replacing the one that runs. When it
+    /// fails, the running game keeps its held keys, and a finger or the
+    /// mouse lifting still releases them.
     pub(super) fn open(&mut self, suite: &Path, cx: &mut Context<'_, Self>) {
-        self.forget_input();
         self.error = match self.session.open(suite) {
-            Ok(()) => None,
+            Ok(()) => {
+                self.forget_input();
+                None
+            }
             Err(error) => {
                 log::error!("view: could not open {}: {error}", suite.display());
                 let name = suite.file_name().unwrap_or(suite.as_os_str());
