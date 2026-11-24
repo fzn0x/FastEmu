@@ -10,10 +10,9 @@ git clone https://github.com/fzn0x/FastEmu.git
 cd FastEmu
 ```
 
-`rust-toolchain.toml` selects the stable Rust toolchain with clippy
-and rustfmt. Install [rustup](https://rustup.rs/) and it downloads on
-the first build. The oldest Rust that builds FastEmu is the
-`rust-version` in `Cargo.toml`.
+`rust-toolchain.toml` pins Rust 1.99.0 with clippy and rustfmt. Install
+[rustup](https://rustup.rs/) and it downloads them on the first build.
+CI and the release builds use the same release.
 
 ## Crates
 
@@ -23,10 +22,12 @@ the first build. The oldest Rust that builds FastEmu is the
 | `fastemu-jvm`    | The virtual machine and class libraries       |
 | `fastemu-gfx`    | 2D graphics                                   |
 | `fastemu-audio`  | Sound and MIDI                                |
-| `fastemu-midp`   | MIDP, game API, MMAPI and Nokia UI            |
+| `fastemu-midp`   | MIDP, game API, MMAPI, connections, Nokia UI and the other makers' APIs |
 | `fastemu-ui`     | The GPUI interface shared by desktop and Android |
 | `fastemu`        | The desktop program and the headless runner   |
 | `fastemu-android`| The Android app                               |
+| `gpui_android`   | GPUI's Android backend                        |
+| `xtask`          | Repository tasks, run as `cargo xtask`        |
 
 ## Windows
 
@@ -41,28 +42,36 @@ The program is `target\release\fastemu.exe`.
 
 ## Linux
 
-Install a C compiler and the development packages GPUI needs for your
-display server. On Debian and Ubuntu these include `libxkbcommon-dev`,
-`libwayland-dev`, `libxcb1-dev`, `libvulkan-dev` and `libfontconfig-dev`.
+Install a C compiler, `pkg-config`, the ALSA headers and the development
+packages GPUI needs. On Debian and Ubuntu:
+
+```
+sudo apt-get install build-essential pkg-config clang cmake lld \
+  libasound2-dev libfontconfig-dev libglib2.0-dev libssl-dev \
+  libvulkan-dev libwayland-dev libx11-xcb-dev libxcb1-dev \
+  libxkbcommon-dev libxkbcommon-x11-dev libzstd-dev mesa-vulkan-drivers
+```
+
 Then:
 
 ```
 cargo build --release -p fastemu
 ```
 
-The program is `target/release/fastemu`.
+The program is `target/release/fastemu`. It needs a Vulkan driver and a
+Wayland or X11 session to open its window.
 
 ## macOS
 
-Install the Xcode command line tools with `xcode-select --install`,
-then:
+Install Xcode. GPUI compiles its Metal shaders with Xcode's Metal
+toolchain, which newer Xcode versions download separately with
+`xcodebuild -downloadComponent MetalToolchain`. Then:
 
 ```
 cargo build --release -p fastemu
 ```
 
-GPUI draws with Metal, so the full Xcode app may be needed to compile
-its shaders. The program is `target/release/fastemu`.
+The program is `target/release/fastemu`.
 
 ## Release builds
 
@@ -76,18 +85,16 @@ before tagging. `cargo xtask icons` renders `assets/icon.svg` into
 
 ## Android
 
-You need the Android SDK and NDK, and the Rust Android targets:
+The Android app is a Gradle project in `android/` around a native
+library that `cargo-ndk` builds. It needs the Android SDK and NDK, a JDK
+17, cargo-ndk 4.1.2 and the Rust Android targets:
 
 ```
-rustup target add aarch64-linux-android
+rustup target add aarch64-linux-android x86_64-linux-android
 ```
 
-The Android build uses the
-[Zed Android port](https://github.com/Dylanmurzello/zed-android-port)
-of GPUI. The
-`fastemu-android` crate documents the exact commands for building and
-signing the `.apk`, which may change as that port changes. Check its
-readme before you start.
+[Building the Android app](/docs/building-android/) has the exact
+versions and the commands for building, running and signing the `.apk`.
 
 ## Tests
 
@@ -96,6 +103,12 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 ```
+
+Many tests compile small Java programs, so they need a JDK 9 or newer
+(CI uses 17). Without one they skip, unless `FASTEMU_REQUIRE_JAVA=1` is
+set, as CI does, in which case they fail. The
+[contributing guide](https://github.com/fzn0x/FastEmu/blob/main/CONTRIBUTING.md#test-tools)
+describes the test tools.
 
 ## The site
 
@@ -107,4 +120,4 @@ npm ci
 node build.mjs
 ```
 
-The output is in `site/public/`.
+The output is in `site/public/`. The build fails on a broken link.
