@@ -10,6 +10,8 @@ pub mod format;
 mod pcm;
 #[allow(dead_code)]
 mod source;
+#[allow(dead_code)]
+mod wav;
 
 pub use error::AudioError;
 pub use format::{Format, SUPPORTED_CONTENT_TYPES};
