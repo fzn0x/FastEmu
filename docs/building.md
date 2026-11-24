@@ -1,0 +1,97 @@
+# Building from source
+
+FastEmu is a Rust workspace. The desktop app and the Android app both
+use Zed's GPUI for the interface.
+
+## Get the source
+
+```
+git clone https://github.com/fzn0x/FastEmu.git
+cd FastEmu
+```
+
+The repository pins its Rust toolchain in `rust-toolchain.toml`.
+Install [rustup](https://rustup.rs/) and the right version downloads
+on the first build.
+
+## Crates
+
+| Crate            | Role                                          |
+| ---------------- | --------------------------------------------- |
+| `fastemu-core`   | Types shared by the runtime and the apps      |
+| `fastemu-jvm`    | The virtual machine and class libraries       |
+| `fastemu-gfx`    | 2D graphics                                   |
+| `fastemu-audio`  | Sound and MIDI                                |
+| `fastemu-midp`   | MIDP, game API, MMAPI and Nokia UI            |
+| `fastemu-ui`     | The GPUI interface shared by desktop and Android |
+| `fastemu`        | The desktop program and the headless runner   |
+| `fastemu-android`| The Android app                               |
+
+## Windows
+
+Install Visual Studio Build Tools with the C++ workload and the Windows
+SDK, then:
+
+```
+cargo build --release -p fastemu
+```
+
+The program is `target\release\fastemu.exe`.
+
+## Linux
+
+Install a C compiler and the development packages GPUI needs for your
+display server. On Debian and Ubuntu these include `libxkbcommon-dev`,
+`libwayland-dev`, `libxcb1-dev`, `libvulkan-dev` and `libfontconfig-dev`.
+Then:
+
+```
+cargo build --release -p fastemu
+```
+
+The program is `target/release/fastemu`.
+
+## macOS
+
+Install the Xcode command line tools with `xcode-select --install`,
+then:
+
+```
+cargo build --release -p fastemu
+```
+
+GPUI draws with Metal, so the full Xcode app may be needed to compile
+its shaders. The program is `target/release/fastemu`.
+
+## Android
+
+You need the Android SDK and NDK, and the Rust Android targets:
+
+```
+rustup target add aarch64-linux-android
+```
+
+The Android build uses the Zed Android port of GPUI. The
+`fastemu-android` crate documents the exact commands for building and
+signing the `.apk`, which may change as that port changes. Check its
+readme before you start.
+
+## Tests
+
+```
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all --check
+```
+
+## The site
+
+The documentation site lives in `site/`. It needs Node 20 or later:
+
+```
+cd site
+npm ci
+node build.mjs
+```
+
+The output is in `site/public/`.
