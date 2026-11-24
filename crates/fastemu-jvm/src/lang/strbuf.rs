@@ -15,14 +15,31 @@ pub(crate) struct StrBuf {
     pub(crate) chars: Vec<u16>,
     /// The capacity Java would report: 16 to start, growing to twice
     /// plus two (or the length needed, if more) when the text outgrows it.
+    /// The heap counts the buffer at this capacity.
     capacity: usize,
 }
 
 impl StrBuf {
-    fn ensure(&mut self, needed: usize) {
+    /// The capacity after the text grows to `needed` characters.
+    fn grown(&self, needed: usize) -> usize {
         if needed > self.capacity {
-            self.capacity = (self.capacity * 2 + 2).max(needed);
+            self.capacity
+                .saturating_mul(2)
+                .saturating_add(2)
+                .max(needed)
+        } else {
+            self.capacity
         }
+    }
+
+    fn ensure(&mut self, needed: usize) {
+        self.capacity = self.grown(needed);
+    }
+
+    /// The bytes a buffer of `capacity` characters counts against the
+    /// heap.
+    fn bytes(capacity: usize) -> usize {
+        24usize.saturating_add(capacity.saturating_mul(2))
     }
 }
 
@@ -37,55 +54,67 @@ impl Default for StrBuf {
 
 impl Payload for StrBuf {
     fn heap_bytes(&self) -> usize {
-        24 + 2 * self.capacity
+        Self::bytes(self.capacity)
     }
 }
 
-/// The text of a buffer, for reading and editing; the capacity follows
-/// the length when the guard is dropped.
-struct BufMut<'a>(&'a mut StrBuf);
+/// The buffer `a[0]`, for reading.
+fn text<'a>(ctx: &'a Ctx<'_>, a: &[Value]) -> JResult<&'a StrBuf> {
+    ctx.payload::<StrBuf>(this(a))
+}
 
-impl std::ops::Deref for BufMut<'_> {
-    type Target = Vec<u16>;
+fn len(ctx: &Ctx<'_>, a: &[Value]) -> JResult<usize> {
+    Ok(text(ctx, a)?.chars.len())
+}
 
-    fn deref(&self) -> &Vec<u16> {
-        &self.0.chars
+/// Changes the text of the buffer `a[0]` with `f`, which adds at most
+/// `grow` characters, and counts the buffer's new size against the heap.
+/// Every method that changes a buffer goes through here, so none can
+/// forget to count.
+///
+/// When the text will outgrow the buffer's capacity, the new capacity is
+/// checked against the heap before `f` makes the host grow the text, and
+/// the heap is told once `f` is done. The capacity grows by doubling, so
+/// a buffer is counted again only a few times as it fills.
+fn edit<R>(
+    ctx: &mut Ctx<'_>,
+    a: &[Value],
+    grow: usize,
+    f: impl FnOnce(&mut Vec<u16>) -> R,
+) -> JResult<R> {
+    let obj = this(a);
+    let sb = ctx.payload::<StrBuf>(obj)?;
+    let needed = sb.chars.len().saturating_add(grow);
+    if needed > sb.capacity {
+        let capacity = sb.grown(needed);
+        ctx.check_alloc(StrBuf::bytes(capacity))?;
     }
-}
-
-impl std::ops::DerefMut for BufMut<'_> {
-    fn deref_mut(&mut self) -> &mut Vec<u16> {
-        &mut self.0.chars
+    let sb = ctx.payload_mut::<StrBuf>(obj)?;
+    let before = sb.capacity;
+    let result = f(&mut sb.chars);
+    sb.ensure(sb.chars.len());
+    if sb.capacity != before {
+        ctx.recount(obj);
     }
+    Ok(result)
 }
 
-impl Drop for BufMut<'_> {
-    fn drop(&mut self) {
-        let len = self.0.chars.len();
-        self.0.ensure(len);
-    }
-}
-
-fn buf<'a>(ctx: &'a mut Ctx<'_>, a: &[Value]) -> JResult<BufMut<'a>> {
-    Ok(BufMut(ctx.payload_mut::<StrBuf>(this(a))?))
-}
-
-fn state<'a>(ctx: &'a mut Ctx<'_>, a: &[Value]) -> JResult<&'a mut StrBuf> {
-    ctx.payload_mut::<StrBuf>(this(a))
-}
-
-fn len(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<usize> {
-    Ok(buf(ctx, a)?.len())
-}
-
-/// Throws `OutOfMemoryError` when a buffer of `chars` characters could not
-/// fit in the heap, before the host allocates it: the heap only measures
-/// a buffer at its next collection.
-fn check_fits(ctx: &mut Ctx<'_>, chars: usize) -> JResult<()> {
-    if chars.saturating_mul(2) > ctx.heap_usage().0 {
-        return Err(ctx.out_of_memory());
-    }
+/// Sets the capacity of the buffer `a[0]` to `capacity` characters, after
+/// checking that the heap can hold it, and counts it.
+fn set_capacity(ctx: &mut Ctx<'_>, a: &[Value], capacity: usize) -> JResult<()> {
+    ctx.check_alloc(StrBuf::bytes(capacity))?;
+    let obj = this(a);
+    ctx.payload_mut::<StrBuf>(obj)?.capacity = capacity;
+    ctx.recount(obj);
     Ok(())
+}
+
+/// The constructors that take text: the buffer starts holding `chars`
+/// with 16 characters of room.
+fn init_text(ctx: &mut Ctx<'_>, a: &[Value], chars: &[u16]) -> JResult<Value> {
+    set_capacity(ctx, a, chars.len().saturating_add(16))?;
+    edit(ctx, a, chars.len(), |text| text.extend_from_slice(chars))?;
+    Ok(Value::Void)
 }
 
 fn index_error(ctx: &mut Ctx<'_>, message: String) -> Throw {
@@ -175,45 +204,41 @@ fn class(name: &str) -> NativeClass {
                     &capacity.to_string(),
                 );
             }
-            check_fits(ctx, capacity as usize)?;
-            state(ctx, a)?.capacity = capacity as usize;
+            set_capacity(ctx, a, capacity as usize)?;
             Ok(Value::Void)
         })
         .method("<init>", "(Ljava/lang/String;)V", |ctx, a| {
             let s = ctx.non_null(a[1])?;
             let chars = ctx.string_utf16(s)?.to_vec();
-            let sb = state(ctx, a)?;
-            sb.capacity = chars.len() + 16;
-            sb.chars.extend_from_slice(&chars);
-            Ok(Value::Void)
+            init_text(ctx, a, &chars)
         })
         .method("<init>", "(Ljava/lang/CharSequence;)V", |ctx, a| {
             ctx.non_null(a[1])?;
             let chars = object_text(ctx, a[1])?;
-            let sb = state(ctx, a)?;
-            sb.capacity = chars.len() + 16;
-            sb.chars.extend_from_slice(&chars);
-            Ok(Value::Void)
+            init_text(ctx, a, &chars)
         })
         .method("length", "()I", |ctx, a| {
             Ok(Value::Int(len(ctx, a)? as i32))
         })
         .method("capacity", "()I", |ctx, a| {
-            Ok(Value::Int(state(ctx, a)?.capacity as i32))
+            Ok(Value::Int(text(ctx, a)?.capacity as i32))
         })
         .method("ensureCapacity", "(I)V", |ctx, a| {
             let want = a[1].int().max(0) as usize;
-            check_fits(ctx, want)?;
-            state(ctx, a)?.ensure(want);
+            let sb = text(ctx, a)?;
+            let capacity = sb.grown(want);
+            if capacity != sb.capacity {
+                set_capacity(ctx, a, capacity)?;
+            }
             Ok(Value::Void)
         })
         .method("toString", "()Ljava/lang/String;", |ctx, a| {
-            let chars = buf(ctx, a)?.clone();
+            let chars = text(ctx, a)?.chars.clone();
             Ok(ctx.new_string_utf16(chars)?.into())
         })
         .method("charAt", "(I)C", |ctx, a| {
             let i = a[1].int();
-            let c = state(ctx, a)?.chars.get(i as usize).copied();
+            let c = text(ctx, a)?.chars.get(i as usize).copied();
             match c {
                 Some(c) => Ok(Value::Int(i32::from(c))),
                 None => {
@@ -229,7 +254,7 @@ fn class(name: &str) -> NativeClass {
             if i < 0 || i as usize >= n {
                 return Err(index_error(ctx, format!("index {i},length {n}")));
             }
-            buf(ctx, a)?[i as usize] = c;
+            edit(ctx, a, 0, |text| text[i as usize] = c)?;
             Ok(Value::Void)
         })
         .method("setLength", "(I)V", |ctx, a| {
@@ -237,8 +262,8 @@ fn class(name: &str) -> NativeClass {
             if n < 0 {
                 return Err(index_error(ctx, format!("String index out of range: {n}")));
             }
-            check_fits(ctx, n as usize)?;
-            buf(ctx, a)?.resize(n as usize, 0);
+            let grow = (n as usize).saturating_sub(len(ctx, a)?);
+            edit(ctx, a, grow, |text| text.resize(n as usize, 0))?;
             Ok(Value::Void)
         })
         .method("getChars", "(II[CI)V", |ctx, a| {
@@ -250,7 +275,7 @@ fn class(name: &str) -> NativeClass {
                     format!("start {begin}, end {end}, length {n}"),
                 ));
             }
-            let part = buf(ctx, a)?[begin as usize..end as usize].to_vec();
+            let part = text(ctx, a)?.chars[begin as usize..end as usize].to_vec();
             let dst = ctx.non_null(a[3])?;
             let dst_len = ctx.array_len(dst)?;
             let (at, k) = check_range(
@@ -267,7 +292,7 @@ fn class(name: &str) -> NativeClass {
             let s = ctx.non_null(a[1])?;
             let target = ctx.string_utf16(s)?.to_vec();
             Ok(Value::Int(super::string::index_of(
-                &buf(ctx, a)?,
+                &text(ctx, a)?.chars,
                 &target,
                 0,
             )))
@@ -276,7 +301,7 @@ fn class(name: &str) -> NativeClass {
             let s = ctx.non_null(a[1])?;
             let target = ctx.string_utf16(s)?.to_vec();
             Ok(Value::Int(super::string::index_of(
-                &buf(ctx, a)?,
+                &text(ctx, a)?.chars,
                 &target,
                 a[2].int(),
             )))
@@ -284,9 +309,9 @@ fn class(name: &str) -> NativeClass {
         .method("lastIndexOf", "(Ljava/lang/String;)I", |ctx, a| {
             let s = ctx.non_null(a[1])?;
             let target = ctx.string_utf16(s)?.to_vec();
-            let b = buf(ctx, a)?;
+            let b = &text(ctx, a)?.chars;
             Ok(Value::Int(super::string::last_index_of(
-                &b,
+                b,
                 &target,
                 b.len() as i32,
             )))
@@ -302,7 +327,7 @@ fn class(name: &str) -> NativeClass {
             substring(ctx, a, a[1].int(), a[2].int())
         })
         .method("reverse", &format!("(){me}"), |ctx, a| {
-            reverse(&mut buf(ctx, a)?);
+            edit(ctx, a, 0, |text| reverse(text))?;
             Ok(a[0])
         })
         .method("delete", &format!("(II){me}"), |ctx, a| {
@@ -315,7 +340,9 @@ fn class(name: &str) -> NativeClass {
                     format!("start {start}, end {end}, length {n}"),
                 ));
             }
-            buf(ctx, a)?.drain(start as usize..end as usize);
+            edit(ctx, a, 0, |text| {
+                text.drain(start as usize..end as usize);
+            })?;
             Ok(a[0])
         })
         .method("deleteCharAt", &format!("(I){me}"), |ctx, a| {
@@ -324,7 +351,9 @@ fn class(name: &str) -> NativeClass {
             if i < 0 || i as usize >= n {
                 return Err(index_error(ctx, format!("index {i},length {n}")));
             }
-            buf(ctx, a)?.remove(i as usize);
+            edit(ctx, a, 0, |text| {
+                text.remove(i as usize);
+            })?;
             Ok(a[0])
         })
         .method(
@@ -342,7 +371,9 @@ fn class(name: &str) -> NativeClass {
                         format!("start {start}, end {end}, length {n}"),
                     ));
                 }
-                buf(ctx, a)?.splice(start as usize..end as usize, with);
+                edit(ctx, a, with.len(), |text| {
+                    text.splice(start as usize..end as usize, with.iter().copied());
+                })?;
                 Ok(a[0])
             },
         )
@@ -357,7 +388,7 @@ fn class(name: &str) -> NativeClass {
                 size,
             )?;
             let part = ctx.array::<u16>(arr)?[off..off + n].to_vec();
-            buf(ctx, a)?.extend_from_slice(&part);
+            edit(ctx, a, part.len(), |text| text.extend_from_slice(&part))?;
             Ok(a[0])
         })
         .method(
@@ -370,7 +401,8 @@ fn class(name: &str) -> NativeClass {
                     let message = format!("start {start}, end {end}, length {}", text.len());
                     return throw(ctx, "java/lang/IndexOutOfBoundsException", &message);
                 }
-                buf(ctx, a)?.extend_from_slice(&text[start as usize..end as usize]);
+                let part = &text[start as usize..end as usize];
+                edit(ctx, a, part.len(), |chars| chars.extend_from_slice(part))?;
                 Ok(a[0])
             },
         )
@@ -392,8 +424,8 @@ fn class(name: &str) -> NativeClass {
         let insert_desc = format!("(I{desc}){me}");
         let d = desc.to_owned();
         class = class.method("append", &append_desc, move |ctx, a| {
-            let text = text_of(ctx, &d, a[1])?;
-            buf(ctx, a)?.extend_from_slice(&text);
+            let part = text_of(ctx, &d, a[1])?;
+            edit(ctx, a, part.len(), |text| text.extend_from_slice(&part))?;
             Ok(a[0])
         });
         let d = desc.to_owned();
@@ -411,7 +443,9 @@ fn insert_at(ctx: &mut Ctx<'_>, a: &[Value], at: i32, text: Vec<u16>) -> JResult
         return Err(index_error(ctx, format!("offset {at}, length {n}")));
     }
     let at = at as usize;
-    buf(ctx, a)?.splice(at..at, text);
+    edit(ctx, a, text.len(), |chars| {
+        chars.splice(at..at, text);
+    })?;
     Ok(a[0])
 }
 
@@ -423,7 +457,7 @@ fn substring(ctx: &mut Ctx<'_>, a: &[Value], begin: i32, end: i32) -> JResult<Va
             format!("start {begin}, end {end}, length {n}"),
         ));
     }
-    let part = buf(ctx, a)?[begin as usize..end as usize].to_vec();
+    let part = text(ctx, a)?.chars[begin as usize..end as usize].to_vec();
     Ok(ctx.new_string_utf16(part)?.into())
 }
 
