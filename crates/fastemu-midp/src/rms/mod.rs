@@ -5,9 +5,14 @@ mod api;
 pub mod disk;
 pub mod format;
 pub mod name;
+mod state;
+mod store;
 
 use fastemu_jvm::NativeClass;
 
+pub use state::{DEFAULT_QUOTA, set_quota};
+
+const RECORD_STORE: &str = "javax/microedition/rms/RecordStore";
 const RECORD_ENUMERATION: &str = "javax/microedition/rms/RecordEnumeration";
 const RECORD_COMPARATOR: &str = "javax/microedition/rms/RecordComparator";
 const RECORD_FILTER: &str = "javax/microedition/rms/RecordFilter";
@@ -21,5 +26,7 @@ const RECORD_STORE_NOT_OPEN_EXCEPTION: &str = "javax/microedition/rms/RecordStor
 
 /// The classes of this module.
 pub fn classes() -> Vec<NativeClass> {
-    api::classes()
+    let mut classes = api::classes();
+    classes.push(store::class());
+    classes
 }
