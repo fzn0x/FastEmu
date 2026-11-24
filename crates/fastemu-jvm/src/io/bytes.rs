@@ -1,6 +1,11 @@
 //! `java.io.ByteArrayInputStream` and `java.io.ByteArrayOutputStream`:
 //! streams over a `byte[]` kept in protected fields, which a subclass may
 //! read and change, as Java's do.
+//!
+//! The data streams, readers and writers read and write these two
+//! straight through their fields when they are not subclassed
+//! ([`read_plain`], [`write_plain`]), instead of calling `read` and
+//! `write` for every byte.
 
 use crate::class::ArrayType;
 use crate::classfile::access;
@@ -89,6 +94,29 @@ fn take(ctx: &mut Ctx<'_>, obj: ObjRef, max: usize, dst: &mut Vec<u8>) -> JResul
     Ok(Some(n))
 }
 
+/// Whether `obj` is exactly an instance of the library class `name`, not
+/// of a subclass that may override what the fast paths skip.
+fn is_plain(ctx: &Ctx<'_>, obj: ObjRef, name: &str) -> bool {
+    ctx.class_name(ctx.class_of(obj)) == name
+}
+
+/// Reads up to `max` bytes from `stream` straight out of its buffer when
+/// it is a plain `ByteArrayInputStream`, appending them to `dst`.
+/// Returns `None` for any other stream, which must be read through its
+/// own `read` methods; else what `read(byte[], int, int)` would return
+/// (`-1` at the end).
+pub(crate) fn read_plain(
+    ctx: &mut Ctx<'_>,
+    stream: ObjRef,
+    max: usize,
+    dst: &mut Vec<u8>,
+) -> JResult<Option<i32>> {
+    if !is_plain(ctx, stream, BAIS) {
+        return Ok(None);
+    }
+    Ok(Some(take(ctx, stream, max, dst)?.map_or(-1, |n| n as i32)))
+}
+
 /// The fields of a `ByteArrayOutputStream`.
 struct Baos {
     buf: FieldId,
@@ -143,6 +171,23 @@ fn append(ctx: &mut Ctx<'_>, obj: ObjRef, bytes: &[u8]) -> JResult<()> {
     }
     ctx.set_field(obj, f.count, Value::Int(needed as i32));
     Ok(())
+}
+
+/// Appends `bytes` straight to the buffer of `stream` when it is a plain
+/// `ByteArrayOutputStream`, and returns whether it was one; any other
+/// stream must be written through its own `write` methods.
+pub(crate) fn write_plain(ctx: &mut Ctx<'_>, stream: ObjRef, bytes: &[u8]) -> JResult<bool> {
+    if !is_plain_output(ctx, stream) {
+        return Ok(false);
+    }
+    append(ctx, stream, bytes)?;
+    Ok(true)
+}
+
+/// Whether `stream` is a plain `ByteArrayOutputStream`, which
+/// [`write_plain`] writes without calling Java.
+pub(crate) fn is_plain_output(ctx: &Ctx<'_>, stream: ObjRef) -> bool {
+    is_plain(ctx, stream, BAOS)
 }
 
 /// The bytes written to the output stream `obj` so far.
