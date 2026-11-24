@@ -6,7 +6,7 @@ use super::{check_size, failed};
 use crate::color::OPAQUE;
 use crate::error::Result;
 
-const FILE_HEADER: usize = 14;
+const FILE_HEADER: u64 = 14;
 const BI_RGB: u32 = 0;
 const BI_BITFIELDS: u32 = 3;
 const BI_ALPHABITFIELDS: u32 = 6;
@@ -46,14 +46,23 @@ fn channel(v: u32, mask: u32) -> u32 {
 }
 
 pub(super) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>)> {
-    let byte = |i: usize| data.get(i).copied().unwrap_or(0);
-    let u16_at = |i: usize| u16::from_le_bytes([byte(i), byte(i + 1)]);
-    let u32_at = |i: usize| u32::from_le_bytes([byte(i), byte(i + 1), byte(i + 2), byte(i + 3)]);
-    if data.len() < FILE_HEADER + 12 {
+    // Offsets come from the file and are worked out in u64, so a header
+    // near 4 GiB cannot overflow a 32-bit usize. Bytes past the end of
+    // the file read as zero.
+    let byte = |i: u64| {
+        usize::try_from(i)
+            .ok()
+            .and_then(|i| data.get(i))
+            .copied()
+            .unwrap_or(0)
+    };
+    let u16_at = |i: u64| u16::from_le_bytes([byte(i), byte(i + 1)]);
+    let u32_at = |i: u64| u32::from_le_bytes([byte(i), byte(i + 1), byte(i + 2), byte(i + 3)]);
+    if data.len() < FILE_HEADER as usize + 12 {
         return Err(failed("BMP", "the file is too short"));
     }
-    let pixel_offset = u32_at(10) as usize;
-    let header = u32_at(FILE_HEADER) as usize;
+    let pixel_offset = u64::from(u32_at(10));
+    let header = u64::from(u32_at(FILE_HEADER));
     let (width, height, bits, compression, colours, entry) = match header {
         12 => (
             i64::from(u16_at(18)),
@@ -68,7 +77,7 @@ pub(super) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>)> {
             i64::from(u32_at(22) as i32),
             u16_at(28),
             u32_at(30),
-            u32_at(46) as usize,
+            u64::from(u32_at(46)),
             4,
         ),
         _ => return Err(failed("BMP", "unknown header")),
@@ -80,6 +89,9 @@ pub(super) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>)> {
     }
     let (w, h) = (width as u32, height as u32);
     check_size(w, h)?;
+    if !matches!(bits, 1 | 4 | 8 | 16 | 24 | 32) {
+        return Err(failed("BMP", "unsupported bit depth"));
+    }
     let masks_at = FILE_HEADER + 40;
     let masks = match (compression, bits) {
         (BI_RGB, 16) => Masks {
@@ -119,7 +131,7 @@ pub(super) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>)> {
             1 << bits
         };
         (0..count)
-            .map(|i| {
+            .map(|i: u64| {
                 let at = start + i * entry;
                 OPAQUE
                     | u32::from(byte(at + 2)) << 16
@@ -130,16 +142,16 @@ pub(super) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>)> {
     } else {
         Vec::new()
     };
-    let row_bytes = (w as usize * usize::from(bits)).div_ceil(32) * 4;
+    let row_bytes = (u64::from(w) * u64::from(bits)).div_ceil(32) * 4;
     let mut pixels = Vec::with_capacity(w as usize * h as usize);
-    for y in 0..h as usize {
-        let row = if top_down { y } else { h as usize - 1 - y };
+    for y in 0..u64::from(h) {
+        let row = if top_down { y } else { u64::from(h) - 1 - y };
         let base = pixel_offset + row * row_bytes;
-        for x in 0..w as usize {
+        for x in 0..u64::from(w) {
             let pixel = match bits {
                 1 | 4 | 8 => {
-                    let bit = x * usize::from(bits);
-                    let shift = 8 - usize::from(bits) - bit % 8;
+                    let bit = x * u64::from(bits);
+                    let shift = 8 - u64::from(bits) - bit % 8;
                     let index = (byte(base + bit / 8) >> shift) & ((1_u16 << bits) - 1) as u8;
                     palette.get(usize::from(index)).copied().unwrap_or(OPAQUE)
                 }
@@ -169,6 +181,7 @@ pub(super) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>)> {
 
 #[cfg(test)]
 mod tests {
+    use crate::color::OPAQUE;
     use crate::error::GfxError;
     use crate::surface::Surface;
 
@@ -256,5 +269,24 @@ mod tests {
         let short = Surface::decode(&bmp(2, 2, 24, 0, &[], &[9, 9, 9])).unwrap();
         assert_eq!(short.pixel(0, 1), Some(0xFF09_0909));
         assert_eq!(short.pixel(1, 0), Some(0xFF00_0000));
+    }
+
+    #[test]
+    fn offsets_near_four_gib_read_as_missing_bytes() {
+        // A pixel offset and a header size of nearly 4 GiB overflow a
+        // 32-bit usize when added to; the pixels and palette they point
+        // at are simply past the end of the file.
+        let mut far = bmp(1, 1, 24, 0, &[], &[1, 2, 3, 0]);
+        far[10..14].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(Surface::decode(&far).unwrap().pixel(0, 0), Some(OPAQUE));
+        let mut huge_header = bmp(1, 1, 8, 0, &[], &[0; 4]);
+        huge_header[14..18].copy_from_slice(&u32::MAX.to_le_bytes());
+        let image = Surface::decode(&huge_header).unwrap();
+        assert_eq!(image.pixel(0, 0), Some(OPAQUE));
+        let odd_depth = bmp(1, 1, 2, 0, &[], &[0; 4]);
+        assert!(matches!(
+            Surface::decode(&odd_depth),
+            Err(GfxError::Decode(_))
+        ));
     }
 }
