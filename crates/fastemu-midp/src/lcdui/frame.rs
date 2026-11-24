@@ -65,7 +65,7 @@ pub(crate) fn present(ctx: &mut Ctx<'_>) -> JResult<()> {
         Some(surface) => surface,
         slot => slot.insert(
             Surface::screen(whole.width as u32, whole.height as u32)
-                .expect("the screen size was checked when the state was made"),
+                .expect("a back buffer of this size was made above"),
         ),
     };
     copy_content(composed, &pixels.lock(), chrome.layout.content);
