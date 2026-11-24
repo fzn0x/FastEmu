@@ -23,7 +23,8 @@
 //! around calls into Java or in a loop with no safepoint. The control
 //! thread does not wait for the lock longer than a second at a time: a
 //! lifecycle call or input that cannot start in that time is dropped, and
-//! a stop sets the VM's stop flag before it waits for anything.
+//! a stop sets the VM's stop flag as soon as `destroyApp` has had its
+//! second, before it waits for the lock again.
 //!
 //! `notifyDestroyed` ends the instance the same way without `destroyApp`.
 //! A crash (the MIDlet class missing, its constructor or `startApp`
