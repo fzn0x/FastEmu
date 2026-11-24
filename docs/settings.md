@@ -122,9 +122,12 @@ Each game's saves are in a folder named after its number in the library,
 with one folder per running copy inside: `games/3/0` is the first copy of
 game 3, `games/3/1` the second copy running beside it. The record stores
 are in its `rms` folder. Where the system names no Pictures folder,
-screenshots go to a `screenshots` folder beside `games`. A file that
-cannot be read, such as a damaged
-`settings.json`, is reported in the window and the defaults are used.
+screenshots go to a `screenshots` folder beside `games`.
+
+A `library.json` or `settings.json` that cannot be read, such as a
+damaged one, is reported in the window, kept beside the new one as
+`settings.json.broken` (or `library.json.broken`), and the defaults are
+used.
 
 On Android the library, settings, saves and the app's copies of games are
 in the app's private storage, and screenshots in
