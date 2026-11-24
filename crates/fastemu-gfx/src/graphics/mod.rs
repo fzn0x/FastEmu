@@ -291,7 +291,7 @@ impl Graphics {
     }
 
     /// A canvas over `target` with the clip and the current colour.
-    fn canvas<'a>(&self, target: &'a mut Surface) -> Canvas<'a> {
+    pub(crate) fn canvas<'a>(&self, target: &'a mut Surface) -> Canvas<'a> {
         self.canvas_with(target, self.color)
     }
 }
