@@ -261,10 +261,11 @@ fn rethrow(ctx: &mut Ctx<'_>, failure: &(String, Option<String>)) -> Throw {
 fn remember(ctx: &mut Ctx<'_>, shared: &Shared, thrown: Throw) -> Throw {
     if let Throw::Exception(e) = thrown {
         let class = ctx.class_name(ctx.class_of(e)).to_owned();
-        let message = ctx
-            .call_virtual(e, "getMessage", "()Ljava/lang/String;", &[])
-            .ok()
-            .and_then(|m| ctx.opt_string(m).ok().flatten());
+        let message = match ctx.call_virtual(e, "getMessage", "()Ljava/lang/String;", &[]) {
+            Ok(m) => ctx.opt_string(m).ok().flatten(),
+            Err(Throw::Stop) => return Throw::Stop,
+            Err(Throw::Exception(_)) => None,
+        };
         lock(shared).failure = Some((class, message));
         ctx.notify_waiters();
     }
