@@ -146,6 +146,9 @@ impl Ctx<'_> {
             m.waiters.retain(|&t| t != me);
         }
         outcome?;
+        // A wait that ends while paused parks before it takes the monitor
+        // back, so a host thread may still enter it meanwhile.
+        self.park_while_paused()?;
         // Take the monitor back before returning, as Java requires.
         loop {
             let m = self.state.monitors.entry(obj).or_default();

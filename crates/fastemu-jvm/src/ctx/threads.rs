@@ -67,6 +67,12 @@ impl Ctx<'_> {
             }
             self.wait_raw(Some(deadline))?;
         }
+        self.park_while_paused()
+    }
+
+    /// Waits while the virtual machine is paused, so a sleep or wait that
+    /// ends during a pause does not run Java until it resumes.
+    pub(crate) fn park_while_paused(&mut self) -> JResult<()> {
         while self.is_paused() {
             self.wait_raw(None)?;
         }

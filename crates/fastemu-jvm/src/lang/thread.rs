@@ -119,14 +119,14 @@ fn join(ctx: &mut Ctx<'_>, a: &[Value], millis: i64) -> JResult<Value> {
     }
     let deadline = (millis > 0).then(|| Instant::now() + Duration::from_millis(millis as u64));
     loop {
-        if !ctx.payload::<ThreadData>(this(a))?.alive {
+        if !ctx.payload::<ThreadData>(this(a))?.alive
+            || deadline.is_some_and(|d| Instant::now() >= d)
+        {
+            ctx.park_while_paused()?;
             return Ok(Value::Void);
         }
         if ctx.take_interrupt() {
             return throw(ctx, "java/lang/InterruptedException", "join interrupted");
-        }
-        if deadline.is_some_and(|d| Instant::now() >= d) {
-            return Ok(Value::Void);
         }
         ctx.wait_raw(deadline)?;
     }

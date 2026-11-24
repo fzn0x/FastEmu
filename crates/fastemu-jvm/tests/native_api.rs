@@ -447,6 +447,29 @@ fn pause_resume_and_stop_control_running_java() {
 }
 
 #[test]
+fn a_wait_that_times_out_while_paused_parks_until_resumed() {
+    let vm = vm();
+    vm.attach("setup", |ctx| ctx.set_extension(Vec::<&str>::new()));
+    vm.pause();
+    vm.spawn("waiter", |ctx| {
+        let class = ctx.find_class("java/lang/Object")?;
+        let lock = ctx.new_object(class)?;
+        ctx.monitor_enter(lock)?;
+        ctx.monitor_wait(lock, Some(Instant::now() + Duration::from_millis(20)))?;
+        ctx.monitor_exit(lock)?;
+        ctx.extension_mut::<Vec<&str>>().unwrap().push("woke");
+        Ok(())
+    })
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(150));
+    let woke = |vm: &Vm| vm.attach("read", |ctx| ctx.extension::<Vec<&str>>().unwrap().len());
+    assert_eq!(woke(&vm), 0, "the wait ended while paused, so it parks");
+    vm.resume();
+    assert!(eventually(|| woke(&vm) == 1));
+    assert!(vm.wait_finished(Some(Duration::from_secs(2))));
+}
+
+#[test]
 fn locks_release_while_a_native_does_slow_work() {
     let vm = vm();
     vm.spawn("spinner", |ctx| {
