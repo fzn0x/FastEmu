@@ -83,13 +83,13 @@ fn edit<R>(
     f: impl FnOnce(&mut Vec<u16>) -> R,
 ) -> JResult<R> {
     let obj = this(a);
-    let sb = ctx.payload::<StrBuf>(obj)?;
+    let mut sb = ctx.payload_mut::<StrBuf>(obj)?;
     let needed = sb.chars.len().saturating_add(grow);
     if needed > sb.capacity {
         let capacity = sb.grown(needed);
         ctx.check_alloc(StrBuf::bytes(capacity))?;
+        sb = ctx.payload_mut::<StrBuf>(obj)?;
     }
-    let sb = ctx.payload_mut::<StrBuf>(obj)?;
     let before = sb.capacity;
     let result = f(&mut sb.chars);
     sb.ensure(sb.chars.len());
