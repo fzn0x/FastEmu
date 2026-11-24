@@ -202,28 +202,36 @@ impl ScreenHandler for AlertHandler {
             return Ok(());
         };
         let theme = *p.theme;
-        let mut y = 6 - scroll;
+        let font = p.fonts.text.clone();
+        let lines = wrap(&font, &text, target.width - 12);
+        let side = p.fonts.label.height() * 2;
+        let picture = match image {
+            Some(image) => surface_of(ctx, image)?.lock().height() as i32 + 6,
+            None if kind != 0 => side + 6,
+            None => 0,
+        };
+        let bar = if gauge.is_some() {
+            font.height() + 10
+        } else {
+            0
+        };
+        // Short content sits in the middle; long content scrolls.
+        let content = picture + lines.len() as i32 * font.height() + bar + 12;
+        let mut y = (target.height - content).max(0) / 2 + 6 - scroll;
         match image {
             Some(image) => {
                 let surface = surface_of(ctx, image)?;
                 let pixels = surface.lock();
                 let x = (target.width - pixels.width() as i32) / 2;
                 p.image(&pixels, x, y);
-                y += pixels.height() as i32 + 6;
             }
             None if kind != 0 => {
-                let side = p.fonts.label.height() * 2;
-                icon(
-                    &mut p,
-                    kind,
-                    Rect::new((target.width - side) / 2, y, side, side),
-                );
-                y += side + 6;
+                let r = Rect::new((target.width - side) / 2, y, side, side);
+                icon(&mut p, kind, r);
             }
             None => {}
         }
-        let font = p.fonts.text.clone();
-        let lines = wrap(&font, &text, target.width - 12);
+        y += picture;
         for line in &lines {
             let units = &text[line.clone()];
             let x = (target.width - super::draw::width(&font, units)) / 2;
@@ -231,14 +239,11 @@ impl ScreenHandler for AlertHandler {
             y += font.height();
         }
         if let Some(g) = gauge {
-            y += 6;
-            let bar = Rect::new(12, y, target.width - 24, font.height() + 4);
-            gauge::draw(&mut p, g, bar, false);
-            y += bar.height;
+            let r = Rect::new(12, y + 6, target.width - 24, font.height() + 4);
+            gauge::draw(&mut p, g, r, false);
         }
-        let height = y + 6 + scroll;
-        p.scrollbar(height, target.height, scroll);
-        alert_mut(ctx, obj)?.height = height;
+        p.scrollbar(content, target.height, scroll);
+        alert_mut(ctx, obj)?.height = content;
         Ok(())
     }
 

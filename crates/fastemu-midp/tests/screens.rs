@@ -143,7 +143,7 @@ fn screens_alerts_time_out_and_dismiss() {
     // The timed alert goes by itself and shows the canvas behind it.
     run.wait_log("behind 1");
     // The modal alert has a listener: it waits for the select key.
-    run.wait_frame(|f| rgb(f, 120, 160) == BACKGROUND);
+    run.wait_frame(|f| rgb(f, 2, 40) == BACKGROUND);
     std::thread::sleep(Duration::from_millis(400));
     assert!(!run.has("dismissed"), "{}", run.dump());
     run.tap(Key::Fire);
