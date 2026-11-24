@@ -123,7 +123,10 @@ impl Group {
         for player in self.player_ids(&mixer) {
             if paused {
                 mixer.fade_out(player);
-            } else if let Some(slot) = mixer.slots.get_mut(&player) {
+            }
+            // Silent while paused, so a stop, seek or close meanwhile
+            // has nothing to fade out; ramps up again on resume.
+            if let Some(slot) = mixer.slots.get_mut(&player) {
                 slot.voice.gain = 0.0;
             }
         }

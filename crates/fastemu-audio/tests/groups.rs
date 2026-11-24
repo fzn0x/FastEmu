@@ -101,6 +101,29 @@ fn pausing_a_group_freezes_its_time() {
 }
 
 #[test]
+fn a_paused_group_stays_silent_when_its_players_change() {
+    let engine = engine(8000);
+    let group = engine.create_group();
+    let players: Vec<_> = (0..3)
+        .map(|_| {
+            let player = group
+                .create_player(&constant_wav(8000, 8000, 8000), None)
+                .unwrap();
+            player.start().unwrap();
+            player
+        })
+        .collect();
+    render(&engine, 200);
+    group.set_paused(true);
+    render(&engine, 200);
+    // Stopping, seeking or closing a paused player has nothing to fade.
+    players[0].stop().unwrap();
+    players[1].set_media_time(500_000).unwrap();
+    players[2].close();
+    assert_eq!(peak(&render(&engine, 200)), 0.0);
+}
+
+#[test]
 fn stop_all_stops_every_player_of_the_group() {
     let engine = engine(8000);
     let group = engine.create_group();
