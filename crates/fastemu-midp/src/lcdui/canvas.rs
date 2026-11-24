@@ -137,14 +137,33 @@ fn service_repaints(ctx: &mut Ctx<'_>, canvas: ObjRef) -> JResult<()> {
 /// buffer and presents the screen: `GameCanvas.flushGraphics`. Waits for
 /// the frame slot first when called off the event thread, so the frame
 /// rate bound holds for games that only flush. Does nothing for a canvas
-/// that is not shown.
-pub fn flush(ctx: &mut Ctx<'_>, canvas: ObjRef, source: &Surface, region: Rect) -> JResult<()> {
+/// that is not shown, or that was hidden while the call waited.
+///
+/// The source is locked only for the copy, after the wait: the wait
+/// releases the VM lock, and the collector locks every image's pixels to
+/// count them, so holding them across it could block both threads.
+pub fn flush(
+    ctx: &mut Ctx<'_>,
+    canvas: ObjRef,
+    source: &SharedSurface,
+    region: Rect,
+) -> JResult<()> {
     if !is_shown(ctx, canvas) {
         return Ok(());
     }
     if !on_event_thread(ctx) {
         frame::wait_for_slot(ctx)?;
+        if !is_shown(ctx, canvas) {
+            return Ok(());
+        }
     }
+    copy_region(ctx, canvas, &source.lock(), region)?;
+    frame::present(ctx)
+}
+
+/// Copies `region` of `source` onto the same place of `canvas`'s back
+/// buffer, cut to both.
+fn copy_region(ctx: &mut Ctx<'_>, canvas: ObjRef, source: &Surface, region: Rect) -> JResult<()> {
     let (w, h) = displayable::size(ctx, canvas)?;
     let region = region.intersect(Rect::new(0, 0, w, h)).intersect(Rect::new(
         0,
@@ -166,7 +185,7 @@ pub fn flush(ctx: &mut Ctx<'_>, canvas: ObjRef, source: &Surface, region: Rect) 
             }
         });
     }
-    frame::present(ctx)
+    Ok(())
 }
 
 #[allow(
