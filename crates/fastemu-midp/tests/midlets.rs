@@ -107,8 +107,9 @@ fn keys_and_pointer_events_reach_the_canvas() {
 /// How long the test below keeps the event thread holding the VM lock.
 const HOLD: Duration = Duration::from_millis(500);
 
-/// The longest a send may take while the VM lock is held: far under
-/// [`HOLD`], with room for a loaded CI machine. It takes microseconds.
+/// The longest a send or a poll may take while the VM lock is held: far
+/// under [`HOLD`], with room for a loaded CI machine. Each takes
+/// microseconds.
 const SEND_LIMIT: Duration = Duration::from_millis(100);
 
 /// Holds the event thread for [`HOLD`] the first time it calls the
@@ -192,12 +193,24 @@ fn input_never_waits_for_a_game_holding_its_vm_lock() {
             slowest = slowest.max(sent.elapsed());
         }
     }
+    // So do the calls the apps make for every game on every frame.
+    let polled = Instant::now();
+    let _ = run.instance.frame();
+    let _ = run.instance.status();
+    let _ = run.instance.wants_text();
+    let _ = run.instance.take_link_request();
+    let _ = run.lines();
+    let poll = polled.elapsed();
     let asked = Instant::now();
     let _ = run.instance.heap_stats();
     let waited = asked.elapsed();
     assert!(
         slowest < SEND_LIMIT,
         "a send took {slowest:?} while a game thread held the VM lock"
+    );
+    assert!(
+        poll < SEND_LIMIT,
+        "a poll took {poll:?} while a game thread held the VM lock"
     );
     assert!(
         waited >= HOLD / 5,
