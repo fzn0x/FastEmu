@@ -4,6 +4,7 @@ pub mod anchor;
 pub mod color;
 pub mod error;
 pub mod graphics;
+pub mod nokia;
 mod raster;
 pub mod surface;
 pub mod transform;

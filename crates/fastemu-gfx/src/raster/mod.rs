@@ -5,6 +5,7 @@
 pub(crate) mod blit;
 pub(crate) mod ellipse;
 pub(crate) mod line;
+pub(crate) mod polygon;
 
 use crate::color::blend;
 use crate::surface::Surface;

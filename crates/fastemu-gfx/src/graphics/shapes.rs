@@ -1,7 +1,8 @@
-//! Lines and rectangles.
+//! Lines, rectangles and triangles.
 
 use super::{Graphics, StrokeStyle};
 use crate::raster::line::Line;
+use crate::raster::polygon::{PolygonPart, polygon};
 use crate::raster::{Canvas, dotted_visible};
 use crate::surface::Surface;
 
@@ -41,6 +42,24 @@ impl Graphics {
             height.into(),
             self.stroke,
         );
+    }
+
+    /// `fillTriangle(x1, y1, x2, y2, x3, y3)`: the pixels whose top-left
+    /// corner lies inside or on the triangle, plus the lines between its
+    /// corners as `drawLine` draws them.
+    #[allow(clippy::too_many_arguments)] // MIDP's signature
+    pub fn fill_triangle(
+        &self,
+        target: &mut Surface,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        x3: i32,
+        y3: i32,
+    ) {
+        let corners = [self.at(x1, y1), self.at(x2, y2), self.at(x3, y3)];
+        polygon(&mut self.canvas(target), &corners, PolygonPart::Filled);
     }
 }
 
@@ -182,6 +201,24 @@ mod tests {
         g.draw_line(&mut s, 0, 0, 6, 0);
         g.draw_rect(&mut s, 0, 1, 6, 2);
         assert_eq!(render(&s), ["#.#.#.#", "#.#.#.#", ".......", "#.#.#.#"]);
+    }
+
+    #[test]
+    fn fill_triangle_includes_the_drawn_sides() {
+        let (mut filled, mut g) = canvas(6, 5);
+        g.translate(1, 0);
+        g.fill_triangle(&mut filled, 3, 0, -1, 2, 3, 4);
+        assert_eq!(
+            render(&filled),
+            ["...##.", ".####.", "#####.", ".####.", "...##."]
+        );
+        let (mut lines, _) = canvas(6, 5);
+        g.draw_line(&mut lines, 3, 0, -1, 2);
+        g.draw_line(&mut lines, -1, 2, 3, 4);
+        g.draw_line(&mut lines, 3, 4, 3, 0);
+        for (f, l) in filled.pixels().iter().zip(lines.pixels()) {
+            assert!(*l != B || *f == B, "every line pixel is filled");
+        }
     }
 
     #[test]

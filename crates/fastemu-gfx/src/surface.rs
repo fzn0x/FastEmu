@@ -324,6 +324,15 @@ pub(crate) fn check_array_rows(
     Ok(())
 }
 
+/// The range `offset .. offset + length` if it lies within `len`: Java's
+/// rule for array and string ranges.
+pub(crate) fn java_range(len: usize, offset: i32, length: i32) -> Option<std::ops::Range<usize>> {
+    let start = usize::try_from(offset).ok()?;
+    let count = usize::try_from(length).ok()?;
+    let end = start.checked_add(count)?;
+    (end <= len).then_some(start..end)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

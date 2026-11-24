@@ -259,7 +259,7 @@ impl Graphics {
     }
 
     /// The absolute position of a translated point.
-    fn at(&self, x: i32, y: i32) -> (i64, i64) {
+    pub(crate) fn at(&self, x: i32, y: i32) -> (i64, i64) {
         (
             i64::from(x) + i64::from(self.translate_x),
             i64::from(y) + i64::from(self.translate_y),
@@ -267,7 +267,7 @@ impl Graphics {
     }
 
     /// A canvas over `target` with the clip and a colour.
-    fn canvas_with<'a>(&self, target: &'a mut Surface, color: u32) -> Canvas<'a> {
+    pub(crate) fn canvas_with<'a>(&self, target: &'a mut Surface, color: u32) -> Canvas<'a> {
         Canvas::new(target, self.clip, color)
     }
 
