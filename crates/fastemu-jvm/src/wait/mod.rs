@@ -17,6 +17,7 @@ mod portable;
 mod windows;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use parking_lot::{Mutex, MutexGuard};
@@ -80,21 +81,52 @@ pub(crate) struct WaitQueue {
     /// The signals of the threads waiting now. Taken only briefly, never
     /// while taking the lock a waiter released.
     waiters: Mutex<Vec<Arc<Signal>>>,
+    /// Whether a notifier that could not take the lock first has woken
+    /// the queue; see [`WaitQueue::notify_all_unlocked`].
+    missed: AtomicBool,
 }
 
 impl WaitQueue {
+    /// Joins the queue, as the first step of a wait that is about to
+    /// release its lock. Returns the thread's signal, and whether a wake
+    /// went by that this thread may not have seen: then it must not block.
+    fn join(&self) -> (Arc<Signal>, bool) {
+        let signal = SIGNAL.with(Arc::clone);
+        signal.reset();
+        self.waiters.lock().push(Arc::clone(&signal));
+        let missed = self.missed.swap(false, Ordering::AcqRel);
+        (signal, missed)
+    }
+
+    fn leave(&self, signal: &Arc<Signal>) {
+        let mut waiters = self.waiters.lock();
+        if let Some(i) = waiters.iter().position(|s| Arc::ptr_eq(s, signal)) {
+            waiters.swap_remove(i);
+        }
+    }
+
     /// Releases the lock `guard` holds until [`WaitQueue::notify_all`]
     /// or `deadline`, then takes it again. Returns whether the deadline
     /// passed. May also return early, as condition variables may.
     pub(crate) fn wait<T>(&self, guard: &mut MutexGuard<'_, T>, deadline: Option<Instant>) -> bool {
-        let signal = SIGNAL.with(Arc::clone);
-        signal.reset();
-        self.waiters.lock().push(Arc::clone(&signal));
-        let timed_out = MutexGuard::unlocked(guard, || signal.wait(deadline));
-        let mut waiters = self.waiters.lock();
-        if let Some(i) = waiters.iter().position(|s| Arc::ptr_eq(s, &signal)) {
-            waiters.swap_remove(i);
-        }
+        let (signal, missed) = self.join();
+        let timed_out = !missed && MutexGuard::unlocked(guard, || signal.wait(deadline));
+        self.leave(&signal);
+        timed_out
+    }
+
+    /// Like [`WaitQueue::wait`], but gives the lock up for good: the
+    /// caller takes it again as it sees fit, a host thread for instance
+    /// with a deadline of its own, since the lock may be held for ever.
+    pub(crate) fn wait_released<T>(
+        &self,
+        guard: MutexGuard<'_, T>,
+        deadline: Option<Instant>,
+    ) -> bool {
+        let (signal, missed) = self.join();
+        drop(guard);
+        let timed_out = !missed && signal.wait(deadline);
+        self.leave(&signal);
         timed_out
     }
 
@@ -103,6 +135,16 @@ impl WaitQueue {
         for signal in self.waiters.lock().iter() {
             signal.raise();
         }
+    }
+
+    /// Wakes every thread in [`WaitQueue::wait`] for a notifier that
+    /// could not take the lock they wait on, and so cannot tell whether a
+    /// thread that holds it checked its condition before this change and
+    /// has yet to join the queue. That thread's next wait returns at once
+    /// instead of blocking, and checks again.
+    pub(crate) fn notify_all_unlocked(&self) {
+        self.missed.store(true, Ordering::Release);
+        self.notify_all();
     }
 }
 

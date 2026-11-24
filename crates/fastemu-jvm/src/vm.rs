@@ -9,7 +9,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use fastemu_core::{LogLevel, LogLine};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 
 use crate::class::{ClassId, ClassTable};
 use crate::clock::{Clock, VmClock};
@@ -187,6 +187,21 @@ pub(crate) struct VmShared {
     pub(crate) id: u64,
 }
 
+/// How long [`Vm::stop`], [`Vm::pause`] and [`Vm::resume`] wait for the VM
+/// lock before they wake the waiting threads without it. A thread that
+/// holds it for longer is running, and sees the flag at its next call into
+/// Java or its next wait.
+const WAKE_LOCK_WAIT: Duration = Duration::from_millis(100);
+
+/// How long [`Vm::flush_output`] waits for the VM lock before it skips the
+/// flush.
+const FLUSH_LOCK_WAIT: Duration = Duration::from_millis(250);
+
+/// How long [`Vm::spawn`] and [`Vm::post`] wait for the VM lock before
+/// they give up. A thread holds it for microseconds at a time; one that
+/// holds it for this long is wedged.
+const WEDGED_LOCK_WAIT: Duration = Duration::from_secs(1);
+
 impl VmShared {
     #[inline]
     pub(crate) fn is_stopping(&self) -> bool {
@@ -207,9 +222,27 @@ impl VmShared {
     /// Wakes every thread waiting on the VM's wait queue. Taking the lock
     /// first makes sure a thread that checked its condition is already in
     /// the queue, so the wakeup is not lost.
+    ///
+    /// The lock is waited for at most [`WAKE_LOCK_WAIT`], since a thread
+    /// that never reaches a safepoint holds it for ever, and the caller is
+    /// a host thread that has to go on, to stop that very thread. Then the
+    /// wake goes out without the lock, and a thread that was between its
+    /// check and its wait is told not to block (see
+    /// [`WaitQueue::notify_all_unlocked`]).
     pub(crate) fn wake_all(&self) {
-        drop(self.state.lock());
-        self.cond.notify_all();
+        if self.state.try_lock_for(WAKE_LOCK_WAIT).is_some() {
+            self.cond.notify_all();
+        } else {
+            self.cond.notify_all_unlocked();
+        }
+    }
+
+    /// The VM lock, if it is free by `deadline`, or whenever with none.
+    fn lock_by(&self, deadline: Option<Instant>) -> Option<MutexGuard<'_, VmState>> {
+        match deadline {
+            Some(deadline) => self.state.try_lock_until(deadline),
+            None => Some(self.state.lock()),
+        }
     }
 
     pub(crate) fn log(&self, level: LogLevel, text: impl Into<String>) {
@@ -363,12 +396,21 @@ impl Vm {
     /// Starts a Java thread named `name` whose body is the Rust closure
     /// `body`; MIDP's event thread is one. An exception the body returns
     /// is reported as uncaught.
+    ///
+    /// Fails with [`std::io::ErrorKind::TimedOut`] when a thread holds the
+    /// VM lock for a second without a safepoint, as one wedged in a native
+    /// does.
     pub fn spawn(
         &self,
         name: &str,
         body: impl FnOnce(&mut Ctx<'_>) -> JResult<()> + Send + 'static,
     ) -> std::io::Result<()> {
-        let mut state = self.shared.state.lock();
+        let Some(mut state) = self.shared.state.try_lock_for(WEDGED_LOCK_WAIT) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "the virtual machine is busy: a thread holds its lock",
+            ));
+        };
         thread::spawn_with_new_object(&self.shared, &mut state, name, Box::new(body))
             .map(|_| ())
             .map_err(std::io::Error::other)
@@ -399,14 +441,30 @@ impl Vm {
     ///
     /// The task runs later, so it must not carry [`ObjRef`]s: hand it
     /// [`crate::GlobalRef`]s instead.
+    ///
+    /// When a thread holds the VM lock for a second without a safepoint,
+    /// as one wedged in a native does, the task is dropped without running
+    /// and a warning goes to the log: waiting longer would only hold up
+    /// the host thread, which is often the one that has to stop the
+    /// machine.
     pub fn post(&self, task: impl FnOnce(&mut Ctx<'_>) -> JResult<()> + Send + 'static) {
-        self.shared.state.lock().posted.push_back(Box::new(task));
+        match self.shared.state.try_lock_for(WEDGED_LOCK_WAIT) {
+            Some(mut state) => state.posted.push_back(Box::new(task)),
+            None => {
+                self.shared.log(
+                    LogLevel::Warn,
+                    "dropped a task posted to a virtual machine that a thread holds locked",
+                );
+                return;
+            }
+        }
         self.shared.cond.notify_all();
     }
 
-    /// Asks every thread to end: each unwinds at its next safepoint or
-    /// wait, without running `finally` blocks. Returns at once; see
-    /// [`Vm::wait_finished`].
+    /// Asks every thread to end: each unwinds at its next safepoint,
+    /// wait or call from native code into Java, without running `finally`
+    /// blocks. Returns at once (after 100 ms at most when a thread holds
+    /// the VM lock); see [`Vm::wait_finished`].
     pub fn stop(&self) {
         self.shared.stopping.store(true, Ordering::Release);
         self.shared.wake_all();
@@ -447,16 +505,25 @@ impl Vm {
     }
 
     /// Waits until every Java thread has ended, at most `timeout` if
-    /// given. Returns whether they have.
+    /// given, the wait for the VM lock included. Returns whether they
+    /// have.
     pub fn wait_finished(&self, timeout: Option<Duration>) -> bool {
         let deadline = timeout.map(|t| Instant::now() + t);
-        let mut state = self.shared.state.lock();
-        while state.live_threads > 0 {
-            if self.shared.cond.wait(&mut state, deadline) {
-                return state.live_threads == 0;
+        loop {
+            let Some(state) = self.shared.lock_by(deadline) else {
+                return false;
+            };
+            if state.live_threads == 0 {
+                return true;
+            }
+            if self.shared.cond.wait_released(state, deadline) {
+                // The time is up: one more look.
+                return self
+                    .shared
+                    .lock_by(deadline)
+                    .is_some_and(|state| state.live_threads == 0);
             }
         }
-        true
     }
 
     /// The status `System.exit` was called with, if it was.
@@ -470,9 +537,11 @@ impl Vm {
     }
 
     /// Writes out what `System.out` and `System.err` hold past their last
-    /// line break.
+    /// line break. Skips it when a thread holds the VM lock for a quarter
+    /// of a second, as one that never reaches a safepoint does.
     pub fn flush_output(&self) {
-        let mut state = self.shared.state.lock();
-        lang::system::flush_lines(&self.shared, &mut state);
+        if let Some(mut state) = self.shared.state.try_lock_for(FLUSH_LOCK_WAIT) {
+            lang::system::flush_lines(&self.shared, &mut state);
+        }
     }
 }
