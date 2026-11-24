@@ -434,6 +434,17 @@ mod tests {
         ctx.get_static(runs).unwrap().int()
     }
 
+    /// Sleeps a few milliseconds at a time until `done` holds or ten
+    /// seconds pass. A fixed sleep would be too short on a busy machine
+    /// that runs the timer's thread late; the test then checks what it
+    /// waited for.
+    fn wait_for(ctx: &mut Ctx<'_>, mut done: impl FnMut(&mut Ctx<'_>) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !done(ctx) && Instant::now() < deadline {
+            ctx.sleep(Duration::from_millis(5)).unwrap();
+        }
+    }
+
     /// Rule 16 of `docs/compat/emulator-notes.md`: a task that throws is
     /// cancelled, and the timer keeps running its other tasks and takes
     /// new ones.
@@ -462,9 +473,11 @@ mod tests {
             .unwrap();
             ctx.call_virtual(timer, "schedule", desc, &[count.into(), every[0], every[1]])
                 .unwrap();
-            ctx.sleep(Duration::from_millis(100)).unwrap();
+            // The throwing task is due first, so it has run by the
+            // counter's second run.
+            wait_for(ctx, |ctx| runs(ctx) >= 2);
             let before = runs(ctx);
-            ctx.sleep(Duration::from_millis(100)).unwrap();
+            wait_for(ctx, |ctx| runs(ctx) > before);
             let after = runs(ctx);
             let boom_phase = ctx.payload::<Task>(boom).unwrap().phase;
             // The timer still takes new tasks.
@@ -472,7 +485,9 @@ mod tests {
             let once = "(Ljava/util/TimerTask;J)V";
             ctx.call_virtual(timer, "schedule", once, &[one.into(), Value::Long(0)])
                 .unwrap();
-            ctx.sleep(Duration::from_millis(50)).unwrap();
+            wait_for(ctx, |ctx| {
+                ctx.payload::<Task>(one).unwrap().phase == Phase::Executed
+            });
             let late = ctx.payload::<Task>(one).unwrap().phase;
             ctx.call_virtual(timer, "cancel", "()V", &[]).unwrap();
             (boom_phase, before, after, late)
