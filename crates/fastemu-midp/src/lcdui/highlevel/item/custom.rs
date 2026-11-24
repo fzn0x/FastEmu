@@ -2,7 +2,7 @@
 //! draws itself, with key, pointer and traversal callbacks.
 //!
 //! The game paints into a surface of the item's content size, through a
-//! `Graphics` the item keeps; the form calls [`render`] for each shown
+//! `Graphics` the item keeps; the form calls `render` for each shown
 //! custom item before it locks its own buffer, and then copies the
 //! surface into place. Every callback runs on the event thread, inside
 //! the callback lock; an exception one throws is logged and the form
