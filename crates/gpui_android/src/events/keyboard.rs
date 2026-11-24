@@ -4,11 +4,14 @@
 //! Modified for FastEmu: no extra windows and no IME, so the raw-fields
 //! variant for extra windows and dead keys, which showed their accent as
 //! composing text, are gone. A dead key types nothing and keeps its US name.
+//! A key's release names the key its press named ([`KeysDown`]).
 //!
 //! A key types what the keyboard's layout in Android's settings says. Its name
 //! for shortcuts follows Zed's Linux backend: a character in ASCII names the key,
 //! and any other leaves it named by its keycode on a US layout, so on a Turkish
 //! layout `ğ` types `ğ` and Ctrl+`ğ` is still `ctrl-[`.
+
+use std::collections::HashMap;
 
 use android_activity::input::{KeyAction, KeyEvent, Keycode, MetaState};
 use anyhow::Result;
@@ -46,19 +49,62 @@ struct Typed {
 /// Returns `None` when the event isn't translatable (e.g. `KeyAction::Multiple`,
 /// which is reserved for synthesized character sequences from soft keyboards we
 /// don't currently support).
-pub(crate) fn translate_key_event(event: &KeyEvent<'_>) -> Option<PlatformInput> {
+pub(crate) fn translate_key_event(
+    event: &KeyEvent<'_>,
+    keys_down: &mut KeysDown,
+) -> Option<PlatformInput> {
     let is_down = match event.action() {
         KeyAction::Down => true,
         KeyAction::Up => false,
         _ => return None,
     };
-    translate_key(
+    let input = translate_key(
         is_down,
         event.device_id(),
         event.key_code(),
         event.meta_state(),
         event.repeat_count(),
-    )
+    )?;
+    Some(keys_down.track(event.key_code().into(), input))
+}
+
+/// The keystrokes of the keys held down, by Android keycode.
+///
+/// A key's name follows the modifiers and the layout at the time of each
+/// event, so pressing Shift+8 (`*`) and letting go of Shift first would
+/// release `8`. An app that tracks held keys by name, as FastEmu's phone
+/// keys do, would then never see `*` released. So a release takes the name
+/// and text of the press it ends, with the modifiers held at release.
+#[derive(Default)]
+pub(crate) struct KeysDown {
+    pressed: HashMap<u32, Keystroke>,
+}
+
+impl KeysDown {
+    /// Records a press of `keycode`, or gives its release the press's name.
+    fn track(&mut self, keycode: u32, input: PlatformInput) -> PlatformInput {
+        match input {
+            PlatformInput::KeyDown(down) => {
+                if down.is_held {
+                    // Repeats keep the first press, unless it went unseen.
+                    self.pressed
+                        .entry(keycode)
+                        .or_insert_with(|| down.keystroke.clone());
+                } else {
+                    self.pressed.insert(keycode, down.keystroke.clone());
+                }
+                PlatformInput::KeyDown(down)
+            }
+            PlatformInput::KeyUp(mut up) => {
+                if let Some(pressed) = self.pressed.remove(&keycode) {
+                    up.keystroke.key = pressed.key;
+                    up.keystroke.key_char = pressed.key_char;
+                }
+                PlatformInput::KeyUp(up)
+            }
+            other => other,
+        }
+    }
 }
 
 fn translate_key(
@@ -455,5 +501,52 @@ mod tests {
     fn plain_space_types_a_space() {
         let keystroke = key_down(Keycode::Space, 0, Typed::default());
         assert_eq!(keystroke.key_char.as_deref(), Some(" "));
+    }
+
+    fn down(keystroke: Keystroke, is_held: bool) -> PlatformInput {
+        PlatformInput::KeyDown(KeyDownEvent {
+            keystroke,
+            is_held,
+            prefer_character_input: false,
+        })
+    }
+
+    fn up(keystroke: Keystroke) -> PlatformInput {
+        PlatformInput::KeyUp(KeyUpEvent { keystroke })
+    }
+
+    fn released_key(input: PlatformInput) -> String {
+        match input {
+            PlatformInput::KeyUp(up) => up.keystroke.key,
+            other => panic!("expected a key up, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_release_names_the_key_its_press_named() {
+        let code = u32::from(Keycode::Keycode8);
+        let mut keys_down = KeysDown::default();
+        // Shift+8 presses `*`; Shift lifts before 8 does.
+        let star = key_down(Keycode::Keycode8, META_SHIFT, typing('*'));
+        keys_down.track(code, down(star, false));
+        let eight = key_down(Keycode::Keycode8, 0, typing('8'));
+        let released = keys_down.track(code, up(eight.clone()));
+        assert_eq!(released_key(released), "*");
+        // The next stroke names itself again.
+        keys_down.track(code, down(eight.clone(), false));
+        assert_eq!(released_key(keys_down.track(code, up(eight))), "8");
+    }
+
+    #[test]
+    fn repeats_keep_the_first_press_and_unseen_presses_change_nothing() {
+        let code = u32::from(Keycode::Keycode8);
+        let mut keys_down = KeysDown::default();
+        let eight = key_down(Keycode::Keycode8, 0, typing('8'));
+        let star = key_down(Keycode::Keycode8, META_SHIFT, typing('*'));
+        keys_down.track(code, down(eight.clone(), false));
+        keys_down.track(code, down(star.clone(), true));
+        assert_eq!(released_key(keys_down.track(code, up(star.clone()))), "8");
+        // A release whose press came before the window had focus.
+        assert_eq!(released_key(keys_down.track(code, up(star))), "*");
     }
 }

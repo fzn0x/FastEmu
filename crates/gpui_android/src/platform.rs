@@ -33,6 +33,7 @@ use ndk::configuration::UiModeNight;
 
 use crate::dispatcher::AndroidDispatcher;
 use crate::display::AndroidDisplay;
+use crate::events::keyboard::KeysDown;
 use crate::keyboard::AndroidKeyboardLayout;
 use crate::window::{AndroidWindow, AndroidWindowStatePtr};
 
@@ -376,6 +377,8 @@ pub struct AndroidPlatform {
     pub(crate) common: RefCell<AndroidCommon>,
     pub(crate) android_app: AndroidApp,
     gestures: OnceCell<Rc<AndroidGestures>>,
+    /// Hardware keys held down, so each release names its press's key.
+    keys_down: RefCell<KeysDown>,
 }
 
 impl AndroidPlatform {
@@ -392,6 +395,7 @@ impl AndroidPlatform {
             common: RefCell::new(common),
             android_app,
             gestures: OnceCell::new(),
+            keys_down: RefCell::default(),
         }
     }
 
@@ -454,13 +458,17 @@ impl AndroidPlatform {
         let mut touch_moves = PendingTouchMoves::default();
         loop {
             let read = iter.next(|event| match event {
-                InputEvent::KeyEvent(key) => match crate::events::translate_key_event(key) {
-                    Some(input) => {
-                        touch_moves.dispatch(&window_ptr, input);
-                        InputStatus::Handled
+                InputEvent::KeyEvent(key) => {
+                    let translated =
+                        crate::events::translate_key_event(key, &mut self.keys_down.borrow_mut());
+                    match translated {
+                        Some(input) => {
+                            touch_moves.dispatch(&window_ptr, input);
+                            InputStatus::Handled
+                        }
+                        None => InputStatus::Unhandled,
                     }
-                    None => InputStatus::Unhandled,
-                },
+                }
                 InputEvent::MotionEvent(motion) => {
                     let translated = {
                         let mut state = window_ptr.state.borrow_mut();

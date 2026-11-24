@@ -71,6 +71,10 @@ Kept with small edits: `dispatcher.rs`, `jni_env.rs`, `events.rs`,
   authentication probes, process hygiene and project import. The matching
   `Platform` methods return neutral answers (no clipboard item, nominal
   thermal state, no credentials).
+- A hardware key's release names the key its press named, even when Shift
+  or the layout changed in between (`KeysDown` in `events/keyboard.rs`).
+  Upstream named the release by the modifiers held at release, so Shift+8
+  pressed `*` and released `8`, and the phone's `*` key stayed held.
 - The text system loads `/system/fonts` only and falls back to Roboto; the
   port also loaded the runtime's fonts and fell back to Zed's Lilex.
 - JNI entry points belong to `io.github.fzn0x.fastemu.NativeBridge`.
