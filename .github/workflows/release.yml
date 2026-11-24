@@ -41,9 +41,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
-  # What every job checks out: the pushed tag, the tag to build again, or
-  # the branch of a dry run.
-  REF: ${{ inputs.tag || github.ref }}
+  # What every job checks out: the tag to build again, or else the commit
+  # the run started on. A commit, not a branch: every job builds the same
+  # code even when the branch moves on during the run.
+  REF: ${{ inputs.tag || github.sha }}
   DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
 
 jobs:
