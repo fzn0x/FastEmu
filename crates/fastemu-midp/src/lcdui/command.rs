@@ -46,6 +46,19 @@ pub struct CommandInfo {
     pub short_label: Vec<u16>,
 }
 
+/// What a soft key shows for a command of `kind` without a label.
+fn type_name(kind: i32) -> &'static str {
+    match kind {
+        BACK => "Back",
+        3 => "Cancel",
+        4 => "OK",
+        5 => "Help",
+        6 => "Stop",
+        EXIT => "Exit",
+        _ => "Select",
+    }
+}
+
 /// What the soft keys and menus need of `command`.
 pub fn info(ctx: &Ctx<'_>, command: ObjRef) -> JResult<CommandInfo> {
     let data = ctx.payload::<CommandData>(command)?;
@@ -55,7 +68,12 @@ pub fn info(ctx: &Ctx<'_>, command: ObjRef) -> JResult<CommandInfo> {
             None => Ok(Vec::new()),
         }
     };
-    let short_label = text(data.label)?;
+    let mut short_label = text(data.label)?;
+    if short_label.is_empty() {
+        // `Alert.DISMISS_COMMAND` and `List.SELECT_COMMAND` have empty
+        // labels; a soft key says what the type does instead.
+        short_label = type_name(data.kind).encode_utf16().collect();
+    }
     let long = text(data.long_label)?;
     Ok(CommandInfo {
         kind: data.kind,
