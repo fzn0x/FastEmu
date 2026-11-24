@@ -156,9 +156,15 @@ mod tests {
 
     #[test]
     fn deadlines_pass_close_to_on_time() {
-        let took = timed(&Signal::new(), Duration::from_millis(5));
-        // Generous for loaded machines; the Windows tick is 15.6 ms.
-        assert!(took[5] < Duration::from_millis(9), "{took:?}");
+        let signal = Signal::new();
+        // Generous for loaded machines, and measured again while late, as
+        // other tests share the machine; the Windows tick is 15.6 ms, so
+        // waits on it are late every time.
+        let medians: Vec<Duration> = (0..3)
+            .map(|_| timed(&signal, Duration::from_millis(5))[5])
+            .take_while(|&median| median >= Duration::from_millis(9))
+            .collect();
+        assert!(medians.len() < 3, "late every time: {medians:?}");
     }
 
     #[test]

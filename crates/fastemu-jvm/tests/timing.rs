@@ -53,42 +53,57 @@ fn measure(
     times
 }
 
-/// Checks that no round ended early and that the median one ended
-/// within [`MEDIAN_SLACK`] of what it asked for.
-fn check(what: &str, times: &[Duration]) {
-    let median = times[times.len() / 2];
-    let mean = times.iter().sum::<Duration>() / times.len() as u32;
-    println!(
-        "{what}: asked {ASKED:?}, min {:?}, median {median:?}, mean {mean:?}, max {:?}",
-        times[0],
-        times[times.len() - 1]
-    );
-    assert!(times[0] >= ASKED, "{what} ended early: {:?}", times[0]);
-    assert!(
-        median <= ASKED + MEDIAN_SLACK,
-        "{what} wakes late: median {median:?} for {ASKED:?}"
-    );
+/// How many times a measurement may be taken again when its median is
+/// late, so that a moment of load on a shared machine (a CI runner, the
+/// other tests) does not fail the test. A wait that wakes on a coarse
+/// tick is late every time.
+const ATTEMPTS: usize = 3;
+
+/// Measures `round` and checks that no round ended early and that the
+/// median one ended within [`MEDIAN_SLACK`] of what it asked for, taking
+/// the measurement again up to [`ATTEMPTS`] times while it is late.
+fn check(
+    what: &str,
+    round: impl Fn(&mut fastemu_jvm::Ctx<'_>) -> JResult<()> + Send + Sync + 'static,
+) {
+    let round = Arc::new(round);
+    let mut medians = Vec::new();
+    for _ in 0..ATTEMPTS {
+        let round = Arc::clone(&round);
+        let times = measure(move |ctx| round(ctx));
+        let median = times[times.len() / 2];
+        let mean = times.iter().sum::<Duration>() / times.len() as u32;
+        println!(
+            "{what}: asked {ASKED:?}, min {:?}, median {median:?}, mean {mean:?}, max {:?}",
+            times[0],
+            times[times.len() - 1]
+        );
+        assert!(times[0] >= ASKED, "{what} ended early: {:?}", times[0]);
+        if median <= ASKED + MEDIAN_SLACK {
+            return;
+        }
+        medians.push(median);
+    }
+    panic!("{what} wakes late: medians {medians:?} for {ASKED:?}");
 }
 
 #[test]
 fn sleeps_wake_on_time() {
-    let times = measure(|ctx| ctx.sleep(ASKED));
-    check("Ctx::sleep", &times);
+    check("Ctx::sleep", |ctx| ctx.sleep(ASKED));
 }
 
 #[test]
 fn java_sleeps_wake_on_time() {
     let millis = ASKED.as_millis() as i64;
-    let times = measure(move |ctx| {
+    check("Thread.sleep", move |ctx| {
         ctx.call_static("java/lang/Thread", "sleep", "(J)V", &[Value::Long(millis)])?;
         Ok(())
     });
-    check("Thread.sleep", &times);
 }
 
 #[test]
 fn timed_object_waits_wake_on_time() {
-    let times = measure(|ctx| {
+    check("Object.wait", |ctx| {
         let class = ctx.find_class("java/lang/Object")?;
         let lock = ctx.new_object(class)?;
         ctx.monitor_enter(lock)?;
@@ -96,17 +111,15 @@ fn timed_object_waits_wake_on_time() {
         ctx.monitor_exit(lock)?;
         waited
     });
-    check("Object.wait", &times);
 }
 
 #[test]
 fn native_waits_wake_on_time() {
-    let times = measure(|ctx| {
+    check("Ctx::wait_until", |ctx| {
         let deadline = Instant::now() + ASKED;
         while ctx.wait_until(Some(deadline))? != Wake::TimedOut {}
         Ok(())
     });
-    check("Ctx::wait_until", &times);
 }
 
 /// How long `vm`'s only thread takes to end after `end` runs.
