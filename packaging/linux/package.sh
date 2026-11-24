@@ -88,10 +88,10 @@ License: GPL-3.0-or-later
 EOF
 
 # dpkg-shlibdeps reads a source package's debian/control, so it runs in an
-# empty one.
+# empty one. Its messages stay in the log, so a failure says why.
 mkdir -p "$work/shlibdeps/debian"
 touch "$work/shlibdeps/debian/control"
-linked="$(cd "$work/shlibdeps" && dpkg-shlibdeps -O -e"$root/usr/bin/fastemu" 2>/dev/null |
+linked="$(cd "$work/shlibdeps" && dpkg-shlibdeps -O -e"$root/usr/bin/fastemu" |
   sed -n 's/^shlibs:Depends=//p')"
 if [ -z "$linked" ]; then
   echo "dpkg-shlibdeps found no libraries in $binary" >&2
