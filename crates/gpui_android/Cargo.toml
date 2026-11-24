@@ -1,0 +1,34 @@
+[package]
+name = "gpui_android"
+description = "GPUI's Android backend, trimmed from the Zed Android port for FastEmu's single-window app"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+# This crate is a modified copy of crates/gpui_android from the Zed Android
+# port and keeps its license; see NOTICE and README.md.
+license = "Apache-2.0"
+authors = ["The Zed Android port contributors", "The FastEmu contributors"]
+repository.workspace = true
+publish = false
+
+[lib]
+path = "src/gpui_android.rs"
+
+# Not the workspace lints: the code stays close to upstream, so a later sync
+# is a readable diff. Clippy's default lints still apply.
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["game-activity"] }
+anyhow = "1"
+calloop = "0.14.3"
+futures = "0.3"
+# The same repository and revision as fastemu-ui's desktop build, so both
+# apps draw with one GPUI.
+gpui = { git = "https://github.com/Dylanmurzello/zed-android-port", rev = "746f088ee8d6b8b273354826757dd09e74565854", default-features = false }
+gpui_wgpu = { git = "https://github.com/Dylanmurzello/zed-android-port", rev = "746f088ee8d6b8b273354826757dd09e74565854" }
+jni = "0.21"
+libc = "0.2"
+log = "0.4"
+ndk = { version = "0.9", features = ["nativewindow", "api-level-31"] }
+raw-window-handle = "0.6"
+uuid = "1"

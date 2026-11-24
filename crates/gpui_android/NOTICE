@@ -1,0 +1,18 @@
+gpui_android for FastEmu
+
+This crate is a modified copy of crates/gpui_android from the Zed Android
+port by Dylan Murzello (https://github.com/Dylanmurzello/zed-android-port),
+revision 746f088ee8d6b8b273354826757dd09e74565854. The port builds on GPUI
+by Zed Industries, Inc. (https://github.com/zed-industries/zed).
+
+Copyright 2022 - 2025 Zed Industries, Inc.
+Copyright the Zed Android port contributors.
+Modifications copyright the FastEmu contributors.
+
+Licensed under the Apache License, Version 2.0 (LICENSE-APACHE in this
+directory). The FastEmu contributors changed the files as README.md
+describes; each changed file says so at its top.
+
+FastEmu as a whole is licensed under the GNU General Public License,
+version 3 or later. Apache License 2.0 code may be combined into a
+GPL-3.0 work.
