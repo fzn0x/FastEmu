@@ -46,6 +46,7 @@ icons! {
     FilePlus => "file-plus",
     Focus => "focus",
     Gamepad => "gamepad-2",
+    Globe => "globe",
     Grid => "layout-grid",
     Info => "info",
     Keyboard => "keyboard",

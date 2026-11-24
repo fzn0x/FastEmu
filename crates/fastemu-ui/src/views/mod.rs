@@ -133,6 +133,14 @@ pub(crate) struct Tile {
     text_asked: bool,
 }
 
+impl Tile {
+    /// Whether the link prompt covers the game's screen: the game asked
+    /// to open a web page and the user has not answered yet.
+    fn shows_link(&self) -> bool {
+        !self.restarting && self.session.link().is_some()
+    }
+}
+
 /// Which dialog covers the workspace, if any.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Dialog {

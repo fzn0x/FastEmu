@@ -99,6 +99,22 @@ and the APIs it called that FastEmu does not have yet. The log follows new
 lines while it shows the last one; scroll up to read older lines and it
 stays put.
 
+## Web links
+
+Some games have a menu item that opens a web page, such as more games
+from their maker. When a game asks to open one, its screen shows the
+game's name and the whole address, with **Open** and **Dismiss**. Nothing
+opens until you choose **Open**; the page then opens in your browser and
+the game keeps running. **Dismiss** drops the request. Each game has its
+own question, and restarting or closing the game drops it. In the focus
+layout, a globe next to a game's name in the strip means it is waiting
+for an answer.
+
+FastEmu opens only web pages, `http` and `https` addresses, and only after
+you agree. A game that asks to make a call, send a message, open a file,
+install another game or open another app is told the phone cannot do it,
+and its log names what it asked for.
+
 ## Keys
 
 The keyboard plays the highlighted game. The default keys:

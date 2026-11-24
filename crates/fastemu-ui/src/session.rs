@@ -123,6 +123,9 @@ pub struct Session {
     text_override: Option<bool>,
     /// Where a pointer press on the screen holds it, in phone pixels.
     pointer_at: Option<(i32, i32)>,
+    /// The web page the game asked to open, until the user opens or
+    /// dismisses it.
+    link: Option<String>,
 }
 
 impl Session {
@@ -148,12 +151,13 @@ impl Session {
             wants_text: false,
             text_override: None,
             pointer_at: None,
+            link: None,
         }
     }
 
-    /// Picks up the latest frame, status and log lines. Returns whether
-    /// anything changed. Frames are compared by serial, so an unchanged
-    /// picture costs nothing.
+    /// Picks up the latest frame, status, log lines and the link the game
+    /// asks to open. Returns whether anything changed. Frames are compared
+    /// by serial, so an unchanged picture costs nothing.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
         if let Some(frame) = self.instance.frame()
@@ -181,11 +185,34 @@ impl Session {
             self.log.extend(lines);
             changed = true;
         }
+        if let Some(link) = self.instance.take_link_request() {
+            if is_web_link(&link) {
+                self.link = Some(link);
+                changed = true;
+            } else {
+                log::warn!("{} asked to open {link:?}, not a web link", self.title);
+            }
+        }
         changed
     }
 
+    /// The web page the game asked to open, until the user opens or
+    /// dismisses it. A newer request replaces it.
+    pub fn link(&self) -> Option<&str> {
+        self.link.as_deref()
+    }
+
+    /// Drops the request to open `link`, once the user has answered it. A
+    /// newer request the game made meanwhile stays.
+    pub fn dismiss_link(&mut self, link: &str) {
+        if self.link.as_deref() == Some(link) {
+            self.link = None;
+        }
+    }
+
     /// Swaps in a fresh instance after a restart, keeping the settings and
-    /// slot but dropping the old picture, log and held keys.
+    /// slot but dropping the old picture, log, held keys and the link the
+    /// old game asked to open.
     pub fn replace_instance(&mut self, instance: Arc<dyn Instance>) {
         self.title = instance.title();
         self.status = instance.status();
@@ -196,6 +223,7 @@ impl Session {
         self.pointer_at = None;
         self.wants_text = false;
         self.text_override = None;
+        self.link = None;
         if self.muted {
             self.instance.set_volume(0.0);
         }
@@ -319,6 +347,17 @@ impl Session {
     }
 }
 
+/// Whether `url` is an `http` or `https` link, the only kind the app
+/// opens. The runtime hands over nothing else; this guards against an
+/// instance that would.
+fn is_web_link(url: &str) -> bool {
+    ["http://", "https://"].iter().any(|scheme| {
+        url.get(..scheme.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(scheme))
+            && url.len() > scheme.len()
+    })
+}
+
 /// A word or two for a title bar.
 pub fn status_label(status: &InstanceStatus) -> String {
     match status {
@@ -359,7 +398,7 @@ pub fn phone_pixel(
 mod tests {
     use super::*;
     use fastemu_core::Launcher;
-    use fastemu_core::mock::MockLauncher;
+    use fastemu_core::mock::{MOCK_LINK, MockLauncher};
     use std::time::{Duration, Instant};
 
     #[test]
@@ -393,6 +432,42 @@ mod tests {
             phone_pixel((1.0, 1.0), (0.0, 0.0), (0.0, 0.0), (240, 320)),
             ((0, 0), false)
         );
+    }
+
+    #[test]
+    fn only_web_links_are_offered() {
+        assert!(is_web_link("http://example.com"));
+        assert!(is_web_link("HTTPS://example.com/a"));
+        for other in ["https://", "tel:123", "file:///x", "javascript:x", "", "h"] {
+            assert!(!is_web_link(other), "{other}");
+        }
+    }
+
+    #[test]
+    fn the_link_a_game_asks_for_waits_for_the_user() {
+        let request = LaunchRequest::new("snake.jar", "unused");
+        let instance = MockLauncher.launch(request.clone()).expect("mock");
+        let mut session = Session::new(EntryId(1), 0, request.clone(), instance);
+        session.poll();
+        assert_eq!(session.link(), None);
+        session.press(Key::Pound);
+        assert!(session.poll());
+        assert_eq!(session.link(), Some(MOCK_LINK));
+        session.poll();
+        assert_eq!(session.link(), Some(MOCK_LINK), "it waits for an answer");
+        session.dismiss_link("https://other.example/");
+        assert_eq!(session.link(), Some(MOCK_LINK), "only the shown link");
+        session.dismiss_link(MOCK_LINK);
+        assert_eq!(session.link(), None);
+
+        session.press(Key::Pound);
+        session.poll();
+        assert!(session.link().is_some());
+        let again = MockLauncher.launch(request).expect("mock");
+        session.instance.stop();
+        session.replace_instance(again);
+        assert_eq!(session.link(), None, "a restart drops it");
+        session.instance.stop();
     }
 
     #[test]

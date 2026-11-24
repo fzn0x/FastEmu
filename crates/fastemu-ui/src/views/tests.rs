@@ -26,6 +26,7 @@ struct FakeInstance {
     log: Mutex<Vec<LogLine>>,
     volume: Mutex<f32>,
     wants_text: Mutex<bool>,
+    link: Mutex<Option<String>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -39,6 +40,11 @@ impl FakeInstance {
 
     fn show(&self, serial: u64) {
         *lock(&self.frame) = Some(Frame::filled(240, 320, 0xFF00_8040, serial));
+    }
+
+    /// Asks the app to open `url`, as `platformRequest` does.
+    fn ask_to_open(&self, url: &str) {
+        *lock(&self.link) = Some(url.to_owned());
     }
 }
 
@@ -85,6 +91,10 @@ impl Instance for FakeInstance {
 
     fn wants_text(&self) -> bool {
         *lock(&self.wants_text)
+    }
+
+    fn take_link_request(&self) -> Option<String> {
+        lock(&self.link).take()
     }
 }
 
@@ -142,6 +152,7 @@ impl Launcher for FakeLauncher {
             }]),
             volume: Mutex::new(request.settings.volume),
             wants_text: Mutex::new(false),
+            link: Mutex::new(None),
         });
         lock(&self.started).push((request, Arc::clone(&instance)));
         Ok(instance)
@@ -228,6 +239,30 @@ impl Harness<'_> {
     fn redraw(&mut self) {
         self.view.update(self.cx, |_, cx| cx.notify());
         self.cx.run_until_parked();
+    }
+
+    /// Where the element drawn with `selector` and the tile number sits,
+    /// if it was drawn.
+    fn bounds(&mut self, selector: &str, tile: usize) -> Option<gpui::Bounds<gpui::Pixels>> {
+        let id = self.read(|v| v.tiles[tile].id.0);
+        let name: &'static str = Box::leak(format!("{selector}-{id}").into_boxed_str());
+        self.cx.debug_bounds(name)
+    }
+
+    /// Clicks the middle of the element drawn with `selector` on the
+    /// tile number `tile`.
+    fn click(&mut self, selector: &str, tile: usize) {
+        let bounds = self
+            .bounds(selector, tile)
+            .unwrap_or_else(|| panic!("{selector} is drawn"));
+        self.cx
+            .simulate_click(bounds.center(), gpui::Modifiers::none());
+        self.cx.run_until_parked();
+    }
+
+    /// The link the prompt of tile number `tile` shows.
+    fn link(&mut self, tile: usize) -> Option<String> {
+        self.read(|v| v.tiles[tile].session.link().map(str::to_owned))
     }
 }
 
@@ -1071,4 +1106,144 @@ fn game_settings_apply_to_the_next_start(cx: &mut TestAppContext) {
     assert!((request.settings.volume - 0.5).abs() < 1e-6);
     let saved = Store::new(h.dir.path().join("config")).load_library().value;
     assert_eq!(saved.entries()[0].settings.encoding, "windows-1251");
+}
+
+#[gpui::test]
+fn a_link_waits_for_the_user_and_dismiss_drops_it(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    let game = h.launcher.instance(0);
+    game.show(1);
+    h.redraw();
+    assert!(h.bounds("link-prompt", 0).is_none());
+
+    game.ask_to_open("https://example.com/more-games?from=snake");
+    h.redraw();
+    assert!(h.bounds("link-prompt", 0).is_some(), "the prompt shows");
+    assert_eq!(
+        h.link(0).as_deref(),
+        Some("https://example.com/more-games?from=snake")
+    );
+    h.redraw();
+    assert!(h.bounds("link-prompt", 0).is_some(), "until it is answered");
+
+    h.click("link-dismiss", 0);
+    assert_eq!(h.link(0), None);
+    assert!(h.bounds("link-prompt", 0).is_none());
+    assert_eq!(h.cx.opened_url(), None, "nothing opens");
+    assert!(
+        game.events().is_empty(),
+        "clicks on the prompt are not the game's: {:?}",
+        game.events()
+    );
+}
+
+#[gpui::test]
+fn open_opens_the_link_the_prompt_shows(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    let game = h.launcher.instance(0);
+    game.show(1);
+    game.ask_to_open("http://example.com/first");
+    game.ask_to_open("http://example.com/second");
+    h.redraw();
+    assert_eq!(h.link(0).as_deref(), Some("http://example.com/second"));
+    assert_eq!(h.cx.opened_url(), None, "nothing opens by itself");
+
+    h.click("link-open", 0);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("http://example.com/second")
+    );
+    assert_eq!(h.link(0), None);
+    assert!(h.bounds("link-prompt", 0).is_none());
+    assert!(game.events().is_empty(), "{:?}", game.events());
+}
+
+#[gpui::test]
+fn the_link_prompt_takes_fingers_from_the_game(cx: &mut TestAppContext) {
+    use gpui::TouchPhase;
+
+    let mut h = open(cx);
+    h.add(&["lines.jar"]);
+    h.launch_first();
+    let game = h.launcher.instance(0);
+    game.show(1);
+    game.ask_to_open("https://example.com/");
+    h.redraw();
+    let open = h.bounds("link-open", 0).expect("the Open button is drawn");
+    let at = open.center();
+    h.cx.simulate_event(finger(TouchPhase::Started, at, at));
+    h.cx.simulate_event(finger(TouchPhase::Ended, at, at));
+    assert!(
+        game.events().is_empty(),
+        "a finger on the prompt is not the game's: {:?}",
+        game.events()
+    );
+}
+
+#[gpui::test]
+fn each_game_has_its_own_link_prompt(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    h.launch_first();
+    let (first, second) = (h.launcher.instance(0), h.launcher.instance(1));
+    first.show(1);
+    second.show(1);
+    first.ask_to_open("https://example.com/first");
+    h.redraw();
+    assert!(h.bounds("link-prompt", 0).is_some());
+    assert!(h.bounds("link-prompt", 1).is_none());
+    second.ask_to_open("https://example.com/second");
+    h.redraw();
+    assert_eq!(h.link(0).as_deref(), Some("https://example.com/first"));
+    assert_eq!(h.link(1).as_deref(), Some("https://example.com/second"));
+
+    // In the focus layout a game in the strip keeps its question for when
+    // it is brought forward.
+    h.view.update(h.cx, FastEmuView::toggle_layout);
+    h.redraw();
+    assert!(
+        h.bounds("link-prompt", 0).is_none(),
+        "a thumbnail asks nothing"
+    );
+    assert!(h.bounds("link-prompt", 1).is_some());
+    h.view.update(h.cx, |v, cx| {
+        let id = v.tiles[0].id;
+        v.focus_tile(id, cx);
+    });
+    h.redraw();
+    assert!(h.bounds("link-prompt", 0).is_some());
+    assert_eq!(h.link(1).as_deref(), Some("https://example.com/second"));
+    h.view.update(h.cx, FastEmuView::toggle_layout);
+
+    // Only web links are offered, whatever an instance hands over.
+    first.ask_to_open("file:///etc/passwd");
+    h.redraw();
+    assert_eq!(h.link(0).as_deref(), Some("https://example.com/first"));
+
+    // A restart drops the old game's prompt; so does closing the tile.
+    h.view.update_in(h.cx, |v, window, cx| {
+        let id = v.tiles[0].id;
+        v.restart_tile(id, window, cx);
+    });
+    assert!(
+        !h.read(|v| v.tiles[0].shows_link()),
+        "gone while restarting"
+    );
+    h.cx.run_until_parked();
+    h.redraw();
+    assert_eq!(h.link(0), None);
+    assert!(h.bounds("link-prompt", 0).is_none());
+    h.view.update_in(h.cx, |v, window, cx| {
+        let id = v.tiles[1].id;
+        v.close_tile(id, window, cx);
+    });
+    h.redraw();
+    assert_eq!(h.read(|v| v.tiles.len()), 1);
+    assert_eq!(h.link(0), None);
+    assert_eq!(h.cx.opened_url(), None);
 }

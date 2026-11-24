@@ -14,7 +14,7 @@ use gpui::{
 use super::library::SIDEBAR_WIDTH;
 use super::panels::LOG_HEIGHT;
 use super::touch::{self, Finger};
-use super::widgets::{icon, icon_button, text_button, toggle_icon_button};
+use super::widgets::{icon, icon_button, primary_button, text_button, toggle_icon_button};
 use super::{Dialog, FastEmuView, NoticeLevel, SettingsTab, Tile, TileId};
 use crate::assets::Icon;
 use crate::layout::{
@@ -352,12 +352,27 @@ impl FastEmuView {
         }
     }
 
+    /// Opens `link`, which `id`'s prompt showed, in the system's browser,
+    /// and answers the prompt. Only the user's click gets here.
+    fn open_link(&mut self, id: TileId, link: &str, cx: &mut Context<'_, Self>) {
+        cx.open_url(link);
+        self.dismiss_link(id, link, cx);
+    }
+
+    /// Answers `id`'s prompt for `link` without opening it.
+    fn dismiss_link(&mut self, id: TileId, link: &str, cx: &mut Context<'_, Self>) {
+        if let Some(tile) = self.tile_mut(id) {
+            tile.session.dismiss_link(link);
+        }
+        cx.notify();
+    }
+
     fn on_screen_down(&mut self, id: TileId, event: &MouseDownEvent, cx: &mut Context<'_, Self>) {
         self.focus_tile(id, cx);
         let Some(tile) = self.tile_mut(id) else {
             return;
         };
-        if !tile.session.is_running() {
+        if !tile.session.is_running() || tile.shows_link() {
             return;
         }
         let Some(((x, y), inside)) = map_pointer(tile, event.position) else {
@@ -370,7 +385,8 @@ impl FastEmuView {
 
     /// A finger on `id`'s screen. A touch starting on a running game's
     /// screen is the game's, as a press, drags and a release; any other
-    /// is left to become a tap, for the buttons over a stopped game.
+    /// is left to become a tap, for the buttons over a stopped game or of
+    /// a link prompt.
     pub(super) fn screen_touch(
         &mut self,
         id: TileId,
@@ -381,7 +397,7 @@ impl FastEmuView {
         if finger == Finger::Down {
             let running = self
                 .tile(id)
-                .is_some_and(|t| t.session.is_running() && !t.restarting);
+                .is_some_and(|t| t.session.is_running() && !t.restarting && !t.shows_link());
             if !running {
                 return false;
             }
@@ -897,6 +913,7 @@ impl FastEmuView {
             return screen;
         }
         screen
+            .children(Self::render_link_prompt(tile, cx))
             .debug_selector(|| format!("screen-{}", id.0))
             .child(touch::touch_screen(cx.entity().downgrade(), id))
             .cursor_crosshair()
@@ -994,6 +1011,85 @@ impl FastEmuView {
         )
     }
 
+    /// The question over a game's screen while the game asks to open a web
+    /// page: the game's name, the whole link, **Open** and **Dismiss**.
+    /// Nothing opens until the user chooses **Open**, and the buttons act
+    /// on the link they showed, even if the game asked for another since.
+    fn render_link_prompt(tile: &Tile, cx: &mut Context<'_, Self>) -> Option<Div> {
+        if !tile.shows_link() {
+            return None;
+        }
+        let link = tile.session.link()?.to_owned();
+        let theme = Theme::get(cx).clone();
+        let id = tile.id;
+        let (to_open, to_dismiss) = (link.clone(), link.clone());
+        let question = format!("{} wants to open a web page", tile.session.title);
+        let card = div()
+            .id("link-prompt")
+            .debug_selector(|| format!("link-prompt-{}", id.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .max_w_full()
+            .max_h_full()
+            .p(px(12.0))
+            .rounded(px(8.0))
+            .bg(theme.raised)
+            .border_1()
+            .border_color(theme.border)
+            .text_color(theme.text)
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(icon(Icon::Globe, 16.0, theme.accent))
+                    .child(div().min_w_0().text_sm().child(question)),
+            )
+            .child(
+                div()
+                    .id("link-url")
+                    .min_h_0()
+                    .max_h(px(96.0))
+                    .overflow_y_scroll()
+                    .text_xs()
+                    .child(link),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .justify_end()
+                    .gap(px(8.0))
+                    .child(
+                        text_button("link-dismiss", "Dismiss", &theme)
+                            .debug_selector(|| format!("link-dismiss-{}", id.0))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.dismiss_link(id, &to_dismiss, cx);
+                            })),
+                    )
+                    .child(
+                        primary_button("link-open", "Open", &theme)
+                            .debug_selector(|| format!("link-open-{}", id.0))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_link(id, &to_open, cx);
+                            })),
+                    ),
+            );
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .p(px(8.0))
+                .bg(theme.scrim)
+                .child(card),
+        )
+    }
+
     /// A small live picture of a game in the focus layout's strip.
     fn render_thumb(
         tile: &Tile,
@@ -1031,11 +1127,22 @@ impl FastEmuView {
                     .flex()
                     .flex_none()
                     .items_center()
+                    .gap(px(4.0))
                     .w_full()
                     .h(px(THUMB_TITLE_HEIGHT))
                     .text_xs()
-                    .truncate()
-                    .child(tile.session.title.clone()),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(tile.session.title.clone()),
+                    )
+                    // The game waits for an answer to its link, which
+                    // shows once it is brought forward.
+                    .when(tile.shows_link(), |d| {
+                        d.child(icon(Icon::Globe, 12.0, theme.accent))
+                    }),
             )
             .child(Self::render_screen(tile, fit, false, cx))
     }
