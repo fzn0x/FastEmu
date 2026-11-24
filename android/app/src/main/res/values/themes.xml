@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The colour of the emulator view's background, so the window doesn't
+         flash white before GPUI draws its first frame. -->
+    <color name="fastemu_background">#101216</color>
+    <color name="fastemu_accent">#4C7DF0</color>
+
+    <!-- GameActivity is an AppCompatActivity, which needs an AppCompat theme. -->
+    <style name="Theme.FastEmu" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/fastemu_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

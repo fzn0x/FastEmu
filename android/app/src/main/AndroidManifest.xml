@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- GPUI draws with Vulkan through wgpu; devices without it can still
+         install the app, which then fails to open its window. -->
+    <uses-feature android:name="android.hardware.vulkan.version" android:required="false"/>
+    <!-- The keypad is on screen, so a touchscreen is enough, and a keyboard
+         alone works too. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+
+    <application
+        android:allowBackup="false"
+        android:appCategory="game"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:resizeableActivity="true"
+        android:theme="@style/Theme.FastEmu">
+
+        <!--
+          GPUI starts once per process, so the Activity is never recreated:
+          configChanges takes rotation, resizing, dark mode and the rest as
+          window events, and singleTask keeps a second instance from starting
+          beside this one. MainActivity ends the process when it is
+          destroyed.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboard|keyboardHidden|navigation|uiMode|colorMode|fontScale|fontWeightAdjustment|layoutDirection|locale|mcc|mnc|touchscreen|grammaticalGender"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowLayoutInDisplayCutoutMode="always"
+            android:windowSoftInputMode="stateAlwaysHidden">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="fastemu_android"/>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- "Open with" for Java ME games in file managers and browsers'
+                 downloads: the JAR and its descriptor. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:scheme="content"/>
+                <data android:scheme="file"/>
+                <data android:mimeType="application/java-archive"/>
+                <data android:mimeType="application/x-java-archive"/>
+                <data android:mimeType="text/vnd.sun.j2me.app-descriptor"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
