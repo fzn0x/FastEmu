@@ -519,12 +519,18 @@ mod tests {
     /// A run that comes late because its thread woke late is late by that
     /// much on both clocks, so a busy machine adds nothing here. A
     /// scheduled time that left out a pause would add the whole pause.
+    ///
+    /// It also keeps the widest gap between the due times of two runs in
+    /// a row, in run time. A fixed-rate task's runs are due one period
+    /// apart however late its thread runs them.
     fn tardy() -> NativeClass {
         const TARDY: &str = "test/Tardy";
         NativeClass::new(TARDY)
             .extends(TASK)
             .static_field("runs", "I")
             .static_field("worst", "J")
+            .static_field("last", "J")
+            .static_field("gap", "J")
             .method("<init>", "()V", |ctx, a| {
                 ctx.call_special(TASK, this(a), "<init>", "()V", &[])?;
                 Ok(Value::Void)
@@ -545,8 +551,25 @@ mod tests {
                 ctx.set_static(runs, Value::Int(n + 1))?;
                 let w = ctx.get_static(worst)?.long();
                 ctx.set_static(worst, Value::Long(w.max(late)))?;
+                let last = ctx.static_field_id(TARDY, "last", "J")?;
+                let gap = ctx.static_field_id(TARDY, "gap", "J")?;
+                if n > 0 {
+                    let g = ctx.get_static(gap)?.long();
+                    let since = due - ctx.get_static(last)?.long();
+                    ctx.set_static(gap, Value::Long(g.max(since)))?;
+                }
+                ctx.set_static(last, Value::Long(due))?;
                 Ok(Value::Void)
             })
+    }
+
+    /// The widest gap between the due times of two runs in a row of a
+    /// `test/Tardy` task, in run-time milliseconds.
+    fn widest_gap(vm: &Vm) -> i64 {
+        vm.attach("read", |ctx| {
+            let gap = ctx.static_field_id("test/Tardy", "gap", "J").unwrap();
+            ctx.get_static(gap).unwrap().long()
+        })
     }
 
     /// The runs a `test/Tardy` task made so far, and the worst lateness
@@ -623,6 +646,11 @@ mod tests {
             later - resumed >= 4,
             "the rate goes on: {resumed} then {later}"
         );
+        // At its rate: each run was due one period after the one before,
+        // across the pause too. A resume that put the next run off, or a
+        // slower rate, shows here however late the thread ran them.
+        let gap = widest_gap(&vm);
+        assert_eq!(gap, 10, "runs were due up to {gap} ms of run time apart");
         // Counted on the wall clock, the runs after the resume would seem
         // late by the whole pause, beyond their lag. A correct timer's
         // runs show a millisecond or two of rounding.
