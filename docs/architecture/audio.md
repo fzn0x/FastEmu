@@ -331,9 +331,13 @@ tone (ffmpeg's `sine` source encoded with LAME).
 ## Gaps
 
 - `device://midi` (a MIDI player with no file, for `MIDIControl` alone)
-  is not provided: a MIDI player renders only while it plays its file.
-- No `RateControl`, `TempoControl`, `PitchControl`, `StopTimeControl`,
-  `MetaDataControl` or `FramePositioningControl`.
+  is silent: the MIDP side gives a player that takes every event and
+  plays nothing, as a MIDI player renders only while it plays its file.
+- No `RateControl`, `TempoControl`, `PitchControl`, `MetaDataControl` or
+  `FramePositioningControl`. `StopTimeControl` is there, on the MIDP
+  side ([media.md](media.md)).
+- Players of `http://` locators are silent: the MIDP side does not
+  fetch them, whatever the network policy.
 - No AMR wideband, AAC, iMelody, MMF (SMAF) or XMF.
 - Media time does not account for the device's output latency (usually
   10 to 30 ms).
