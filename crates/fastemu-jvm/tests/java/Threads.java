@@ -108,8 +108,14 @@ public class Threads {
         }
         System.out.println("shared " + shared + " " + staticShared);
 
+        // Each step waits for the one before it, so the output does not
+        // depend on timing. Waits loop on their condition: HotSpot's
+        // wait() may return without a notify or an interrupt (an
+        // interrupt that ends a sleep can also unpark the next wait), as
+        // Java allows.
         final Object gate = new Object();
-        final boolean[] state = new boolean[2];
+        // interrupted sleep, interrupted wait, waiting
+        final boolean[] state = new boolean[3];
         Thread sleeper = new Thread() {
             public void run() {
                 try {
@@ -119,8 +125,12 @@ public class Threads {
                     state[0] = true;
                 }
                 synchronized (gate) {
+                    state[2] = true;
+                    gate.notifyAll();
                     try {
-                        gate.wait();
+                        while (true) {
+                            gate.wait();
+                        }
                     } catch (InterruptedException e) {
                         state[1] = true;
                     }
@@ -128,10 +138,18 @@ public class Threads {
             }
         };
         sleeper.start();
+        // Whether it lands before the sleep starts or during it, the
+        // interrupt makes the sleep throw.
         Thread.sleep(50);
         sleeper.interrupt();
-        Thread.sleep(50);
-        sleeper.interrupt();
+        synchronized (gate) {
+            while (!state[2]) {
+                gate.wait();
+            }
+            // Main holds gate again only once the sleeper's wait has
+            // released it, so this interrupt lands in that wait.
+            sleeper.interrupt();
+        }
         sleeper.join();
         System.out.println("interrupted sleep " + state[0] + " interrupted wait " + state[1]);
 
@@ -142,8 +160,12 @@ public class Threads {
 
         synchronized (gate) {
             long t0 = System.currentTimeMillis();
-            gate.wait(40);
-            System.out.println("timed wait returned " + (System.currentTimeMillis() - t0 >= 35));
+            long left = 40;
+            while (left > 0) {
+                gate.wait(left);
+                left = 40 - (System.currentTimeMillis() - t0);
+            }
+            System.out.println("timed wait returned");
         }
 
         Thread self = Thread.currentThread();
@@ -210,10 +232,11 @@ public class Threads {
             readers[i].join();
         }
         System.out.println("init once " + SlowInit.runs + " seen " + seen[0] + " " + seen[1] + " " + seen[2]);
+        final Thread main = Thread.currentThread();
         Thread late = new Thread() {
             public void run() {
                 try {
-                    Thread.sleep(20);
+                    main.join();
                 } catch (InterruptedException e) {
                     return;
                 }
