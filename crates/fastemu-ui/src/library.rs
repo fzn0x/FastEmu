@@ -79,9 +79,8 @@ impl Library {
         if let Some(id) = self.find_path(&path) {
             return id;
         }
-        let highest = self.entries.iter().map(|e| e.id.0).max().unwrap_or(0);
-        let id = EntryId(self.next_id.max(highest + 1));
-        self.next_id = id.0 + 1;
+        let id = self.fresh_id();
+        self.next_id = id.0.saturating_add(1);
         let fallback = path.file_stem().map_or_else(
             || "Untitled".to_owned(),
             |s| s.to_string_lossy().into_owned(),
@@ -97,6 +96,29 @@ impl Library {
         entry.update_info(info);
         self.entries.push(entry);
         id
+    }
+
+    /// An id above every one handed out so far. Only a hand-edited file
+    /// can use up the ids; then the smallest id not in use serves.
+    fn fresh_id(&self) -> EntryId {
+        let highest = self.entries.iter().map(|e| e.id.0).max().unwrap_or(0);
+        if let Some(above) = highest.checked_add(1) {
+            return EntryId(self.next_id.max(above));
+        }
+        let mut used: Vec<u64> = self
+            .entries
+            .iter()
+            .map(|e| e.id.0)
+            .filter(|&id| id > 0)
+            .collect();
+        used.sort_unstable();
+        used.dedup();
+        // Distinct ids from 1 up: the first position that differs is free.
+        let free = (1..)
+            .zip(&used)
+            .find(|&(want, &have)| want != have)
+            .map_or(used.len() as u64 + 1, |(want, _)| want);
+        EntryId(free)
     }
 
     pub fn remove(&mut self, id: EntryId) -> Option<LibraryEntry> {
@@ -226,6 +248,21 @@ mod tests {
         let c = lib.add("c.jar".into(), &info("C"));
         assert!(c != a && c != b, "{c:?} reuses a removed id");
         assert!(lib.remove(b).is_none());
+    }
+
+    #[test]
+    fn the_largest_id_in_a_file_does_not_overflow() {
+        let mut lib: Library = serde_json::from_str(&format!(
+            r#"{{"entries":[{{"id":{max},"path":"a.jar","name":"A"}}],"next_id":{max}}}"#,
+            max = u64::MAX
+        ))
+        .expect("parses");
+        let b = lib.add("b.jar".into(), &info("B"));
+        let c = lib.add("c.jar".into(), &info("C"));
+        let mut ids: Vec<u64> = lib.entries().iter().map(|e| e.id.0).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), 3, "{b:?} and {c:?} must be new ids");
     }
 
     #[test]
