@@ -1,8 +1,10 @@
-//! Natives that loop around calls into Java end when the VM stops, even
-//! when the Java methods they call hold no backward branch and no call,
-//! which would never be a safepoint.
+//! Natives that call back into Java: a loop of them ends when the VM
+//! stops, and a recursion of them ends in a `StackOverflowError` that Java
+//! can catch.
 //!
-//! The classes are assembled by hand, because each needs exact bytecode.
+//! The classes are assembled by hand, because each needs exact bytecode:
+//! a method with no backward branch and no call, which is never a
+//! safepoint.
 
 mod support;
 
@@ -10,13 +12,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-use fastemu_jvm::{NativeClass, Value, Vm, VmConfig};
+use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Value, Vm, VmConfig};
 use support::{ClassBuilder, PUBLIC, STATIC, idx};
 
 /// How long a test waits for something that takes milliseconds: far longer
 /// than that, so that a busy machine waits instead of failing. A call that
 /// has to give up on a locked VM takes about a second.
 const LONG: Duration = Duration::from_secs(5);
+
+/// How deep the nests go: a host thread's stack overflows well before.
+const DEPTH: i32 = 30_000;
 
 /// `class Endless extends InputStream`: `read(byte[], int, int)` returns
 /// `len` at once, so `InputStream.skip` over it never ends.
@@ -121,6 +126,84 @@ fn loops() -> Vec<u8> {
     c.build()
 }
 
+/// `class Catcher`: static `boolean` methods that run a native on the
+/// object they are given and say whether a `StackOverflowError` came out:
+///
+/// - `toStr(o)`: `o.toString()`
+/// - `valueOf(o)`: `String.valueOf(o)`
+/// - `append(o)`: `new StringBuffer().append(o)`
+fn catcher() -> Vec<u8> {
+    let mut c = ClassBuilder::new("Catcher", "java/lang/Object", 49, 0);
+    let overflow = c.class("java/lang/StackOverflowError");
+    let to_string = c.method_ref("java/lang/Object", "toString", "()Ljava/lang/String;");
+    let value_of = c.method_ref(
+        "java/lang/String",
+        "valueOf",
+        "(Ljava/lang/Object;)Ljava/lang/String;",
+    );
+    let buffer = c.class("java/lang/StringBuffer");
+    let buffer_init = c.method_ref("java/lang/StringBuffer", "<init>", "()V");
+    let append = c.method_ref(
+        "java/lang/StringBuffer",
+        "append",
+        "(Ljava/lang/Object;)Ljava/lang/StringBuffer;",
+    );
+    let [th, tl] = idx(to_string);
+    let [vh, vl] = idx(value_of);
+    let [bh, bl] = idx(buffer);
+    let [ih, il] = idx(buffer_init);
+    let [ah, al] = idx(append);
+    #[rustfmt::skip]
+    let to_str = [
+        0x2a, 0xb6, th, tl,     // 0: aload_0 invokevirtual toString
+        0x57, 0x03, 0xac,       // 4: pop iconst_0 ireturn
+        0x4c, 0x04, 0xac,       // 7: astore_1 iconst_1 ireturn (the handler)
+    ];
+    #[rustfmt::skip]
+    let value = [
+        0x2a, 0xb8, vh, vl,     // 0: aload_0 invokestatic valueOf
+        0x57, 0x03, 0xac,
+        0x4c, 0x04, 0xac,
+    ];
+    #[rustfmt::skip]
+    let appended = [
+        0xbb, bh, bl, 0x59,     // 0: new StringBuffer dup
+        0xb7, ih, il,           // 4: invokespecial <init>
+        0x2a, 0xb6, ah, al,     // 7: aload_0 invokevirtual append
+        0x57, 0x03, 0xac,       // 11: pop iconst_0 ireturn
+        0x4c, 0x04, 0xac,       // 14: the handler
+    ];
+    let object = "(Ljava/lang/Object;)Z";
+    c.method(
+        STATIC,
+        "toStr",
+        object,
+        1,
+        2,
+        &to_str,
+        &[(0, 5, 7, overflow)],
+    );
+    c.method(
+        STATIC,
+        "valueOf",
+        object,
+        1,
+        2,
+        &value,
+        &[(0, 5, 7, overflow)],
+    );
+    c.method(
+        STATIC,
+        "append",
+        object,
+        2,
+        2,
+        &appended,
+        &[(0, 12, 14, overflow)],
+    );
+    c.build()
+}
+
 /// `demo/Probe.entered()`: tells the test, without the VM lock, that the
 /// thread is about to start its loop.
 fn probe(entered: Arc<AtomicBool>) -> NativeClass {
@@ -136,8 +219,123 @@ fn vm_with(natives: Vec<NativeClass>, config: VmConfig) -> Vm {
         ("Skipper", skipper()),
         ("EndlessReader", endless_reader()),
         ("Loops", loops()),
+        ("Catcher", catcher()),
     ]);
     Vm::new(config, Arc::new(source), natives)
+}
+
+/// A VM for the nests: a heap that holds 30,000 of them.
+fn nest_vm() -> Vm {
+    let config = VmConfig {
+        heap_bytes: 32 * 1024 * 1024,
+        ..VmConfig::default()
+    };
+    vm_with(Vec::new(), config)
+}
+
+/// Runs `body` on a Java thread of its own, with the stack of a game's
+/// threads, and returns what it returned.
+fn on_java_thread<R: Send + 'static>(
+    vm: &Vm,
+    body: impl FnOnce(&mut Ctx<'_>) -> JResult<R> + Send + 'static,
+) -> R {
+    let (tx, rx) = mpsc::channel();
+    vm.spawn("main", move |ctx| {
+        let _ = tx.send(body(ctx));
+        Ok(())
+    })
+    .expect("the thread starts");
+    match rx.recv_timeout(Duration::from_secs(60)) {
+        Ok(Ok(result)) => result,
+        Ok(Err(throw)) => panic!("the thread threw {throw:?}"),
+        Err(e) => panic!("the thread did not finish: {e}"),
+    }
+}
+
+/// `depth` vectors, each holding the one before, and the outermost.
+fn nested_vectors(ctx: &mut Ctx<'_>, depth: i32) -> JResult<ObjRef> {
+    let mut inner = ctx.construct("java/util/Vector", "()V", &[])?;
+    for _ in 0..depth {
+        let outer = ctx.construct("java/util/Vector", "()V", &[])?;
+        ctx.call_virtual(
+            outer,
+            "addElement",
+            "(Ljava/lang/Object;)V",
+            &[inner.into()],
+        )?;
+        inner = outer;
+    }
+    Ok(inner)
+}
+
+/// `depth` hashtables, each holding the one before as the value of "k".
+fn nested_tables(ctx: &mut Ctx<'_>, depth: i32) -> JResult<ObjRef> {
+    let key = ctx.new_string("k")?;
+    let put = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;";
+    let mut inner = ctx.construct("java/util/Hashtable", "()V", &[])?;
+    for _ in 0..depth {
+        let outer = ctx.construct("java/util/Hashtable", "()V", &[])?;
+        ctx.call_virtual(outer, "put", put, &[key.into(), inner.into()])?;
+        inner = outer;
+    }
+    Ok(inner)
+}
+
+/// Whether `Catcher.<method>` of `nest` caught a `StackOverflowError`.
+fn overflows(ctx: &mut Ctx<'_>, method: &str, nest: ObjRef) -> JResult<bool> {
+    let caught = ctx.call_static("Catcher", method, "(Ljava/lang/Object;)Z", &[nest.into()])?;
+    Ok(caught.int() != 0)
+}
+
+#[test]
+fn nested_vectors_overflow_the_stack_in_java_not_in_rust() {
+    let vm = nest_vm();
+    let caught = on_java_thread(&vm, |ctx| {
+        let nest = nested_vectors(ctx, DEPTH)?;
+        Ok([
+            overflows(ctx, "toStr", nest)?,
+            overflows(ctx, "valueOf", nest)?,
+            overflows(ctx, "append", nest)?,
+        ])
+    });
+    assert_eq!(caught, [true; 3], "Vector.toString, String.valueOf, append");
+}
+
+#[test]
+fn nested_hashtables_overflow_the_stack_in_java_not_in_rust() {
+    let vm = nest_vm();
+    let caught = on_java_thread(&vm, |ctx| {
+        let nest = nested_tables(ctx, DEPTH)?;
+        Ok([
+            overflows(ctx, "toStr", nest)?,
+            overflows(ctx, "valueOf", nest)?,
+            overflows(ctx, "append", nest)?,
+        ])
+    });
+    assert_eq!(
+        caught, [true; 3],
+        "Hashtable.toString, String.valueOf, append"
+    );
+}
+
+#[test]
+fn a_thread_that_caught_the_overflow_goes_on_and_shallow_nests_still_print() {
+    let vm = nest_vm();
+    let (deep, again, shallow, text) = on_java_thread(&vm, |ctx| {
+        let deep = nested_vectors(ctx, DEPTH)?;
+        let first = overflows(ctx, "toStr", deep)?;
+        // The depth the overflow reached was given back: the same call,
+        // and one on a nest of 100, behave as they did.
+        let second = overflows(ctx, "toStr", deep)?;
+        let shallow = nested_vectors(ctx, 100)?;
+        let caught = overflows(ctx, "toStr", shallow)?;
+        let text = ctx.call_virtual(shallow, "toString", "()Ljava/lang/String;", &[])?;
+        let text = ctx.string(text.obj().expect("a string"))?;
+        Ok((first, second, caught, text))
+    });
+    assert!(deep && again, "the deep nest overflows every time");
+    assert!(!shallow, "a nest of 100 prints");
+    assert_eq!(text, format!("{}[]{}", "[".repeat(100), "]".repeat(100)));
 }
 
 /// Starts `method` of `Loops` on a Java thread, waits until it is about to
