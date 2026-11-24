@@ -150,18 +150,21 @@ impl KeyTracker {
     /// Records `host` coming up and returns the phone keys to release.
     ///
     /// The OS may name the key differently on the way up: Shift+3 goes down
-    /// as `#` and, if Shift is let go first, comes up as `3`. A release that
-    /// matches no held key therefore also releases keys held by symbol
-    /// characters, so they cannot stick.
+    /// as `#` and, if Shift is let go first, comes up as `3` (on AZERTY,
+    /// down as `1` and up as `&`). A digit or symbol release that matches
+    /// no held key therefore also releases the keys digits and symbols
+    /// hold, so they cannot stick. Letters and named keys never rename
+    /// that way, so their releases leave other keys alone.
     pub fn release(&mut self, host: &str) -> Vec<Key> {
         let matches_held = self.held.iter().any(|(h, _)| h == host);
+        let renamed = !matches_held && is_char_key(host);
         let mut released = Vec::new();
         let mut kept = Vec::with_capacity(self.held.len());
         for (h, key) in std::mem::take(&mut self.held) {
             let drop = if matches_held {
                 h == host
             } else {
-                is_symbol(&h)
+                renamed && is_char_key(&h)
             };
             if drop {
                 released.push(key);
@@ -189,9 +192,11 @@ impl KeyTracker {
     }
 }
 
-fn is_symbol(host: &str) -> bool {
+/// A key named by the one digit or symbol it types, the kind Shift
+/// renames.
+fn is_char_key(host: &str) -> bool {
     let mut chars = host.chars();
-    matches!((chars.next(), chars.next()), (Some(c), None) if !c.is_alphanumeric())
+    matches!((chars.next(), chars.next()), (Some(c), None) if !c.is_alphabetic())
 }
 
 #[cfg(test)]
@@ -269,6 +274,24 @@ mod tests {
         assert_eq!(t.release("3"), vec![Key::Pound]);
         assert!(t.is_held(Key::Up));
         assert_eq!(t.release_all(), vec![Key::Up]);
+    }
+
+    #[test]
+    fn other_keys_coming_up_leave_symbols_held() {
+        let mut t = KeyTracker::default();
+        assert!(t.press("#", Key::Pound));
+        assert!(t.release("q").is_empty(), "an unbound letter");
+        assert!(t.release("escape").is_empty());
+        assert!(t.is_held(Key::Pound));
+    }
+
+    #[test]
+    fn a_renamed_release_frees_shifted_digits() {
+        // On AZERTY layouts Shift types the digits: down as `1`, up as
+        // `&` once Shift is let go.
+        let mut t = KeyTracker::default();
+        assert!(t.press("1", Key::Num1));
+        assert_eq!(t.release("&"), vec![Key::Num1]);
     }
 
     #[test]
