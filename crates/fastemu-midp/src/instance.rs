@@ -225,7 +225,8 @@ impl std::fmt::Debug for MidpInstance {
 
 impl MidpInstance {
     /// Starts the control thread and the first lifecycle thread, which
-    /// constructs `class_name` and calls `startApp`.
+    /// constructs `class_name` and calls `startApp`. When either cannot
+    /// start, the VM stops, so its event thread does not live on.
     pub(crate) fn start(
         vm: Vm,
         host: HostLink,
@@ -243,10 +244,18 @@ impl MidpInstance {
             frozen: false,
             next_turn: 1,
         };
-        std::thread::Builder::new()
+        let control = std::thread::Builder::new()
             .name(format!("instance {} control", host.id()))
-            .spawn(move || controller.run())?;
-        vm.spawn("MIDlet", move |ctx| midlet::launch(ctx, &class_name))?;
+            .spawn(move || controller.run());
+        if let Err(e) = control {
+            vm.stop();
+            return Err(e);
+        }
+        if let Err(e) = vm.spawn("MIDlet", move |ctx| midlet::launch(ctx, &class_name)) {
+            // The control thread owns a clone of the VM: let it end both.
+            let _ = tx.send(Control::Stop);
+            return Err(e);
+        }
         Ok(Arc::new(Self {
             id: host.id(),
             title,
