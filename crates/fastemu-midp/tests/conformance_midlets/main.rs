@@ -13,3 +13,4 @@ mod conformance_support;
 mod support;
 
 mod resources;
+mod suites;
