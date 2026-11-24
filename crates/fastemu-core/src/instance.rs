@@ -62,8 +62,10 @@ pub enum NetworkPolicy {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InstanceSettings {
     /// The `microedition.encoding` system property, the charset of
-    /// `new String(bytes)` and friends. Games from some regions expect
-    /// their phones' encoding, such as `windows-1251`.
+    /// `new String(bytes)` and every other conversion that names none.
+    /// ISO-8859-1 by default, as on Nokia's phones and in J2ME Loader;
+    /// games from some regions expect their phones' encoding, such as
+    /// `UTF-8` or `windows-1251`.
     pub encoding: String,
     /// The `microedition.locale` system property.
     pub locale: String,
@@ -80,7 +82,7 @@ pub struct InstanceSettings {
 impl Default for InstanceSettings {
     fn default() -> Self {
         Self {
-            encoding: "UTF-8".to_owned(),
+            encoding: "ISO-8859-1".to_owned(),
             locale: "en-US".to_owned(),
             volume: 1.0,
             network: NetworkPolicy::Deny,

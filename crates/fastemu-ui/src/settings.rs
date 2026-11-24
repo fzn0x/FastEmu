@@ -105,8 +105,8 @@ impl GameSettings {
 /// The character encodings offered for `microedition.encoding`: the ones
 /// phones of the era shipped with.
 pub const ENCODINGS: &[&str] = &[
-    "UTF-8",
     "ISO-8859-1",
+    "UTF-8",
     "ISO-8859-2",
     "windows-1250",
     "windows-1251",
@@ -146,7 +146,7 @@ mod tests {
         let s: GameSettings =
             serde_json::from_str(r#"{"volume":0.5,"future":true}"#).expect("parses");
         assert!((s.volume - 0.5).abs() < f32::EPSILON);
-        assert_eq!(s.encoding, "UTF-8");
+        assert_eq!(s.encoding, "ISO-8859-1");
     }
 
     #[test]
