@@ -274,6 +274,15 @@ pub fn class() -> NativeClass {
             "(Ljavax/microedition/lcdui/Alert;Ljavax/microedition/lcdui/Displayable;)V",
             set_current_alert,
         )
+        .method(
+            "setCurrentItem",
+            "(Ljavax/microedition/lcdui/Item;)V",
+            |ctx, a| {
+                let item = ctx.non_null(a[1])?;
+                super::highlevel::form::set_current_item(ctx, item)?;
+                Ok(Value::Void)
+            },
+        )
         .method("callSerially", "(Ljava/lang/Runnable;)V", |ctx, a| {
             if let Some(runnable) = a[1].obj() {
                 let global = Arc::new(ctx.new_global(runnable));

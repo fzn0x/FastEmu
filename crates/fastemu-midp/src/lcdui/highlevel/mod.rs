@@ -1,9 +1,15 @@
-//! The high-level screens and items of `javax.microedition.lcdui`: Form
-//! and its items, List, TextBox, Alert and Ticker, built on the runtime's
-//! [`ScreenHandler`](crate::lcdui::screen::ScreenHandler).
+//! The high-level screens and items of `javax.microedition.lcdui`: `Form`
+//! and its items, `List`, `TextBox`, `Alert` and `Ticker`, built on the
+//! runtime's [`ScreenHandler`](crate::lcdui::screen::ScreenHandler).
+//!
+//! Each screen draws its content area in the runtime's theme and fonts;
+//! the runtime draws the title, the ticker line and the soft keys around
+//! it. `docs/architecture/midp.md` describes how they behave.
 
 pub mod choice;
 pub mod draw;
+pub mod form;
+pub mod item;
 pub mod list;
 pub mod rows;
 pub mod text;
@@ -19,12 +25,15 @@ use crate::lcdui::{displayable, frame, state};
 
 /// The classes of this module.
 pub fn classes() -> Vec<NativeClass> {
-    vec![
+    let mut classes = vec![
         choice::interface(),
         ticker::class(),
         list::class(),
         textbox::class(),
-    ]
+        form::class(),
+    ];
+    classes.extend(item::classes());
+    classes
 }
 
 /// Tells the app whether `screen` wants typed text rather than keypad
