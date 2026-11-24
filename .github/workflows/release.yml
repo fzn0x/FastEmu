@@ -197,7 +197,7 @@ jobs:
         run: |
           bash packaging/retry.sh sudo apt-get install -y --no-install-recommends "$RUNNER_TEMP/release/fastemu-$VERSION-linux-x64.deb"
           test "$(/usr/bin/fastemu --version)" = "fastemu $VERSION"
-          test -f /usr/share/applications/dev.functionx.fastemu.desktop
+          test -f /usr/share/applications/io.github.fzn0x.fastemu.desktop
       - uses: actions/upload-artifact@v7
         with:
           name: release-linux-${{ matrix.arch }}

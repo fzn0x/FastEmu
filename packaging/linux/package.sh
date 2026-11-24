@@ -32,7 +32,7 @@ case "$arch" in
   *) echo "ARCH is x64 or arm64, not $arch" >&2; exit 2 ;;
 esac
 
-app_id=dev.functionx.fastemu
+app_id=io.github.fzn0x.fastemu
 name="fastemu-$version-linux-$arch"
 mkdir -p "$outdir"
 outdir="$(cd "$outdir" && pwd)"

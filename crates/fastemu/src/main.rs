@@ -86,7 +86,7 @@ fn open_window(files: Vec<PathBuf>) {
                     ..TitlebarOptions::default()
                 }),
                 window_min_size: Some(size(px(640.0), px(480.0))),
-                app_id: Some("dev.functionx.fastemu".into()),
+                app_id: Some("io.github.fzn0x.fastemu".into()),
                 ..WindowOptions::default()
             };
             let opened = cx.open_window(options, |window, cx| {
