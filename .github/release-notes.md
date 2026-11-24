@@ -11,10 +11,10 @@
 | **macOS**, Intel | [`fastemu-{version}-macos-x64.zip`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-macos-x64.zip) |
 | **Android** | [`fastemu-{version}-android.apk`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-android.apk): allow installing from this source when Android asks |
 
-**First launch on macOS.** The app is not notarized: open it once from System Settings > Privacy & Security > Open Anyway, or run `xattr -dr com.apple.quarantine fastemu`.
+**First launch on macOS.** The app is not notarized: open it once from System Settings > Privacy & Security > Open Anyway, or run `xattr -dr com.apple.quarantine /Applications/FastEmu.app`.
 
 **First launch on Windows.** The program is not signed: if SmartScreen warns, choose More info > Run anyway.
 
-**Games.** FastEmu does not include any. Add `.jar` files, with their `.jad` files when you have them, from the game list. The [README](https://github.com/{repo}/blob/{tag}/README.md#usage) tells how.
+**Games.** FastEmu does not include any. Add `.jar` files, with their `.jad` files when you have them, with Add game in the library. The [README](https://github.com/{repo}/blob/{tag}/README.md#usage) tells how.
 
 Verify downloads with `SHA256SUMS`: `sha256sum -c SHA256SUMS --ignore-missing` on Linux and macOS, or `Get-FileHash` on Windows, compared with the line of the file.
