@@ -7,6 +7,10 @@
 //! the instance they were meant for, and that stopping them in a mixed
 //! order ends every one and frees its virtual machine. A hang fails the
 //! test after [`LIMIT`] instead of stalling CI.
+//!
+//! `soak_real_games` runs real games from a folder, side by side and then
+//! one at a time, and prints how each did. It is ignored by default; see
+//! CONTRIBUTING.md.
 
 mod media_support;
 mod support;
@@ -18,10 +22,10 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use fastemu_audio::{Engine, EngineConfig};
+use fastemu_audio::{Engine, EngineConfig, NullOutput};
 use fastemu_core::{
     Frame, InputEvent, Instance, InstanceSettings, InstanceStatus, Key, KeyAction, LaunchRequest,
-    Notify,
+    LogLevel, Notify,
 };
 use fastemu_midp::host::HostLink;
 use fastemu_midp::{MidpInstance, MidpLauncher};
@@ -458,4 +462,363 @@ fn side_by_side(jar: &Path, root: &Path) {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(engine.player_count(), 0, "a stopped instance left players");
+}
+
+/// The key script of the soak test, from launch: nothing for 1.5 s, `5`,
+/// then the arrows and fire in turn, one every 250 ms, each held 100 ms.
+struct Script {
+    next: usize,
+}
+
+impl Script {
+    const LOOP: [Key; 5] = [Key::Up, Key::Right, Key::Down, Key::Left, Key::Fire];
+
+    /// When event `n` is due and what it is.
+    fn event(n: usize) -> (Duration, Key, KeyAction) {
+        let action = |n: usize| {
+            if n.is_multiple_of(2) {
+                KeyAction::Press
+            } else {
+                KeyAction::Release
+            }
+        };
+        if n < 2 {
+            let at = 1500 + 100 * n as u64;
+            return (Duration::from_millis(at), Key::Num5, action(n));
+        }
+        let step = (n - 2) / 2;
+        let at = 2000 + 250 * step as u64 + 100 * ((n - 2) % 2) as u64;
+        (
+            Duration::from_millis(at),
+            Self::LOOP[step % Self::LOOP.len()],
+            action(n - 2),
+        )
+    }
+
+    /// The events due by `elapsed`, in order.
+    fn due(&mut self, elapsed: Duration) -> Vec<InputEvent> {
+        let mut events = Vec::new();
+        loop {
+            let (at, key, action) = Self::event(self.next);
+            if at > elapsed {
+                return events;
+            }
+            events.push(InputEvent::Key { key, action });
+            self.next += 1;
+        }
+    }
+}
+
+/// When the soak test starts counting frames for the frame rate, past
+/// loading screens.
+const WARMUP: Duration = Duration::from_secs(3);
+
+/// How one game did in a soak run.
+#[derive(Debug, Default)]
+struct Outcome {
+    name: String,
+    frames: u64,
+    /// Frames presented between [`WARMUP`] and the end of the window.
+    window_frames: u64,
+    errors: u64,
+    error_lines: Vec<String>,
+    status: Option<InstanceStatus>,
+    /// The longest an `Instance::send` call took.
+    slowest_send: Duration,
+    /// Whether every thread ended and the virtual machine was freed after
+    /// the stop.
+    freed: bool,
+}
+
+/// Runs `jars` side by side for `length` with the key script, counting
+/// frames presented between [`WARMUP`] and `window`, then stops them all.
+fn soak(
+    launcher: &MidpLauncher,
+    jars: &[PathBuf],
+    data: &Path,
+    length: Duration,
+    window: Duration,
+) -> Vec<Outcome> {
+    struct Running {
+        instance: Arc<MidpInstance>,
+        started: Instant,
+        script: Script,
+        alive: Arc<()>,
+        warm: Option<u64>,
+        outcome: Outcome,
+    }
+    let mut games: Vec<Running> = jars
+        .iter()
+        .enumerate()
+        .map(|(i, jar)| {
+            let alive = Arc::new(());
+            let held = Arc::clone(&alive);
+            let notify: Notify = Arc::new(move |_| {
+                let _ = &held;
+            });
+            let request = LaunchRequest {
+                notify: Some(notify),
+                ..LaunchRequest::new(jar, data.join(format!("{i}")))
+            };
+            let name = jar.file_stem().unwrap().to_string_lossy().into_owned();
+            let instance = launcher
+                .launch_midp(request)
+                .unwrap_or_else(|e| panic!("launching {name}: {e}"));
+            Running {
+                instance,
+                started: Instant::now(),
+                script: Script { next: 0 },
+                alive,
+                warm: None,
+                outcome: Outcome {
+                    name,
+                    ..Outcome::default()
+                },
+            }
+        })
+        .collect();
+    let start = Instant::now();
+    while start.elapsed() < length {
+        for game in &mut games {
+            let elapsed = game.started.elapsed();
+            for event in game.script.due(elapsed) {
+                let sent = Instant::now();
+                game.instance.send(event);
+                game.outcome.slowest_send = game.outcome.slowest_send.max(sent.elapsed());
+            }
+            let serial = game.instance.frame().map_or(0, |f| f.serial());
+            if elapsed >= WARMUP && game.warm.is_none() {
+                game.warm = Some(serial);
+            }
+            if elapsed <= window {
+                game.outcome.window_frames = serial - game.warm.unwrap_or(serial);
+            }
+            game.outcome.frames = serial;
+            for line in game.instance.drain_log() {
+                if line.level == LogLevel::Err && game.outcome.error_lines.len() < 3 {
+                    game.outcome.error_lines.push(line.text);
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    for game in &mut games {
+        game.outcome.status = Some(game.instance.status());
+        game.outcome.errors = game.instance.error_count();
+        game.instance.stop();
+    }
+    let stop = Instant::now();
+    let mut outcomes = Vec::new();
+    for game in games {
+        let host = game.instance.host().clone();
+        while !host.status().is_finished() && stop.elapsed() < DEADLINE {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        drop(host);
+        drop(game.instance);
+        while Arc::strong_count(&game.alive) > 1 && stop.elapsed() < DEADLINE {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let mut outcome = game.outcome;
+        outcome.freed = Arc::strong_count(&game.alive) == 1;
+        outcomes.push(outcome);
+    }
+    outcomes
+}
+
+/// The process's CPU time so far and its peak and current memory, where
+/// the platform tells them without extra crates.
+#[derive(Clone, Copy, Debug)]
+struct Usage {
+    cpu: Duration,
+    peak_bytes: u64,
+    now_bytes: u64,
+}
+
+/// Prints the CPU time in milliseconds, the peak working set and the
+/// working set of process `PID`.
+const WINDOWS_USAGE: &str = "
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices;
+public static class FastEmuCycles {
+    [DllImport(\"kernel32.dll\")] public static extern bool QueryProcessCycleTime(IntPtr p, out ulong c);
+    [DllImport(\"kernel32.dll\")] public static extern bool QueryThreadCycleTime(IntPtr t, out ulong c);
+    [DllImport(\"kernel32.dll\")] public static extern IntPtr GetCurrentThread();
+}'
+$t = [FastEmuCycles]::GetCurrentThread()
+$a = [uint64]0; [void][FastEmuCycles]::QueryThreadCycleTime($t, [ref]$a)
+$w = [Diagnostics.Stopwatch]::StartNew(); while ($w.ElapsedMilliseconds -lt 200) {}
+$b = [uint64]0; [void][FastEmuCycles]::QueryThreadCycleTime($t, [ref]$b)
+$rate = ($b - $a) / $w.Elapsed.TotalSeconds
+$p = Get-Process -Id PID
+$c = [uint64]0; [void][FastEmuCycles]::QueryProcessCycleTime($p.Handle, [ref]$c)
+'{0} {1} {2}' -f [uint64]($c / $rate * 1000), $p.PeakWorkingSet64, $p.WorkingSet64
+";
+
+fn usage() -> Option<Usage> {
+    if cfg!(target_os = "linux") {
+        let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+        // The fields after the command, which is in parentheses.
+        let fields: Vec<&str> = stat.rsplit_once(')')?.1.split_whitespace().collect();
+        let ticks: u64 =
+            fields.get(11)?.parse::<u64>().ok()? + fields.get(12)?.parse::<u64>().ok()?;
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let kib = |key: &str| -> Option<u64> {
+            let line = status.lines().find(|l| l.starts_with(key))?;
+            line.split_whitespace().nth(1)?.parse().ok()
+        };
+        return Some(Usage {
+            // Linux counts in USER_HZ, 100 a second on every platform it
+            // supports.
+            cpu: Duration::from_millis(ticks * 10),
+            peak_bytes: kib("VmHWM:")? * 1024,
+            now_bytes: kib("VmRSS:")? * 1024,
+        });
+    }
+    if cfg!(windows) {
+        // Windows charges CPU time by the clock tick, which misses most of
+        // the short bursts game threads run in, so count cycles instead,
+        // at the rate a busy thread of PowerShell's runs them.
+        let script = WINDOWS_USAGE.replace("PID", &std::process::id().to_string());
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut parts = text.split_whitespace();
+        return Some(Usage {
+            cpu: Duration::from_millis(parts.next()?.parse().ok()?),
+            peak_bytes: parts.next()?.parse().ok()?,
+            now_bytes: parts.next()?.parse().ok()?,
+        });
+    }
+    None
+}
+
+fn mib(bytes: u64) -> String {
+    format!("{:.0} MiB", bytes as f64 / (1024.0 * 1024.0))
+}
+
+/// CPU time per second of `length`, as a share of one core.
+fn cpu_share(before: Option<Usage>, after: Option<Usage>, length: Duration) -> String {
+    match (before, after) {
+        (Some(b), Some(a)) => format!(
+            "{:.0} ms/s",
+            a.cpu.saturating_sub(b.cpu).as_secs_f64() * 1000.0 / length.as_secs_f64()
+        ),
+        _ => "n/a".to_owned(),
+    }
+}
+
+/// Real games side by side: every JAR in `FASTEMU_GAMES_DIR` at once for
+/// `FASTEMU_SOAK_SECONDS` (60 by default), then each alone for up to
+/// 20 s, all with the same key script. Prints per game the frames, the
+/// errors, the final status and the frame rate together and alone, with
+/// the process's CPU time and memory. Run it with
+/// `cargo test --release -p fastemu-midp --test many_instances -- --ignored --nocapture`.
+#[test]
+#[ignore = "runs real games from FASTEMU_GAMES_DIR for minutes; see CONTRIBUTING.md"]
+fn soak_real_games() {
+    let dir = std::env::var_os("FASTEMU_GAMES_DIR")
+        .map(PathBuf::from)
+        .expect("FASTEMU_GAMES_DIR names a folder of JARs");
+    let seconds: u64 = std::env::var("FASTEMU_SOAK_SECONDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(60);
+    let length = Duration::from_secs(seconds.max(5));
+    let solo = length.min(Duration::from_secs(20));
+    let mut jars: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .expect("reading FASTEMU_GAMES_DIR")
+        .map(|e| e.expect("an entry").path())
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("jar")))
+        .collect();
+    jars.sort();
+    assert!(!jars.is_empty(), "no JARs in {}", dir.display());
+    let data = tempfile::tempdir().expect("a data folder");
+    let engine = Engine::default();
+    let _output = NullOutput::start(&engine);
+    let launcher = MidpLauncher::new(Some(engine.clone()));
+
+    let before = usage();
+    println!("{} games together for {}s", jars.len(), length.as_secs());
+    let together = soak(
+        &launcher,
+        &jars,
+        &data.path().join("together"),
+        length,
+        solo,
+    );
+    let after = usage();
+    let mut alone = Vec::new();
+    let mut solo_cpu = Vec::new();
+    for (i, jar) in jars.iter().enumerate() {
+        let start = usage();
+        let mut outcome = soak(
+            &launcher,
+            std::slice::from_ref(jar),
+            &data.path().join(format!("alone-{i}")),
+            solo,
+            solo,
+        );
+        let end = usage();
+        solo_cpu.push(cpu_share(start, end, solo));
+        alone.push(outcome.remove(0));
+        if let Some(end) = end {
+            println!("after {} alone: {}", alone[i].name, mib(end.now_bytes));
+        }
+    }
+
+    let span = solo.saturating_sub(WARMUP).as_secs_f64();
+    println!(
+        "\n{:<24} {:>7} {:>8} {:>9} {:>8} {:>6} {:>8} {:>7} {:>9} {:>6}  status",
+        "game",
+        "frames",
+        "fps all",
+        "fps with",
+        "fps solo",
+        "ratio",
+        "cpu solo",
+        "errors",
+        "send max",
+        "freed"
+    );
+    for ((with, solo_run), cpu) in together.iter().zip(&alone).zip(&solo_cpu) {
+        let fps_with = with.window_frames as f64 / span;
+        let fps_solo = solo_run.window_frames as f64 / span;
+        let ratio = if fps_solo > 0.0 {
+            fps_with / fps_solo
+        } else {
+            f64::NAN
+        };
+        println!(
+            "{:<24} {:>7} {:>8.1} {:>9.1} {:>8.1} {:>6.2} {:>8} {:>7} {:>9} {:>6}  {:?}",
+            with.name,
+            with.frames,
+            with.frames as f64 / length.as_secs_f64(),
+            fps_with,
+            fps_solo,
+            ratio,
+            cpu,
+            with.errors,
+            format!("{:.1?}", with.slowest_send),
+            with.freed && solo_run.freed,
+            with.status.as_ref().unwrap_or(&InstanceStatus::Starting),
+        );
+        for line in &with.error_lines {
+            println!("    {line}");
+        }
+    }
+    println!(
+        "\ntogether: cpu {}, peak memory {}, memory after they stopped {}",
+        cpu_share(before, after, length),
+        after.map_or("n/a".to_owned(), |u| mib(u.peak_bytes)),
+        after.map_or("n/a".to_owned(), |u| mib(u.now_bytes)),
+    );
+    for outcome in together.iter().chain(&alone) {
+        assert!(
+            outcome.freed,
+            "{} did not end and free its machine",
+            outcome.name
+        );
+    }
 }

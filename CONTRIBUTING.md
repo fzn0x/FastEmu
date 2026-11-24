@@ -149,6 +149,33 @@ fzn0x/FastEmu` writes a release's notes from CHANGELOG.md and
 workflow does. `--unreleased` takes the Unreleased section instead, for
 a version not released yet.
 
+### The soak test with real games
+
+`crates/fastemu-midp/tests/many_instances.rs` holds a soak test that is
+ignored by default, since it needs games the repository cannot hold. It
+starts every JAR in a folder at once on the default profile, presses keys
+on a script (nothing for 1.5 s, then `5`, then the arrows and fire in
+turn), stops them all, and then runs each game alone for up to 20 s with
+the same keys. Each game keeps its record stores in a temporary folder, so
+the JARs are only read. Run it with a release build, since a debug build
+runs games several times slower:
+
+```sh
+FASTEMU_GAMES_DIR=/path/to/jars FASTEMU_SOAK_SECONDS=60 \
+  cargo test --release -p fastemu-midp --test many_instances -- --ignored --nocapture
+```
+
+In PowerShell, set the variables first with `$env:FASTEMU_GAMES_DIR =
+"D:\games"` and `$env:FASTEMU_SOAK_SECONDS = 60`. `FASTEMU_SOAK_SECONDS`
+is the length of the run side by side, 60 by default. For each game it
+prints the frames presented, the frame rate over the whole run, the frame
+rate from 3 s to the end of the solo window side by side and alone with
+their ratio, the CPU time per second alone, the errors, the slowest
+`Instance::send`, whether every thread ended and the virtual machine was
+freed, and the final status. Then it prints the CPU time per second and
+the peak memory of the run side by side, on Linux and Windows. A ratio
+well under 1 means the game slows down when others run.
+
 ## Commits
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org),
