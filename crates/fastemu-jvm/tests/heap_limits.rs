@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, OnceLock};
 
-use fastemu_jvm::{HeapStats, MemorySource, Vm, VmConfig};
+use fastemu_jvm::{HeapStats, MemorySource, Throw, Vm, VmConfig};
 
 const HEAP: usize = 256 * 1024;
 
@@ -49,7 +49,11 @@ fn compiled() -> &'static Result<Compiled, String> {
     static COMPILED: OnceLock<Result<Compiled, String>> = OnceLock::new();
     COMPILED.get_or_init(|| {
         let javac = tool("javac").ok_or("no javac in JAVA_HOME or on the PATH")?;
-        let out = Path::new(env!("CARGO_TARGET_TMPDIR")).join("heap-limits-classes");
+        // One folder for each process, so two runs of this test at once
+        // (two checkouts sharing a target folder) do not overwrite each
+        // other's class files; it goes away once the classes are in memory.
+        let out = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("heap-limits-classes-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&out);
         std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
         let source_file = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -88,6 +92,7 @@ fn compiled() -> &'static Result<Compiled, String> {
                 source.add_class(name, std::fs::read(&path).map_err(|e| e.to_string())?);
             }
         }
+        let _ = std::fs::remove_dir_all(&out);
         // A resource of 64 KiB.
         source.add_resource("/big.bin", vec![7; 64 * 1024]);
         Ok(Compiled { source })
@@ -123,7 +128,10 @@ fn call(vm: &Vm, method: &str) -> i32 {
     vm.attach("test", |ctx| {
         match ctx.call_static("HeapCases", method, "()I", &[]) {
             Ok(v) => v.int(),
-            Err(thrown) => panic!("HeapCases.{method} threw {thrown:?} out of the program"),
+            Err(Throw::Exception(e)) => {
+                panic!("HeapCases.{method} threw {}", ctx.describe_exception(e))
+            }
+            Err(Throw::Stop) => panic!("HeapCases.{method} was stopped"),
         }
     })
 }
@@ -260,7 +268,7 @@ fn a_native_that_asks_for_more_than_the_heap_fails_before_it_allocates() {
             let mut thrown = Vec::new();
             for bytes in [HEAP + 1, 3 * HEAP, usize::MAX] {
                 match ctx.check_alloc(bytes) {
-                    Err(fastemu_jvm::Throw::Exception(e)) => thrown.push(ctx.describe_exception(e)),
+                    Err(Throw::Exception(e)) => thrown.push(ctx.describe_exception(e)),
                     other => thrown.push(format!("{bytes}: {other:?}")),
                 }
             }
