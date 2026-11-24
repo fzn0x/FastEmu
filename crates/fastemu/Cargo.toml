@@ -12,11 +12,13 @@ default-run = "fastemu"
 
 [dependencies]
 dirs = "7"
-# The runtime is not ready yet: the app runs the mock launcher, whose games
-# draw test patterns. The real launcher from fastemu-midp takes its place
-# through the same `Launcher` trait.
+# Sound through the system's audio device (cpal) for the window; the
+# headless runner stays silent.
+fastemu-audio = { workspace = true, features = ["output"] }
+# The mock launcher's test patterns serve `fastemu --mock`, for working on
+# the window without games.
 fastemu-core = { workspace = true, features = ["mock"] }
-# The real launcher, for the headless runner (`fastemu run`).
+# The real launcher, for the window and the headless runner.
 fastemu-midp.workspace = true
 fastemu-ui.workspace = true
 # GPUI's default features, as Zed builds its desktop app: font-kit, the
@@ -24,6 +26,8 @@ fastemu-ui.workspace = true
 gpui = { git = "https://github.com/Dylanmurzello/zed-android-port", rev = "746f088ee8d6b8b273354826757dd09e74565854" }
 # The desktop backends: Windows, macOS and Linux with both X11 and Wayland.
 gpui_platform = { git = "https://github.com/Dylanmurzello/zed-android-port", rev = "746f088ee8d6b8b273354826757dd09e74565854", default-features = false, features = ["font-kit", "wayland", "x11"] }
+# The terminal logger for the window's warnings.
+log = "0.4"
 # The headless runner's screenshots.
 png = "0.18"
 

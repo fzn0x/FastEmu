@@ -7,7 +7,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 pub const USAGE: &str = "\
-Usage: fastemu [FILE...]
+Usage: fastemu [--mock] [FILE...]
        fastemu run SUITE [OPTIONS]
        fastemu --version | --help
 
@@ -18,16 +18,22 @@ Commands:
   run         Run a game without a window (fastemu run --help)
 
 Options:
+      --mock      Start test patterns instead of games, for working on
+                  the window itself
   -V, --version   Print the version and exit
   -h, --help      Print this help and exit
+
+FASTEMU_LOG=info (or debug) prints more than warnings to the terminal.
 ";
 
 /// What the user asked for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
-    /// Open the window, adding and starting `files`.
+    /// Open the window, adding and starting `files`. With `mock`, games
+    /// are the mock launcher's test patterns.
     Open {
         files: Vec<PathBuf>,
+        mock: bool,
     },
     /// The headless runner, with its own arguments.
     Run {
@@ -60,10 +66,12 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, CliErr
         });
     }
     let mut files = Vec::new();
+    let mut mock = false;
     let mut options_done = false;
     for arg in args {
         match arg.to_str() {
             Some("--") if !options_done => options_done = true,
+            Some("--mock") if !options_done => mock = true,
             Some("-V" | "--version") if !options_done => return Ok(Command::Version),
             Some("-h" | "--help") if !options_done => return Ok(Command::Help),
             Some(option) if !options_done && option.starts_with('-') && option.len() > 1 => {
@@ -72,7 +80,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, CliErr
             _ => files.push(PathBuf::from(arg)),
         }
     }
-    Ok(Command::Open { files })
+    Ok(Command::Open { files, mock })
 }
 
 #[cfg(test)]
@@ -85,7 +93,13 @@ mod tests {
 
     #[test]
     fn no_arguments_open_the_window() {
-        assert_eq!(parse_strs(&[]), Ok(Command::Open { files: vec![] }));
+        assert_eq!(
+            parse_strs(&[]),
+            Ok(Command::Open {
+                files: vec![],
+                mock: false
+            })
+        );
     }
 
     #[test]
@@ -93,7 +107,8 @@ mod tests {
         assert_eq!(
             parse_strs(&["a.jar", "--", "-odd.jad"]),
             Ok(Command::Open {
-                files: vec!["a.jar".into(), "-odd.jad".into()]
+                files: vec!["a.jar".into(), "-odd.jad".into()],
+                mock: false
             })
         );
     }
@@ -119,9 +134,21 @@ mod tests {
         assert_eq!(
             parse_strs(&["game.jar", "run"]),
             Ok(Command::Open {
-                files: vec!["game.jar".into(), "run".into()]
+                files: vec!["game.jar".into(), "run".into()],
+                mock: false
             }),
             "run is a command only in first place"
+        );
+    }
+
+    #[test]
+    fn mock_starts_test_patterns() {
+        assert_eq!(
+            parse_strs(&["--mock", "a.jar"]),
+            Ok(Command::Open {
+                files: vec!["a.jar".into()],
+                mock: true
+            })
         );
     }
 

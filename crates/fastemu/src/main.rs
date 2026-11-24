@@ -3,7 +3,9 @@
 //! lives in `fastemu-ui`, which the Android app shares. `fastemu run`
 //! runs a game without a window (see `run`).
 
+mod audio;
 mod cli;
+mod logger;
 mod paths;
 mod run;
 
@@ -12,6 +14,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use fastemu_core::Launcher;
+use fastemu_midp::MidpLauncher;
 use fastemu_ui::{AppConfig, Assets, FastEmuView};
 use gpui::{
     App, AppContext, Bounds, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, actions, px,
@@ -30,8 +33,9 @@ actions!(
 
 fn main() -> ExitCode {
     match cli::parse(std::env::args_os().skip(1)) {
-        Ok(Command::Open { files }) => {
-            open_window(files);
+        Ok(Command::Open { files, mock }) => {
+            logger::init();
+            open_window(files, mock);
             ExitCode::SUCCESS
         }
         Ok(Command::Version) => {
@@ -50,16 +54,25 @@ fn main() -> ExitCode {
     }
 }
 
-/// The runtime that starts games. Until the virtual machine is ready this
-/// is the mock launcher, whose games draw a test pattern; the real
-/// launcher from fastemu-midp replaces it here.
-fn launcher() -> Arc<dyn Launcher> {
-    Arc::new(fastemu_core::mock::MockLauncher)
+/// The runtime that starts games and what plays their sound, which must
+/// live as long as the app. With `mock`, the mock launcher's test
+/// patterns stand in for games, for working on the window without a
+/// game at hand; they make no sound.
+fn launcher(mock: bool) -> (Arc<dyn Launcher>, Option<audio::Output>) {
+    if mock {
+        return (Arc::new(fastemu_core::mock::MockLauncher), None);
+    }
+    let engine = fastemu_audio::Engine::default();
+    let output = audio::start(&engine);
+    (Arc::new(MidpLauncher::new(Some(engine))), Some(output))
 }
 
-fn open_window(files: Vec<PathBuf>) {
+fn open_window(files: Vec<PathBuf>, mock: bool) {
+    // `run` returns when the app quits (or never, on macOS), so the sound
+    // plays for as long as the window is open.
+    let (launcher, _output) = launcher(mock);
     let config = AppConfig {
-        launcher: launcher(),
+        launcher,
         paths: paths::desktop(),
     };
     gpui_platform::application()

@@ -2010,11 +2010,13 @@ version = "0.1.0"
 dependencies = [
  "dirs 7.0.0",
  "embed-resource",
+ "fastemu-audio",
  "fastemu-core",
  "fastemu-midp",
  "fastemu-ui",
  "gpui",
  "gpui_platform",
+ "log",
  "png 0.18.1",
  "tempfile",
 ]
