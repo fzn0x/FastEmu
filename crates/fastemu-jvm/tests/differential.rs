@@ -91,7 +91,14 @@ fn normalize(text: &str) -> String {
 
 fn run_reference(jdk: &Jdk, class: &str) -> String {
     let output = Command::new(&jdk.java)
-        .args(["-Xss8m", "-Dfile.encoding=UTF-8", "-cp"])
+        .args([
+            "-Xss8m",
+            "-Xmx256m",
+            "-Dfile.encoding=UTF-8",
+            "-Dsun.stdout.encoding=UTF-8",
+            "-Dstdout.encoding=UTF-8",
+            "-cp",
+        ])
         .arg(&jdk.classes)
         .arg(class)
         .output()
@@ -174,5 +181,17 @@ macro_rules! programs {
 }
 
 programs! {
+    arith: "Arith", 8;
+    arrays: "Arrays", 8;
+    exceptions: "Exceptions", 8;
+    float_math: "FloatMath", 8;
+    gc_stress: "GcStress", 4;
     hello: "Hello", 8;
+    inheritance: "Inheritance", 8;
+    recursion: "Recursion", 8;
+    static_init: "StaticInit", 8;
+    strings: "Strings", 8;
+    switches: "Switches", 8;
+    threads: "Threads", 8;
+    wrappers: "Wrappers", 8;
 }
