@@ -6,6 +6,13 @@
 //! from the start of this one) and `scheduleAtFixedRate` fixed-rate (from
 //! when this one was due, so late runs catch up).
 //!
+//! Tasks are due on the machine's run time ([`crate::VmClock`]), which
+//! stands still while the machine is paused, so a pause does not make
+//! runs late: a fixed-rate task paused for a minute goes on at its rate
+//! when the machine resumes, where on the wall clock it would run a
+//! minute of tasks at once. A `Date` given to `schedule` is wall time and
+//! counts from now; `scheduledExecutionTime` reports wall time.
+//!
 //! Unlike Java SE, where an exception in a task kills the timer thread
 //! and every other task, a task that throws is reported as uncaught and
 //! cancelled, and the timer goes on with the rest (rule 16 of
@@ -43,7 +50,7 @@ enum Phase {
 #[derive(Default)]
 struct Task {
     phase: Phase,
-    /// When it runs next, in `currentTimeMillis` time.
+    /// When it runs next, in run-time milliseconds ([`run_millis`]).
     next: i64,
     /// 0 for a one-shot task, positive for fixed-rate, negative for
     /// fixed-delay, as in Java.
@@ -122,6 +129,11 @@ fn queue<'a>(ctx: &'a mut Ctx<'_>, obj: ObjRef) -> JResult<&'a mut Queue> {
     ctx.payload_mut::<Queue>(obj)
 }
 
+/// The machine's run time in milliseconds: the clock tasks are due on.
+fn run_millis(ctx: &Ctx<'_>) -> i64 {
+    ctx.clock().elapsed().as_millis() as i64
+}
+
 /// Waits until something changes or `deadline` passes. An interrupt of
 /// the timer thread is cleared, as Java's timer thread ignores it, and a
 /// paused virtual machine parks the thread until it resumes.
@@ -157,10 +169,10 @@ fn turn(ctx: &mut Ctx<'_>, queue_ref: &GlobalRef) -> JResult<bool> {
         queue(ctx, q_obj)?.remove(t_obj);
         return Ok(true);
     }
-    let now = current_time_millis();
+    let now = run_millis(ctx);
     if due > now {
-        let wait_ms = (due - now) as u64;
-        wait(ctx, Some(Instant::now() + Duration::from_millis(wait_ms)))?;
+        let at = ctx.clock().instant_at(Duration::from_millis(due as u64));
+        wait(ctx, at)?;
         return Ok(true);
     }
     if period == 0 {
@@ -202,8 +214,8 @@ fn timer_queue(ctx: &mut Ctx<'_>, timer: ObjRef) -> JResult<ObjRef> {
     }
 }
 
-/// Java's `Timer.sched`: puts `task_obj` on the queue to run at `time`,
-/// with `period` as Java stores it.
+/// Java's `Timer.sched`: puts `task_obj` on the queue to run at `time`
+/// (run-time milliseconds), with `period` as Java stores it.
 fn schedule(
     ctx: &mut Ctx<'_>,
     timer: ObjRef,
@@ -212,13 +224,6 @@ fn schedule(
     period: i64,
 ) -> JResult<Value> {
     let task_obj = ctx.non_null(task_obj)?;
-    if time < 0 {
-        return throw(
-            ctx,
-            "java/lang/IllegalArgumentException",
-            "Illegal execution time.",
-        );
-    }
     // Java halves huge periods so that adding one never overflows.
     let period = if period.unsigned_abs() > (i64::MAX >> 1) as u64 {
         period >> 1
@@ -249,11 +254,12 @@ fn schedule(
     Ok(Value::Void)
 }
 
+/// The run time `delay` milliseconds from now.
 fn check_delay(ctx: &mut Ctx<'_>, delay: i64) -> JResult<i64> {
     if delay < 0 {
         return throw(ctx, "java/lang/IllegalArgumentException", "Negative delay.");
     }
-    Ok(current_time_millis().saturating_add(delay))
+    Ok(run_millis(ctx).saturating_add(delay))
 }
 
 fn check_period(ctx: &mut Ctx<'_>, period: i64) -> JResult<i64> {
@@ -267,9 +273,21 @@ fn check_period(ctx: &mut Ctx<'_>, period: i64) -> JResult<i64> {
     Ok(period)
 }
 
-fn date_millis(ctx: &mut Ctx<'_>, date: Value) -> JResult<i64> {
+/// The run time of the wall time `date` holds: as far from the run time
+/// now as the date is from `System.currentTimeMillis()`. Java refuses a
+/// date before 1970.
+fn date_time(ctx: &mut Ctx<'_>, date: Value) -> JResult<i64> {
     let date = ctx.non_null(date)?;
-    Ok(ctx.call_virtual(date, "getTime", "()J", &[])?.long())
+    let millis = ctx.call_virtual(date, "getTime", "()J", &[])?.long();
+    if millis < 0 {
+        return throw(
+            ctx,
+            "java/lang/IllegalArgumentException",
+            "Illegal execution time.",
+        );
+    }
+    let from_now = millis.saturating_sub(current_time_millis());
+    Ok(run_millis(ctx).saturating_add(from_now))
 }
 
 /// `new Timer()`: the queue, and the thread that runs it.
@@ -305,11 +323,12 @@ pub(crate) fn classes() -> Vec<NativeClass> {
             .method("scheduledExecutionTime", "()J", |ctx, a| {
                 let t = task(ctx, this(a))?;
                 let at = if t.period < 0 {
-                    t.next + t.period
+                    t.next.wrapping_add(t.period)
                 } else {
-                    t.next - t.period
+                    t.next.wrapping_sub(t.period)
                 };
-                Ok(Value::Long(at))
+                // In wall time, as games compare it with currentTimeMillis.
+                Ok(Value::Long(ctx.shared.clock.wall_millis(at)))
             }),
         NativeClass::new(TIMER)
             .payload::<TimerData>()
@@ -323,7 +342,7 @@ pub(crate) fn classes() -> Vec<NativeClass> {
                 "schedule",
                 "(Ljava/util/TimerTask;Ljava/util/Date;)V",
                 |ctx, a| {
-                    let time = date_millis(ctx, a[2])?;
+                    let time = date_time(ctx, a[2])?;
                     schedule(ctx, this(a), a[1], time, 0)
                 },
             )
@@ -337,7 +356,7 @@ pub(crate) fn classes() -> Vec<NativeClass> {
                 "(Ljava/util/TimerTask;Ljava/util/Date;J)V",
                 |ctx, a| {
                     let period = check_period(ctx, a[3].long())?;
-                    let time = date_millis(ctx, a[2])?;
+                    let time = date_time(ctx, a[2])?;
                     schedule(ctx, this(a), a[1], time, -period)
                 },
             )
@@ -355,7 +374,7 @@ pub(crate) fn classes() -> Vec<NativeClass> {
                 "(Ljava/util/TimerTask;Ljava/util/Date;J)V",
                 |ctx, a| {
                     let period = check_period(ctx, a[3].long())?;
-                    let time = date_millis(ctx, a[2])?;
+                    let time = date_time(ctx, a[2])?;
                     schedule(ctx, this(a), a[1], time, period)
                 },
             )
@@ -475,5 +494,82 @@ mod tests {
             "{:?}",
             lines.iter().map(|l| &l.text).collect::<Vec<_>>()
         );
+    }
+
+    /// A task that counts its runs and keeps the worst lateness it sees
+    /// as javadoc's tardiness check computes it:
+    /// `System.currentTimeMillis() - scheduledExecutionTime()`.
+    fn tardy() -> NativeClass {
+        const TARDY: &str = "test/Tardy";
+        NativeClass::new(TARDY)
+            .extends(TASK)
+            .static_field("runs", "I")
+            .static_field("worst", "J")
+            .method("<init>", "()V", |ctx, a| {
+                ctx.call_special(TASK, this(a), "<init>", "()V", &[])?;
+                Ok(Value::Void)
+            })
+            .method("run", "()V", |ctx, a| {
+                let at = ctx.call_virtual(this(a), "scheduledExecutionTime", "()J", &[])?;
+                let late = current_time_millis() - at.long();
+                let runs = ctx.static_field_id(TARDY, "runs", "I")?;
+                let worst = ctx.static_field_id(TARDY, "worst", "J")?;
+                let n = ctx.get_static(runs)?.int();
+                ctx.set_static(runs, Value::Int(n + 1))?;
+                let w = ctx.get_static(worst)?.long();
+                ctx.set_static(worst, Value::Long(w.max(late)))?;
+                Ok(Value::Void)
+            })
+    }
+
+    /// The runs and the worst lateness a `test/Tardy` task saw so far.
+    fn tardiness(vm: &Vm) -> (i32, i64) {
+        vm.attach("read", |ctx| {
+            let runs = ctx.static_field_id("test/Tardy", "runs", "I").unwrap();
+            let worst = ctx.static_field_id("test/Tardy", "worst", "J").unwrap();
+            let runs = ctx.get_static(runs).unwrap().int();
+            (runs, ctx.get_static(worst).unwrap().long())
+        })
+    }
+
+    /// Tasks are due on the run time, which stands still during a pause,
+    /// so a fixed-rate task does not catch up on the runs a pause missed,
+    /// and its scheduled times stay close to the wall time.
+    #[test]
+    fn a_pause_does_not_make_a_fixed_rate_timer_catch_up() {
+        let source = Arc::new(MemorySource::new());
+        let vm = Vm::new(VmConfig::default(), source, vec![tardy()]);
+        let timer = vm.attach("test", |ctx| {
+            let timer = ctx.construct(TIMER, "()V", &[]).unwrap();
+            let task = ctx.construct("test/Tardy", "()V", &[]).unwrap();
+            let args = [task.into(), Value::Long(0), Value::Long(10)];
+            let desc = "(Ljava/util/TimerTask;JJ)V";
+            ctx.call_virtual(timer, "scheduleAtFixedRate", desc, &args)
+                .unwrap();
+            ctx.new_global(timer)
+        });
+        std::thread::sleep(Duration::from_millis(60));
+        vm.pause();
+        std::thread::sleep(Duration::from_millis(20));
+        let (paused_at, _) = tardiness(&vm);
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(tardiness(&vm).0, paused_at, "no runs while paused");
+        vm.resume();
+        std::thread::sleep(Duration::from_millis(25));
+        let (resumed, worst) = tardiness(&vm);
+        // On the wall clock, 30 late runs would come at once.
+        assert!(resumed - paused_at <= 8, "{paused_at} then {resumed}");
+        assert!(worst < 100, "a run seemed {worst} ms late");
+        std::thread::sleep(Duration::from_millis(100));
+        let (later, _) = tardiness(&vm);
+        assert!(
+            later - resumed >= 4,
+            "the rate goes on: {resumed} then {later}"
+        );
+        vm.attach("cancel", |ctx| {
+            let timer = timer.get(ctx);
+            ctx.call_virtual(timer, "cancel", "()V", &[]).unwrap();
+        });
+        assert!(vm.wait_finished(Some(Duration::from_secs(10))));
     }
 }

@@ -613,12 +613,13 @@ What natives and games can rely on:
   and `reset` to it), and `OutputStreamWriter` writes through at once.
 - **`PrintStream`** never throws `IOException`: a failure of the stream
   under it sets the flag `checkError` returns.
-- **Time.** `Date`, `Random()`, `Calendar` and `Timer` read the clock
-  through `lang::system::current_time_millis`, the one place a
-  pause-aware or offset clock would go. `Random` is the javadoc's 48-bit
-  generator, so seeded sequences match every phone. `Calendar` behaves as
-  Java's lenient `GregorianCalendar` (proleptic: no Julian dates before
-  1582), with weeks from Sunday as in the US locale. `TimeZone` has GMT,
+- **Time.** `System.currentTimeMillis`, `Date`, `Random()` and `Calendar`
+  read the wall clock through `lang::system::current_time_millis`;
+  `Timer` schedules on the run time (see [Run time](#run-time)).
+  `Random` is the javadoc's 48-bit generator, so seeded sequences match
+  every phone. `Calendar` behaves as Java's lenient `GregorianCalendar`
+  (proleptic: no Julian dates before 1582), with weeks from Sunday as in
+  the US locale. `TimeZone` has GMT,
   UTC and custom `GMT+hh:mm` zones, gives GMT for an ID it does not know,
   and defaults to the host's zone, with the host's daylight saving rules
   (from the jiff crate), under the `GMT+hh:mm` ID of its standard offset
@@ -626,7 +627,14 @@ What natives and games can rely on:
 - **`Timer`** runs its tasks on a Java thread of its own, `Timer-n`, with
   a Rust body. A task that throws is reported as uncaught and cancelled,
   and the timer goes on with its other tasks, as J2ME Loader does; on
-  Java SE the whole timer would end.
+  Java SE the whole timer would end. Tasks are due on the run time, so a
+  pause neither runs them nor leaves late runs to catch up on: a
+  fixed-rate task goes on at its rate after the resume. A `Date` passed
+  to `schedule` counts from the wall time now, and
+  `scheduledExecutionTime` is wall time (the wall time the machine
+  started at, plus the run time, plus the pauses so far), so the
+  javadoc's check `currentTimeMillis() - scheduledExecutionTime()` stays
+  small after a pause.
 
 ## Testing
 

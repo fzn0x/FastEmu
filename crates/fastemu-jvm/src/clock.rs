@@ -19,6 +19,8 @@ pub(crate) struct Clock {
     /// Whether the machine is paused. Read without the lock at every
     /// safepoint; changed only with it held, with the times.
     paused: AtomicBool,
+    /// `System.currentTimeMillis` when the run time was zero.
+    wall_start_millis: i64,
     times: Mutex<Times>,
 }
 
@@ -30,16 +32,40 @@ struct Times {
     paused_since: Option<Instant>,
 }
 
+impl Times {
+    /// Every pause so far, the current one too.
+    fn paused(&self, now: Instant) -> Duration {
+        let current = self
+            .paused_since
+            .map_or(Duration::ZERO, |since| now.saturating_duration_since(since));
+        self.paused_for + current
+    }
+}
+
 impl Clock {
     pub(crate) fn new() -> Self {
         Clock {
             paused: AtomicBool::new(false),
+            wall_start_millis: crate::lang::system::current_time_millis(),
             times: Mutex::new(Times {
                 start: Instant::now(),
                 paused_for: Duration::ZERO,
                 paused_since: None,
             }),
         }
+    }
+
+    /// The wall time, as `System.currentTimeMillis` counts it, that the
+    /// run time `run_millis` stands for: the wall time the machine started
+    /// at, plus the run time, plus every pause so far. Times the library
+    /// reports to the game (`TimerTask.scheduledExecutionTime`) come from
+    /// here, so two run times a period apart map exactly a period apart,
+    /// and a run time just reached maps to about the wall time now.
+    pub(crate) fn wall_millis(&self, run_millis: i64) -> i64 {
+        let paused = self.times.lock().paused(Instant::now());
+        self.wall_start_millis
+            .saturating_add(run_millis)
+            .saturating_add(paused.as_millis() as i64)
     }
 
     #[inline]
@@ -65,9 +91,8 @@ impl Clock {
 
     fn elapsed_at(&self, now: Instant) -> Duration {
         let t = self.times.lock();
-        let end = t.paused_since.unwrap_or(now);
-        end.saturating_duration_since(t.start)
-            .saturating_sub(t.paused_for)
+        now.saturating_duration_since(t.start)
+            .saturating_sub(t.paused(now))
     }
 }
 
@@ -150,6 +175,22 @@ mod tests {
             "the pause is left out: {after:?} of {:?}",
             start.elapsed()
         );
+    }
+
+    #[test]
+    fn run_times_map_to_wall_times_a_fixed_distance_apart() {
+        let clock = Clock::new();
+        let now = crate::lang::system::current_time_millis();
+        let at = |run| clock.wall_millis(run);
+        assert!((at(0) - now).abs() <= 50, "{} and {now}", at(0));
+        assert_eq!(at(120) - at(100), 20);
+        let before = at(100);
+        clock.set_paused(true);
+        std::thread::sleep(Duration::from_millis(30));
+        clock.set_paused(false);
+        // The run time stood still while the wall clock went on.
+        assert!(at(100) - before >= 30, "{}", at(100) - before);
+        assert_eq!(at(120) - at(100), 20);
     }
 
     #[test]
