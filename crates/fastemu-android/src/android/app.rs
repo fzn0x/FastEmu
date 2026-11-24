@@ -88,18 +88,19 @@ fn open_games_from_other_apps(
     .detach();
 }
 
-/// Pauses the games while the app is in the background, as a phone pauses
-/// a game when a call comes in, and resumes them when it comes back.
+/// Pauses the games when the Activity pauses, as a phone pauses a game
+/// when a call comes in, and resumes them when it resumes. GPUI calls the
+/// Activity's onPause Inactive and its onResume Active; onStop
+/// (Background) follows a pause and onStart (Foreground) comes before a
+/// resume, so they change nothing.
 fn follow_the_lifecycle(cx: &mut App, window: WindowHandle<FastEmuView>) {
     cx.on_app_lifecycle(move |phase, cx| {
         let result = window.update(cx, |view, _, cx| match phase {
-            AppLifecyclePhase::Background | AppLifecyclePhase::Disconnected => {
-                view.set_background(true, cx);
-            }
-            AppLifecyclePhase::Foreground | AppLifecyclePhase::Active => {
-                view.set_background(false, cx);
-            }
-            AppLifecyclePhase::Inactive => {}
+            AppLifecyclePhase::Inactive
+            | AppLifecyclePhase::Background
+            | AppLifecyclePhase::Disconnected => view.set_background(true, cx),
+            AppLifecyclePhase::Active => view.set_background(false, cx),
+            AppLifecyclePhase::Foreground => {}
         });
         if let Err(error) = result {
             log::warn!("app: lifecycle change {phase:?} with no window: {error:#}");
