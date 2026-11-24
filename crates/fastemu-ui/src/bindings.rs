@@ -126,12 +126,22 @@ pub fn host_label(host: &str) -> String {
     }
 }
 
-/// Tracks which host keys hold which phone keys, so each phone key gets one
-/// press when its first host key goes down and one release when its last
-/// host key comes up, whatever the OS sends in between.
+/// What holds a phone key down: a host keyboard key, by the name GPUI
+/// gives it, or the on-screen keypad.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Source {
+    Host(String),
+    Keypad,
+}
+
+/// Tracks what holds each phone key down, the keyboard's keys and the
+/// on-screen keypad alike, so each phone key gets one press when its first
+/// source goes down and one release when its last source lets go, whatever
+/// the OS sends in between. A key the keyboard holds stays held when the
+/// keypad lets go of it, and the other way round.
 #[derive(Debug, Default)]
 pub struct KeyTracker {
-    held: Vec<(String, Key)>,
+    held: Vec<(Source, Key)>,
 }
 
 impl KeyTracker {
@@ -139,11 +149,15 @@ impl KeyTracker {
     /// key was not held yet, the moment to send its press. A host key that
     /// is already down (an OS key repeat) changes nothing.
     pub fn press(&mut self, host: &str, key: Key) -> bool {
-        if self.held.iter().any(|(h, _)| h == host) {
+        if self
+            .held
+            .iter()
+            .any(|(s, _)| matches!(s, Source::Host(h) if h == host))
+        {
             return false;
         }
         let first = !self.is_held(key);
-        self.held.push((host.to_owned(), key));
+        self.held.push((Source::Host(host.to_owned()), key));
         first
     }
 
@@ -156,39 +170,66 @@ impl KeyTracker {
     /// hold, so they cannot stick. Letters and named keys never rename
     /// that way, so their releases leave other keys alone.
     pub fn release(&mut self, host: &str) -> Vec<Key> {
-        let matches_held = self.held.iter().any(|(h, _)| h == host);
+        let matches_held = self
+            .held
+            .iter()
+            .any(|(s, _)| matches!(s, Source::Host(h) if h == host));
         let renamed = !matches_held && is_char_key(host);
-        let mut released = Vec::new();
-        let mut kept = Vec::with_capacity(self.held.len());
-        for (h, key) in std::mem::take(&mut self.held) {
-            let drop = if matches_held {
-                h == host
-            } else {
-                renamed && is_char_key(&h)
-            };
-            if drop {
-                released.push(key);
-            } else {
-                kept.push((h, key));
-            }
-        }
-        self.held = kept;
-        released.retain(|&key| !self.is_held(key));
-        released.sort();
-        released.dedup();
-        released
+        self.release_where(|source| match source {
+            Source::Host(h) if matches_held => h == host,
+            Source::Host(h) => renamed && is_char_key(h),
+            Source::Keypad => false,
+        })
+    }
+
+    /// Holds `key` from the on-screen keypad, which holds one key at a
+    /// time. Returns the phone keys to release (the keypad's last key,
+    /// unless the keyboard holds it too) and whether `key` needs a press.
+    pub fn press_keypad(&mut self, key: Key) -> (Vec<Key>, bool) {
+        let released = self.release_keypad();
+        let first = !self.is_held(key);
+        self.held.push((Source::Keypad, key));
+        (released, first)
+    }
+
+    /// Lets go of the keypad's key and returns the phone keys to release:
+    /// none when the keyboard still holds it.
+    pub fn release_keypad(&mut self) -> Vec<Key> {
+        self.release_where(|source| *source == Source::Keypad)
+    }
+
+    /// The phone key the on-screen keypad holds.
+    pub fn keypad_key(&self) -> Option<Key> {
+        self.held
+            .iter()
+            .find(|(s, _)| *s == Source::Keypad)
+            .map(|&(_, key)| key)
     }
 
     /// Lets go of everything, as when the game loses keyboard focus.
     pub fn release_all(&mut self) -> Vec<Key> {
-        let mut keys: Vec<Key> = self.held.drain(..).map(|(_, key)| key).collect();
-        keys.sort();
-        keys.dedup();
-        keys
+        self.release_where(|_| true)
     }
 
     pub fn is_held(&self, key: Key) -> bool {
         self.held.iter().any(|&(_, k)| k == key)
+    }
+
+    /// Drops the sources `drop` picks and returns the phone keys no
+    /// source holds any more, once each.
+    fn release_where(&mut self, drop: impl Fn(&Source) -> bool) -> Vec<Key> {
+        let mut released = Vec::new();
+        self.held.retain(|(source, key)| {
+            let dropped = drop(source);
+            if dropped {
+                released.push(*key);
+            }
+            !dropped
+        });
+        released.retain(|&key| !self.is_held(key));
+        released.sort();
+        released.dedup();
+        released
     }
 }
 
@@ -292,6 +333,32 @@ mod tests {
         let mut t = KeyTracker::default();
         assert!(t.press("1", Key::Num1));
         assert_eq!(t.release("&"), vec![Key::Num1]);
+    }
+
+    #[test]
+    fn the_keypad_and_the_keyboard_share_holds() {
+        let mut t = KeyTracker::default();
+        assert!(t.press("up", Key::Up));
+        assert_eq!(t.press_keypad(Key::Up), (vec![], false), "held already");
+        assert!(t.release_keypad().is_empty(), "the keyboard still holds Up");
+        assert!(t.is_held(Key::Up));
+        assert_eq!(t.press_keypad(Key::Fire), (vec![], true));
+        assert!(!t.press("enter", Key::Fire), "the keypad holds Fire");
+        assert!(t.release("enter").is_empty(), "the keypad still holds Fire");
+        assert_eq!(t.keypad_key(), Some(Key::Fire));
+        assert_eq!(t.release("up"), vec![Key::Up]);
+        assert_eq!(t.press_keypad(Key::Num5), (vec![Key::Fire], true));
+        assert_eq!(t.release_all(), vec![Key::Num5]);
+        assert_eq!(t.keypad_key(), None);
+    }
+
+    #[test]
+    fn a_renamed_release_leaves_the_keypad_alone() {
+        let mut t = KeyTracker::default();
+        assert_eq!(t.press_keypad(Key::Pound), (vec![], true));
+        assert!(t.press("#", Key::Star));
+        assert_eq!(t.release("3"), vec![Key::Star]);
+        assert_eq!(t.keypad_key(), Some(Key::Pound));
     }
 
     #[test]

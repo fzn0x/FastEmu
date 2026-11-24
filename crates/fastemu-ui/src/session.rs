@@ -59,13 +59,12 @@ pub struct Session {
     /// stays visible.
     pub frame: Option<Frame>,
     pub log: LogBuffer,
+    /// What the keyboard and the on-screen keypad hold down.
     pub keys: KeyTracker,
     pub muted: bool,
     /// Typed characters go to the game as text instead of keypad keys,
     /// for its text boxes.
     pub text_mode: bool,
-    /// A phone key the on-screen keypad holds down.
-    pub keypad_held: Option<Key>,
     /// Whether a pointer press on the screen is in progress.
     pub pointer_down: bool,
 }
@@ -91,7 +90,6 @@ impl Session {
             keys: KeyTracker::default(),
             muted: false,
             text_mode: false,
-            keypad_held: None,
             pointer_down: false,
         }
     }
@@ -132,7 +130,6 @@ impl Session {
         self.frame = None;
         self.log.clear();
         self.keys = KeyTracker::default();
-        self.keypad_held = None;
         self.pointer_down = false;
         if self.muted {
             self.instance.set_volume(0.0);
@@ -167,11 +164,7 @@ impl Session {
     /// Releases every key the keyboard or keypad holds, as when the game
     /// loses focus, so none stays pressed inside the game.
     pub fn release_everything(&mut self) {
-        let mut keys = self.keys.release_all();
-        keys.extend(self.keypad_held.take());
-        keys.sort();
-        keys.dedup();
-        for key in keys {
+        for key in self.keys.release_all() {
             self.release(key);
         }
     }

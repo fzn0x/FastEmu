@@ -365,6 +365,45 @@ fn the_keypad_presses_and_releases(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_keypad_and_the_keyboard_hold_keys_together(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    let game = h.launcher.instance(0);
+    h.key_down("left", None, false);
+    h.view.update(h.cx, |v, cx| {
+        let id = v.tiles[0].id;
+        v.keypad_press(id, Key::Left, cx);
+        v.keypad_release(id, cx);
+    });
+    assert_eq!(
+        game.events(),
+        vec![key(Key::Left, KeyAction::Press)],
+        "the keyboard still holds Left"
+    );
+    h.view.update(h.cx, |v, cx| {
+        let id = v.tiles[0].id;
+        v.keypad_press(id, Key::Fire, cx);
+    });
+    h.key_down("enter", None, false);
+    h.key_up("enter");
+    h.key_up("left");
+    h.view.update(h.cx, |v, cx| {
+        let id = v.tiles[0].id;
+        v.keypad_release(id, cx);
+    });
+    assert_eq!(
+        game.events(),
+        vec![
+            key(Key::Left, KeyAction::Press),
+            key(Key::Fire, KeyAction::Press),
+            key(Key::Left, KeyAction::Release),
+            key(Key::Fire, KeyAction::Release),
+        ]
+    );
+}
+
+#[gpui::test]
 fn new_frames_replace_the_uploaded_image(cx: &mut TestAppContext) {
     let mut h = open(cx);
     h.add(&["snake.jar"]);

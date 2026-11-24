@@ -52,11 +52,13 @@ impl FastEmuView {
         if !tile.session.is_running() {
             return;
         }
-        if let Some(old) = tile.session.keypad_held.take() {
+        let (released, press) = tile.session.keys.press_keypad(key);
+        for old in released {
             tile.session.release(old);
         }
-        tile.session.keypad_held = Some(key);
-        tile.session.press(key);
+        if press {
+            tile.session.press(key);
+        }
         cx.notify();
     }
 
@@ -64,8 +66,10 @@ impl FastEmuView {
         let Some(tile) = self.tiles.iter_mut().find(|t| t.id == id) else {
             return;
         };
-        if let Some(key) = tile.session.keypad_held.take() {
-            tile.session.release(key);
+        if tile.session.keys.keypad_key().is_some() {
+            for key in tile.session.keys.release_keypad() {
+                tile.session.release(key);
+            }
             cx.notify();
         }
     }
@@ -75,7 +79,7 @@ impl FastEmuView {
         placement: KeypadPlacement,
         cx: &mut Context<'_, Self>,
     ) -> Div {
-        let held = tile.session.keypad_held;
+        let held = tile.session.keys.keypad_key();
         let nav = div()
             .flex()
             .flex_col()
@@ -175,7 +179,7 @@ impl FastEmuView {
                     if this
                         .tiles
                         .iter()
-                        .any(|t| t.id == tile && t.session.keypad_held == Some(key))
+                        .any(|t| t.id == tile && t.session.keys.keypad_key() == Some(key))
                     {
                         this.keypad_release(tile, cx);
                     }
