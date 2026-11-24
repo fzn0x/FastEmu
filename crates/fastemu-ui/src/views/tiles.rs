@@ -33,6 +33,9 @@ const TOOLBAR_HEIGHT: f32 = 44.0;
 const WORKSPACE_PADDING: f32 = 12.0;
 /// The tiles' border, inside their padding.
 const TILE_BORDER: f32 = 2.0;
+/// Below this width, a phone held upright, the library and a game do not
+/// fit side by side, so starting a game hides the library.
+const NARROW_WIDTH: f32 = 2.5 * SIDEBAR_WIDTH;
 
 /// Starts an instance off the main thread: makes its data folder and asks
 /// the launcher.
@@ -104,6 +107,9 @@ impl FastEmuView {
         let Some(request) = self.request_for(entry, slot) else {
             return;
         };
+        if f32::from(window.viewport_size().width) < NARROW_WIDTH {
+            self.sidebar_open = false;
+        }
         let name = self
             .library
             .get(entry)

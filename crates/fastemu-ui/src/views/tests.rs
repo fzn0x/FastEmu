@@ -317,6 +317,17 @@ fn a_game_keeps_its_save_folder_across_starts(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn starting_a_game_on_a_narrow_window_hides_the_library(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    assert!(h.read(|v| v.sidebar_open), "a wide window keeps it");
+    h.cx.simulate_resize(gpui::size(gpui::px(400.0), gpui::px(800.0)));
+    h.launch_first();
+    assert!(!h.read(|v| v.sidebar_open), "a phone shows the game");
+}
+
+#[gpui::test]
 fn keys_reach_the_focused_game_once_per_stroke(cx: &mut TestAppContext) {
     let mut h = open(cx);
     h.add(&["snake.jar"]);
