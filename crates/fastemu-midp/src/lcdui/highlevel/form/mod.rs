@@ -690,7 +690,9 @@ fn insert(ctx: &mut Ctx<'_>, obj: ObjRef, at: usize, item: ObjRef) -> JResult<()
 
 /// Takes the item at `at` out of the form.
 fn remove(ctx: &mut Ctx<'_>, obj: ObjRef, at: usize) -> JResult<ObjRef> {
-    let item = form_mut(ctx, obj)?.items.remove(at);
+    let f = form_mut(ctx, obj)?;
+    let item = f.items.remove(at);
+    f.laid.retain(|(i, _)| *i != item);
     item::data_mut(ctx, item)?.owner = None;
     if form(ctx, obj)?.focus == Some(item) {
         form_mut(ctx, obj)?.focus = None;
