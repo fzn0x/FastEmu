@@ -11,6 +11,15 @@ homepage.workspace = true
 default-run = "fastemu"
 
 [dependencies]
+dirs = "7"
+# The runtime is not ready yet: the app runs the mock launcher, whose games
+# draw test patterns. The real launcher from fastemu-midp takes its place
+# through the same `Launcher` trait.
+fastemu-core = { workspace = true, features = ["mock"] }
+fastemu-ui.workspace = true
+gpui = { git = "https://github.com/Dylanmurzello/zed-android-port", rev = "746f088ee8d6b8b273354826757dd09e74565854", default-features = false }
+# The desktop backends: Windows, macOS and Linux with both X11 and Wayland.
+gpui_platform = { git = "https://github.com/Dylanmurzello/zed-android-port", rev = "746f088ee8d6b8b273354826757dd09e74565854", default-features = false, features = ["font-kit", "wayland", "x11"] }
 
 [lints]
 workspace = true

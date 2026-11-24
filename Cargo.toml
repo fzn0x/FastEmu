@@ -68,3 +68,19 @@ strip = true
 # Panics stay as unwinding: a crash inside one game's virtual machine is
 # caught on that instance's threads and must not take the others down.
 panic = "unwind"
+
+# GPUI's patches. GPUI comes from the Zed Android port at one commit
+# (746f088ee8d6b8b273354826757dd09e74565854), and Zed builds it against
+# its own forks of a few crates through [patch.crates-io] in Zed's root
+# manifest. Cargo applies only the patches of the workspace being built, so
+# FastEmu repeats the ones its dependency graph reaches, with the same
+# revisions. Keep this block in step with that commit's root Cargo.toml
+# whenever the GPUI revision moves; the Android app relies on it too.
+[patch.crates-io]
+async-process = { git = "https://github.com/zed-industries/async-process.git", rev = "0b6d6713570af61806e1e5cb40e0f757cb93fd9d" }
+async-task = { git = "https://github.com/zed-industries/async-task.git", rev = "015845a19fc31752c02367567d3b8900a406f9da" }
+calloop = { git = "https://github.com/zed-industries/calloop", rev = "3759371fee14c40066d64777e2a36b6ffcc22590" }
+# Avoids a panic when a failed EGL call reports EGL_SUCCESS (Linux and
+# Android GL): https://github.com/timothee-haudebourg/khronos-egl/pull/37
+khronos-egl = { git = "https://github.com/zed-industries/khronos-egl", rev = "42214b36347b108fd9630ca6254b96dde59e04fe" }
+windows-capture = { git = "https://github.com/zed-industries/windows-capture.git", rev = "f0d6c1b6691db75461b732f6d5ff56eed002eeb9" }
