@@ -143,9 +143,11 @@ games expect:
 
 Two more tasks serve the releases: `cargo xtask icons` renders
 `assets/icon.svg` into `packaging/icons` and the Android launcher icons,
-and `cargo xtask release-notes` writes a release's notes from
-CHANGELOG.md and [.github/release-notes.md](.github/release-notes.md), as
-the release workflow does.
+and `cargo xtask release-notes --version X.Y.Z --tag vX.Y.Z --repo
+fzn0x/FastEmu` writes a release's notes from CHANGELOG.md and
+[.github/release-notes.md](.github/release-notes.md), as the release
+workflow does. `--unreleased` takes the Unreleased section instead, for
+a version not released yet.
 
 ## Commits
 
