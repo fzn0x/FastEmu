@@ -113,6 +113,11 @@ impl Mixer {
     pub fn fade_out(&mut self, id: PlayerId) {
         let frames = (RAMP_SECONDS * self.rate as f32) as usize;
         let slew = self.slew();
+        // With the tails full, skip the fade rather than render it for
+        // nothing: closing a game with a hundred players stays cheap.
+        if self.tails.len() >= MAX_TAILS {
+            return;
+        }
         let Some(slot) = self.slots.get_mut(&id) else {
             return;
         };
