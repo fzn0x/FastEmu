@@ -274,8 +274,10 @@ fn receive(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         }
         net::again(socket.recv_from(&mut buf))
     })?;
+    // A game's own Datagram class may give an offset past its buffer; it
+    // then has no room, and nothing is copied.
     let n = n.min(room);
-    if let Some(arr) = data.obj() {
+    if let Some(arr) = data.obj().filter(|_| n > 0) {
         copy_in(ctx, arr, offset.max(0) as usize, &buf[..n])?;
     }
     ctx.call_interface(dgram, "setLength", "(I)V", &[Value::Int(n as i32)])?;
@@ -743,38 +745,75 @@ mod tests {
         assert_eq!(decode_utf(&[0x80]), None);
     }
 
-    #[test]
-    fn a_closed_datagram_server_frees_its_port() {
+    const OPTIONS: Options = Options {
+        mode: crate::io::connector::READ_WRITE,
+        timeouts: false,
+    };
+
+    /// Runs `f` on a VM with the MIDP classes and `more`, whose instance
+    /// may use the network.
+    fn with_network(more: Vec<NativeClass>, f: impl FnOnce(&mut Ctx<'_>)) {
         use std::sync::Arc;
 
         use fastemu_core::NetworkPolicy;
         use fastemu_jvm::{MemorySource, Vm, VmConfig};
 
         use crate::env::InstanceEnv;
-        use crate::io::connector::READ_WRITE;
 
-        let vm = Vm::new(
-            VmConfig::default(),
-            Arc::new(MemorySource::new()),
-            crate::classes(),
-        );
+        let mut classes = crate::classes();
+        classes.extend(more);
+        let vm = Vm::new(VmConfig::default(), Arc::new(MemorySource::new()), classes);
         vm.attach("test", |ctx| {
             let mut env = InstanceEnv::for_tests("unused");
             env.settings.network = NetworkPolicy::Allow;
             ctx.set_extension(env);
-            let options = Options {
-                mode: READ_WRITE,
-                timeouts: false,
-            };
-            let first = open(ctx, "//:0", "datagram://:0", options).unwrap();
-            let port = ctx
-                .call_interface(first, "getLocalPort", "()I", &[])
-                .unwrap()
-                .int();
+            f(ctx);
+        });
+    }
+
+    fn local_port(ctx: &mut Ctx<'_>, conn: ObjRef) -> u16 {
+        let port = ctx.call_interface(conn, "getLocalPort", "()I", &[]);
+        u16::try_from(port.unwrap().int()).unwrap()
+    }
+
+    #[test]
+    fn a_closed_datagram_server_frees_its_port() {
+        with_network(Vec::new(), |ctx| {
+            let first = open(ctx, "//:0", "datagram://:0", OPTIONS).unwrap();
+            let port = local_port(ctx, first);
             ctx.call_interface(first, "close", "()V", &[]).unwrap();
             let rest = format!("//:{port}");
-            let again = open(ctx, &rest, &format!("datagram:{rest}"), options);
+            let again = open(ctx, &rest, &format!("datagram:{rest}"), OPTIONS);
             assert!(again.is_ok(), "port {port} is still taken");
+        });
+    }
+
+    #[test]
+    fn a_game_datagram_whose_offset_is_past_its_buffer_receives_nothing() {
+        // A game's own Datagram class, with an offset beyond its data.
+        let odd = NativeClass::new("test/OddDatagram")
+            .implements("javax/microedition/io/Datagram")
+            .method("getData", "()[B", |ctx, _| {
+                Ok(ctx.new_array(ArrayType::Byte, 3)?.into())
+            })
+            .method("getOffset", "()I", |_, _| Ok(Value::Int(10)))
+            .method("setLength", "(I)V", |_, _| Ok(Value::Void))
+            .method("setAddress", "(Ljava/lang/String;)V", |_, _| {
+                Ok(Value::Void)
+            });
+        // Datagram extends these; the CLDC library may not have them yet.
+        let mut more = vec![odd];
+        more.extend(["java/io/DataInput", "java/io/DataOutput"].map(NativeClass::interface));
+        with_network(more, |ctx| {
+            let conn = open(ctx, "//:0", "datagram://:0", OPTIONS).unwrap();
+            let port = local_port(ctx, conn);
+            let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+            peer.send_to(b"hello", ("127.0.0.1", port)).unwrap();
+            let class = ctx.find_class("test/OddDatagram").unwrap();
+            let dgram = ctx.new_object(class).unwrap();
+            let desc = "(Ljavax/microedition/io/Datagram;)V";
+            ctx.call_interface(conn, "receive", desc, &[dgram.into()])
+                .unwrap();
         });
     }
 }
