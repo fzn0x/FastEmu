@@ -125,7 +125,7 @@ Column meanings and tier rules: [README](README.md).
 
 Tier 2. Javadoc: [Siemens_API](https://nikita36078.github.io/J2ME_Docs/docs/Siemens_API/com/siemens/mp/game/ExtendedImage.html). Implementations: [J2ME Loader](https://github.com/nikita36078/J2ME-Loader/blob/e270ed91e67b5cafc18c1991b92ba5249cf41c50/app/src/main/java/com/siemens/mp/game/ExtendedImage.java), [freej2me-plus](https://github.com/TASEmulators/freej2me-plus/blob/aab3350832c0d82aff1771394d28bff6f66b0aa4/src/com/siemens/mp/game/ExtendedImage.java), [MicroEmulator](https://github.com/barteo/microemu/blob/e47b656d983deaa67810c776662444483bdbf134/microemulator/microemu-extensions/microemu-siemensapi/src/main/java/com/siemens/mp/game/ExtendedImage.java).
 
-Wraps a MIDP `Image` (passed to the constructor) to give pixel access to black and white images and to draw straight to the display without `paint`. 1-bit pixels, packed in bytes; a second bit plane for transparency.
+Wraps a MIDP `Image` (passed to the constructor) to give pixel access to black and white, or black, white and transparent, bitmaps, and to draw straight to the display without `paint`.
 
 | T | Constructor | Descriptor | Flags | Throws | Notes |
 |---|---|---|---|---|---|
