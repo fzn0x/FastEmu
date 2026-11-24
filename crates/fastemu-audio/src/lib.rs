@@ -7,9 +7,13 @@ pub mod format;
 // The decoders come before the mixer that plays them; until it lands in a
 // later commit, nothing outside the tests calls them.
 #[allow(dead_code)]
+mod gain;
+#[allow(dead_code)]
 mod pcm;
 #[allow(dead_code)]
 mod source;
+#[allow(dead_code)]
+mod tone;
 #[allow(dead_code)]
 mod wav;
 
