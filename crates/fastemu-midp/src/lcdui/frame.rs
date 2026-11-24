@@ -20,7 +20,8 @@ use crate::env::env;
 struct Chrome {
     layout: Layout,
     title: Option<Vec<u16>>,
-    ticker: Option<Vec<u16>>,
+    /// The ticker's text and where it starts now.
+    ticker: Option<(Vec<u16>, i32)>,
     left: Vec<u16>,
     right: Vec<u16>,
     menu: Option<softkeys::MenuView>,
@@ -97,10 +98,14 @@ fn read_chrome(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<Chrome> {
                     None
                 }
             };
-            match text {
-                Some(s) => Some(ctx.string_utf16(s)?.to_vec()),
-                None => Some(Vec::new()),
-            }
+            let text = match text {
+                Some(s) => ctx.string_utf16(s)?.to_vec(),
+                None => Vec::new(),
+            };
+            let width = state(ctx).fonts.default_font().string_width(&text);
+            let area = layout.ticker.map_or(0, |a| a.width);
+            let x = super::highlevel::ticker::position(ctx, t, area, width);
+            Some((text, x))
         }
         _ => None,
     };
@@ -153,11 +158,13 @@ fn draw_chrome(composed: &mut Surface, chrome: &Chrome, font: &Font, theme: &The
         bar(&mut g, composed, area, theme);
         let _ = g.draw_string(composed, title, area.width / 2, text_y(area), HCENTER | TOP);
     }
-    if let (Some(area), Some(ticker)) = (chrome.layout.ticker, &chrome.ticker) {
+    if let (Some(area), Some((ticker, x))) = (chrome.layout.ticker, &chrome.ticker) {
         g.set_color(theme.highlighted_background);
         g.fill_rect(composed, area.x, area.y, area.width, area.height);
         g.set_color(theme.highlighted_foreground);
-        let _ = g.draw_string(composed, ticker, 2, text_y(area), LEFT | TOP);
+        g.set_clip(area.x, area.y, area.width, area.height);
+        let _ = g.draw_string(composed, ticker, area.x + x, text_y(area), LEFT | TOP);
+        g.set_clip(0, 0, composed.width() as i32, composed.height() as i32);
     }
     let bar_height = font.height() + 4;
     let bar_area = chrome.layout.bar.unwrap_or(Rect::new(
