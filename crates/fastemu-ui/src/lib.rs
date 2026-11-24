@@ -4,5 +4,7 @@
 pub mod bindings;
 pub mod layout;
 pub mod library;
+pub mod pixels;
+pub mod screenshot;
 pub mod settings;
 pub mod store;
