@@ -2,11 +2,14 @@
 //! about themselves, and serving their classes and resources.
 //!
 //! [`Suite::open`] takes either file. For a `.jad` it finds the JAR from
-//! `MIDlet-Jar-URL` (as a relative path, then its last segment) or else
-//! the JAD's own name with `.jar`; for a `.jar` it also reads a `.jad` of
-//! the same name beside it. JAD attributes come before the manifest's, so
-//! the first match of a lookup gives the JAD's value, as MIDP says for
-//! untrusted suites.
+//! `MIDlet-Jar-URL` (as a relative path, then its last segment, always
+//! inside the JAD's folder) or else the JAD's own name with `.jar`; for a
+//! `.jar` it also reads a `.jad` of the same name beside it. JAD
+//! attributes come before the manifest's, so the first match of a lookup
+//! gives the JAD's value, as MIDP says for untrusted suites.
+//!
+//! A JAD is hostile input: its `MIDlet-Jar-URL` never makes the host
+//! touch a file outside the JAD's folder or a network share.
 
 pub mod attributes;
 pub mod source;
@@ -22,6 +25,10 @@ pub use zip::ZipArchive;
 
 /// The binary name every MIDlet class extends.
 const MIDLET_CLASS: &str = "javax/microedition/midlet/MIDlet";
+
+/// The longest file or folder name a JAD may use in its JAR path, as most
+/// file systems allow.
+const MAX_NAME_BYTES: usize = 255;
 
 /// An opened suite: its attributes and its JAR.
 #[derive(Clone, Debug)]
@@ -91,24 +98,87 @@ impl Suite {
 /// The JAR a JAD names, by the rules in the module comment.
 fn find_jar_of_jad(jad: &Path, attributes: &[(String, String)]) -> Option<PathBuf> {
     let dir = jad.parent().unwrap_or(Path::new("."));
-    let mut candidates = Vec::new();
-    if let Some(url) = attributes::lookup(attributes, "MIDlet-Jar-URL") {
-        let local = url
-            .strip_prefix("file://")
-            .unwrap_or(url)
-            .split(['?', '#'])
-            .next()
-            .unwrap_or_default();
-        if !local.contains("://") && !local.is_empty() {
-            candidates.push(dir.join(local.trim_start_matches('/')));
-        }
-        if let Some(last) = local.rsplit(['/', '\\']).next().filter(|s| !s.is_empty()) {
-            candidates.push(dir.join(last));
-        }
-    }
+    let mut candidates = attributes::lookup(attributes, "MIDlet-Jar-URL")
+        .map(|url| jar_candidates(dir, url))
+        .unwrap_or_default();
     candidates.push(jad.with_extension("jar"));
     candidates.push(jad.with_extension("JAR"));
     candidates.into_iter().find(|p| p.is_file())
+}
+
+/// The places in `dir`, the JAD's folder, that the `MIDlet-Jar-URL` value
+/// `url` may name, the likeliest first. The value is only ever a name: each
+/// place is the JAD's folder followed by plain file or folder names,
+/// whatever `url` says, so it cannot leave the folder, start with a drive
+/// or a network share, or reach a stream or a device. This works on the
+/// text alone, the same on every system, and touches no file: a guess with
+/// a part that is not a plain name is dropped, and the caller asks the
+/// file system only about what is left.
+fn jar_candidates(dir: &Path, url: &str) -> Vec<PathBuf> {
+    let url = url.strip_prefix("file://").unwrap_or(url);
+    let value = url.split(['?', '#']).next().unwrap_or_default();
+    let parts: Vec<&str> = value
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect();
+    let mut candidates = Vec::new();
+    // A full URL names a download, not a path: only its last part is used.
+    if !value.contains("://") && !parts.is_empty() && parts.iter().all(|p| is_plain_name(p)) {
+        let mut path = dir.to_path_buf();
+        path.extend(&parts);
+        candidates.push(path);
+    }
+    if let Some(last) = parts.last().filter(|p| is_plain_name(p)) {
+        let alone = dir.join(last);
+        if !candidates.contains(&alone) {
+            candidates.push(alone);
+        }
+    }
+    candidates
+}
+
+/// Whether `name` is one file or folder name that is safe to put after the
+/// JAD's folder on every system: no `..`, no `:` (a drive, or a stream of
+/// a file on NTFS), none of the characters `< > " | * ?`, no separator or
+/// control character, no dot or space at the end (Windows drops them, so
+/// `.. ` would be `..`), at most 255 bytes, and on Windows no device name.
+fn is_plain_name(name: &str) -> bool {
+    let refused = |c: char| {
+        c.is_control() || matches!(c, ':' | '<' | '>' | '"' | '|' | '*' | '?' | '/' | '\\')
+    };
+    // A name that ends with a dot is refused, and `..` is one.
+    if name.is_empty() || name.len() > MAX_NAME_BYTES || name.ends_with(['.', ' ']) {
+        return false;
+    }
+    if name.chars().any(refused) {
+        return false;
+    }
+    !(cfg!(windows) && is_device_name(name))
+}
+
+/// Whether Windows takes `name` for a device (`NUL`, `COM1`, `con.txt`)
+/// and not for a file, with any extension and in any case.
+fn is_device_name(name: &str) -> bool {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches(' ');
+    let upper = stem.to_ascii_uppercase();
+    if matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) {
+        return true;
+    }
+    let mut chars = upper.chars();
+    let prefix: String = chars.by_ref().take(3).collect();
+    matches!(prefix.as_str(), "COM" | "LPT")
+        && matches!(
+            chars.next(),
+            Some('0'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}')
+        )
+        && chars.next().is_none()
 }
 
 /// Builds the suite's description from its JAD and manifest attributes.
@@ -345,6 +415,203 @@ mod tests {
             Suite::open(&dir.join("none.jar")),
             Err(LaunchError::Io(_))
         ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// `dir` followed by the `/` separated names in `parts`.
+    fn under(dir: &Path, parts: &str) -> PathBuf {
+        parts
+            .split('/')
+            .fold(dir.to_path_buf(), |p, part| p.join(part))
+    }
+
+    #[test]
+    fn a_jar_url_gives_only_plain_names_inside_the_jad_folder() {
+        use std::path::Component;
+
+        // A folder that does not exist: the rules read the text and touch
+        // no file, so this runs the same on every system.
+        let dir = Path::new("no-such-folder").join("inbox");
+        let cases: &[(&str, &[&str])] = &[
+            ("game.jar", &["game.jar"]),
+            ("files/real.jar", &["files/real.jar", "real.jar"]),
+            (r"a\b\game.jar", &["a/b/game.jar", "game.jar"]),
+            ("./a//b/game.jar", &["a/b/game.jar", "game.jar"]),
+            ("/files/real.jar", &["files/real.jar", "real.jar"]),
+            ("game.jar?x=1#top", &["game.jar"]),
+            ("http://example.com/dl/real.jar?x=1", &["real.jar"]),
+            // Parent folders: the guess with a `..` is dropped.
+            ("../victim.jar", &["victim.jar"]),
+            (r"..\..\victim.jar", &["victim.jar"]),
+            ("sub/../../victim.jar", &["victim.jar"]),
+            ("..", &[]),
+            // Absolute paths become paths inside the folder.
+            ("/abs/victim.jar", &["abs/victim.jar", "victim.jar"]),
+            ("file:///tmp/victim.jar", &["tmp/victim.jar", "victim.jar"]),
+            // Windows: drives, network shares, device paths and streams.
+            ("file:///C:/x/victim.jar", &["victim.jar"]),
+            (r"C:\x\victim.jar", &["victim.jar"]),
+            ("C:victim.jar", &[]),
+            (
+                r"\\127.0.0.1\share\victim.jar",
+                &["127.0.0.1/share/victim.jar", "victim.jar"],
+            ),
+            (r"\\?\C:\x\victim.jar", &[]),
+            (r"\\.\pipe\x", &["pipe/x", "x"]),
+            ("victim.jar:evil", &[]),
+            ("victim.jar::$DATA", &[]),
+            ("victim.jar.", &[]),
+            ("victim.jar ", &[]),
+            // Characters Windows refuses, and control characters.
+            ("a|b.jar", &[]),
+            ("a*.jar", &[]),
+            ("a\"b.jar", &[]),
+            ("a<b>.jar", &[]),
+            ("a\u{1}b.jar", &[]),
+            ("a\nb.jar", &[]),
+            // Nothing to name.
+            ("", &[]),
+            ("/", &[]),
+            ("?x", &[]),
+            ("file://", &[]),
+        ];
+        for (url, want) in cases {
+            let got = jar_candidates(&dir, url);
+            let want: Vec<PathBuf> = want.iter().map(|w| under(&dir, w)).collect();
+            assert_eq!(got, want, "for {url:?}");
+            for path in &got {
+                let rest = path.strip_prefix(&dir).expect("inside the folder");
+                assert!(
+                    rest.components().all(|c| matches!(c, Component::Normal(_))),
+                    "{path:?} for {url:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_name_is_plain_up_to_255_bytes() {
+        let dir = Path::new("inbox");
+        let longest = format!("{}.jar", "a".repeat(251));
+        assert_eq!(longest.len(), 255);
+        assert_eq!(jar_candidates(dir, &longest), [dir.join(&longest)]);
+        assert!(jar_candidates(dir, &format!("x{longest}")).is_empty());
+        assert!(jar_candidates(dir, &format!("x/{longest}x")).is_empty());
+    }
+
+    #[test]
+    fn device_names_are_known_by_their_stem() {
+        for name in [
+            "NUL",
+            "nul",
+            "Con.jar",
+            "aux.tar.gz",
+            "PRN",
+            "COM1",
+            "com9.x",
+            "lpt0.txt",
+            "COM\u{b9}",
+            "NUL .jar",
+            "CONIN$",
+            "conout$.x",
+        ] {
+            assert!(is_device_name(name), "{name}");
+        }
+        for name in [
+            "COM",
+            "COM10",
+            "COMX",
+            "LPT",
+            "console.jar",
+            "game.jar",
+            "nul-x",
+            "a.nul",
+        ] {
+            assert!(!is_device_name(name), "{name}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_a_device_name_is_not_a_plain_name() {
+        let dir = Path::new("inbox");
+        for url in ["NUL", "con.jar", "a/COM1.txt", r"..\PRN", "sub\\lpt3"] {
+            assert!(jar_candidates(dir, url).is_empty(), "for {url:?}");
+        }
+        assert_eq!(
+            jar_candidates(dir, "console.jar"),
+            [dir.join("console.jar")]
+        );
+    }
+
+    #[test]
+    fn a_jad_cannot_open_a_jar_outside_its_folder() {
+        let base = temp_dir("escape");
+        let inbox = base.join("inbox");
+        std::fs::create_dir_all(inbox.join("sub")).unwrap();
+        let victim = base.join("victim.jar");
+        std::fs::write(&victim, jar("META-INF/MANIFEST.MF", MANIFEST)).unwrap();
+        let absolute = victim.to_string_lossy().into_owned();
+        let forward = absolute.replace('\\', "/");
+        let urls = [
+            "../victim.jar".to_owned(),
+            r"..\victim.jar".to_owned(),
+            r"..\..\victim.jar".to_owned(),
+            "sub/../../victim.jar".to_owned(),
+            r"sub\..\..\victim.jar".to_owned(),
+            absolute.clone(),
+            forward.clone(),
+            format!("file:///{}", forward.trim_start_matches('/')),
+            r"\\127.0.0.1\share\victim.jar".to_owned(),
+            r"\\?\C:\x\victim.jar".to_owned(),
+            r"C:\x\victim.jar".to_owned(),
+            "C:victim.jar".to_owned(),
+            "/abs/victim.jar".to_owned(),
+            "file:///tmp/victim.jar".to_owned(),
+        ];
+        let jad = inbox.join("hostile.jad");
+        let mut opened = Vec::new();
+        for url in &urls {
+            std::fs::write(
+                &jad,
+                format!("MIDlet-Name: Hostile\r\nMIDlet-Jar-URL: {url}\r\n"),
+            )
+            .unwrap();
+            match Suite::open(&jad) {
+                Err(LaunchError::InvalidSuite(_)) => {}
+                other => opened.push(format!("{url:?} gave {:?}", other.map(|s| s.jar_path))),
+            }
+        }
+        assert!(opened.is_empty(), "opened: {opened:#?}");
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn a_jad_finds_its_jar_by_a_path_a_windows_path_or_a_url() {
+        let dir = temp_dir("forms");
+        std::fs::create_dir_all(dir.join("a/b")).unwrap();
+        std::fs::write(
+            dir.join("a/b/game.jar"),
+            jar("META-INF/MANIFEST.MF", MANIFEST),
+        )
+        .unwrap();
+        std::fs::write(dir.join("top.jar"), jar("META-INF/MANIFEST.MF", MANIFEST)).unwrap();
+        let jad = dir.join("game.jad");
+        for (url, found) in [
+            ("a/b/game.jar", "a/b/game.jar"),
+            (r"a\b\game.jar", "a/b/game.jar"),
+            ("./a//b/game.jar", "a/b/game.jar"),
+            ("/a/b/game.jar", "a/b/game.jar"),
+            ("file:///a/b/game.jar", "a/b/game.jar"),
+            ("http://example.com/dl/top.jar", "top.jar"),
+            ("https://example.com/top.jar#x", "top.jar"),
+            (r"..\old\top.jar", "top.jar"),
+            ("top.jar", "top.jar"),
+        ] {
+            std::fs::write(&jad, format!("MIDlet-Jar-URL: {url}\n")).unwrap();
+            let suite = Suite::open(&jad).unwrap_or_else(|e| panic!("{url:?}: {e}"));
+            assert_eq!(suite.jar_path, under(&dir, found), "for {url:?}");
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
