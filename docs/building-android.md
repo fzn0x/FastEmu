@@ -2,9 +2,10 @@
 
 The Android app is a Gradle project in `android/` around one native library,
 `libfastemu_android.so`, built from `crates/fastemu-android` with
-[cargo-ndk](https://github.com/bbqsrc/cargo-ndk). Its UI is GPUI drawn with
-Vulkan through `crates/gpui_android`, a trimmed copy of the Zed Android port's
-backend (see that crate's README).
+[cargo-ndk](https://github.com/bbqsrc/cargo-ndk). Its UI is the desktop app's
+(`crates/fastemu-ui`), drawn by GPUI with Vulkan through `crates/gpui_android`,
+a trimmed copy of the Zed Android port's backend (see that crate's README).
+Games run on the same runtime as on the desktop, with sound through AAudio.
 
 The APK carries the library for `arm64-v8a` (phones and tablets) and `x86_64`
 (the Android emulator). It needs Android 12 (API 31) or later and a Vulkan
@@ -71,15 +72,20 @@ each. Gradle's first run downloads Gradle and its plugins, about a minute.
 `assembleRelease` builds a release APK, shrunk with R8 and, for now, signed
 with the debug key like the debug build.
 
-| Output | Path | Size |
-| --- | --- | --- |
-| Debug APK | `android/app/build/outputs/apk/debug/app-debug.apk` | 33.6 MB from a clean build |
-| Release APK | `android/app/build/outputs/apk/release/app-release.apk` | 27.2 MB |
-| arm64-v8a library | `android/app/src/main/jniLibs/arm64-v8a/libfastemu_android.so` | 12.3 MB (5.3 MB gzipped) |
-| x86_64 library | `android/app/src/main/jniLibs/x86_64/libfastemu_android.so` | 13.9 MB (5.7 MB gzipped) |
+| Output | Path |
+| --- | --- |
+| Debug APK | `android/app/build/outputs/apk/debug/app-debug.apk` |
+| Release APK | `android/app/build/outputs/apk/release/app-release.apk` |
+| arm64-v8a library | `android/app/src/main/jniLibs/arm64-v8a/libfastemu_android.so` |
+| x86_64 library | `android/app/src/main/jniLibs/x86_64/libfastemu_android.so` |
 
-Gradle stores the libraries uncompressed so Android can map them straight from
-the APK. An arm64-only build (`-t arm64-v8a` and `abiFilters`) halves the APK.
+With the whole runtime inside, the x86_64 library is about 24 MB (10 MB
+gzipped). Gradle stores the libraries uncompressed so Android can map them
+straight from the APK. An arm64-only build (`-t arm64-v8a` and `abiFilters`)
+halves the APK, and an x86_64-only one is enough for the emulator: run the
+`cargo ndk` line above with `-t x86_64` only, then
+`./gradlew assembleDebug -Pfastemu.skipCargo` (Gradle then warns that there
+is no arm64-v8a library to package).
 
 ## Run it
 
@@ -89,13 +95,22 @@ adb shell am start -n io.github.fzn0x.fastemu/.MainActivity
 adb logcat -s fastemu fastemu_activity fastemu_files AndroidRuntime
 ```
 
-The app starts the mock launcher's test pattern ("FastEmu demo"). Its keypad
-and a hardware keyboard drive the square: the arrows and 2, 4, 6, 8 move it,
-OK and 5 change its colour, and a tap on the screen moves it there. "Open game"
-shows Android's document picker for `.jar` and `.jad` files; "Open with
-FastEmu" in a file manager works too. Either copies the file into the app's
-storage and starts it. Back moves the app behind the home screen with the
-game paused; it resumes when the app comes back.
+The app opens on its library. **+** shows Android's document picker for
+`.jar` and `.jad` files; "Open with FastEmu" in a file manager works too.
+Either copies the files into the app's storage, into a folder named after
+their content, adds them to the library and, for "Open with", starts the
+game. Each game has the on-screen keypad under its screen; a finger holds a
+key for as long as it stays down. A game's text box opens a dialog with the
+system keyboard. Back moves the app behind the home screen with its games
+paused; they resume when it comes back. [Playing](/docs/playing/) has the rest.
+
+A debuggable build also opens the file named by the `fastemu.open` extra,
+which lets a script start a game without the picker:
+
+```sh
+adb push snake.jar /data/local/tmp/snake.jar
+adb shell am start -n io.github.fzn0x.fastemu/.MainActivity   --es fastemu.open /data/local/tmp/snake.jar
+```
 
 ## Check it in a headless emulator
 
@@ -113,7 +128,8 @@ adb -s emulator-5580 wait-for-device
 until [ "$(adb -s emulator-5580 shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; do sleep 5; done
 
 adb -s emulator-5580 install -r android/app/build/outputs/apk/debug/app-debug.apk
-adb -s emulator-5580 shell am start -W -n io.github.fzn0x.fastemu/.MainActivity
+adb -s emulator-5580 push snake.jar /data/local/tmp/snake.jar
+adb -s emulator-5580 shell am start -W -n io.github.fzn0x.fastemu/.MainActivity   --es fastemu.open /data/local/tmp/snake.jar
 adb -s emulator-5580 exec-out screencap -p > fastemu.png
 adb -s emulator-5580 logcat -d | grep -E "fastemu|FATAL|panic"
 
@@ -132,10 +148,11 @@ Input can be driven from adb: `input tap X Y` taps,
 
 ## Tests and lints
 
-The app's logic that needs neither Android nor GPUI tests on the host:
+The views the app shows test on the host, through GPUI's test platform,
+with the rest of the app's logic that needs neither Android nor GPUI:
 
 ```sh
-cargo test -p fastemu-android
+cargo test -p fastemu-ui -p fastemu-android
 ```
 
 Everything, including `gpui_android`'s input tests, also runs on a connected
