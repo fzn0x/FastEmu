@@ -4,6 +4,10 @@
 //! superclass, interfaces, fields, methods) but with Rust functions as the
 //! method bodies. The virtual machine links it on first use, like any
 //! other class, so bytecode can extend it, call it and override it.
+//!
+//! A built class can also be read back ([`NativeClass::fields`],
+//! [`NativeClass::methods`] and the rest), so tools can list the API the
+//! runtime offers without starting a virtual machine.
 
 use std::sync::Arc;
 
@@ -21,19 +25,77 @@ use crate::value::Value;
 /// ([`Value::Void`] for `void` methods) or the exception to throw.
 pub type NativeFn = Arc<dyn Fn(&mut Ctx<'_>, &[Value]) -> JResult<Value> + Send + Sync>;
 
-pub(crate) struct NativeField {
+/// A field of a [`NativeClass`], as [`NativeClass::fields`] describes it.
+pub struct NativeField {
     pub(crate) name: String,
     pub(crate) desc: String,
     pub(crate) access: u16,
     pub(crate) constant: Option<ConstValue>,
 }
 
-pub(crate) struct NativeMethod {
+impl NativeField {
+    /// The field's name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The field's descriptor, such as `I` or `Ljava/lang/String;`.
+    pub fn descriptor(&self) -> &str {
+        &self.desc
+    }
+
+    /// The access flags (see [`crate::classfile::access`]).
+    pub fn flags(&self) -> u16 {
+        self.access
+    }
+
+    /// The compile-time constant, for a field a `ConstantValue` attribute
+    /// would initialize.
+    pub fn constant(&self) -> Option<FieldConstant<'_>> {
+        self.constant.as_ref().map(|c| match c {
+            ConstValue::Value(v) => FieldConstant::Value(*v),
+            ConstValue::String(s) => FieldConstant::String(s),
+        })
+    }
+}
+
+/// The value of a constant field.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FieldConstant<'a> {
+    /// A primitive: [`Value::Int`] for `int`, `short`, `char`, `byte` and
+    /// `boolean`, or a `Long`, `Float` or `Double`.
+    Value(Value),
+    /// A `String`, as UTF-16.
+    String(&'a [u16]),
+}
+
+/// A method or constructor of a [`NativeClass`], as
+/// [`NativeClass::methods`] describes it.
+pub struct NativeMethod {
     pub(crate) name: String,
     pub(crate) desc: String,
     pub(crate) access: u16,
     /// `None` for abstract methods.
     pub(crate) body: Option<NativeFn>,
+}
+
+impl NativeMethod {
+    /// The method's name: `<init>` for a constructor, `<clinit>` for the
+    /// static initializer.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The method's descriptor, such as `(II)V`.
+    pub fn descriptor(&self) -> &str {
+        &self.desc
+    }
+
+    /// The access flags (see [`crate::classfile::access`]); abstract
+    /// methods have `ABSTRACT`.
+    pub fn flags(&self) -> u16 {
+        self.access
+    }
 }
 
 /// A Java class implemented in Rust.
@@ -82,6 +144,34 @@ impl NativeClass {
     /// The internal name of the class.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// The internal name of the superclass; `None` only for
+    /// `java/lang/Object`.
+    pub fn super_name(&self) -> Option<&str> {
+        self.super_name.as_deref()
+    }
+
+    /// The internal names of the interfaces the class implements (or, for
+    /// an interface, extends), in the order they were added.
+    pub fn interfaces(&self) -> impl Iterator<Item = &str> {
+        self.interfaces.iter().map(String::as_str)
+    }
+
+    /// The class access flags (see [`crate::classfile::access`]).
+    pub fn flags(&self) -> u16 {
+        self.access
+    }
+
+    /// The fields, in the order they were added.
+    pub fn fields(&self) -> &[NativeField] {
+        &self.fields
+    }
+
+    /// The methods and constructors, in the order they were added, the
+    /// static initializer among them.
+    pub fn methods(&self) -> &[NativeMethod] {
+        &self.methods
     }
 
     /// Sets the superclass.
@@ -256,5 +346,50 @@ impl NativeClass {
     ) -> Self {
         self.payload = Some(Arc::new(f));
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_built_class_reads_back() {
+        let class = NativeClass::interface("demo/Shape")
+            .implements("demo/Named")
+            .constant("SIDES", "I", Value::Int(4))
+            .string_constant("NAME", "sq\u{e9}")
+            .abstract_method("area", "()I");
+        assert_eq!(class.super_name(), Some("java/lang/Object"));
+        assert_eq!(class.interfaces().collect::<Vec<_>>(), ["demo/Named"]);
+        assert_ne!(class.flags() & access::INTERFACE, 0);
+        let fields = class.fields();
+        assert_eq!(fields[0].name(), "SIDES");
+        assert_eq!(fields[0].descriptor(), "I");
+        assert_eq!(
+            fields[0].flags(),
+            access::PUBLIC | access::STATIC | access::FINAL
+        );
+        assert_eq!(
+            fields[0].constant(),
+            Some(FieldConstant::Value(Value::Int(4)))
+        );
+        let name: Vec<u16> = "sq\u{e9}".encode_utf16().collect();
+        assert_eq!(fields[1].constant(), Some(FieldConstant::String(&name)));
+        let method = &class.methods()[0];
+        assert_eq!((method.name(), method.descriptor()), ("area", "()I"));
+        assert_eq!(method.flags(), access::PUBLIC | access::ABSTRACT);
+    }
+
+    #[test]
+    fn object_has_no_superclass() {
+        let object = NativeClass::new("java/lang/Object")
+            .field_with("lock", "I", access::PRIVATE)
+            .static_init(|_, _| Ok(Value::Void));
+        assert_eq!(object.super_name(), None);
+        assert_eq!(object.fields()[0].constant(), None);
+        assert_eq!(object.fields()[0].flags(), access::PRIVATE);
+        assert_eq!(object.methods()[0].name(), "<clinit>");
+        assert_eq!(object.methods()[0].flags(), access::STATIC);
     }
 }

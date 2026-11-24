@@ -37,7 +37,7 @@ pub use class::{ArrayType, ClassId, PayloadFactory};
 pub use clock::VmClock;
 pub use ctx::{ArrayElem, Ctx, FieldId, GlobalRef, JResult, StaticFieldId, Throw, Wake};
 pub use heap::{HeapStats, Payload, Tracer};
-pub use native::{NativeClass, NativeFn};
+pub use native::{FieldConstant, NativeClass, NativeField, NativeFn, NativeMethod};
 pub use source::{ClassSource, DirSource, MemorySource};
 pub use thread::ThreadId;
 pub use value::{ObjRef, Value};
@@ -45,7 +45,10 @@ pub use vm::{Diagnostic, DiagnosticSink, LogSink, Task, Vm, VmConfig, WeakVm};
 
 /// Every class of the CLDC 1.1 library: `java.lang`, `java.io` and
 /// `java.util`.
-fn library() -> Vec<NativeClass> {
+///
+/// [`Vm::new`] adds these to every virtual machine. Tools read them back
+/// (see [`NativeClass::methods`]) to list the API the runtime offers.
+pub fn library() -> Vec<NativeClass> {
     let mut all = lang::classes();
     all.extend(io::classes());
     all.extend(util::classes());
