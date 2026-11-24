@@ -34,6 +34,8 @@ Options:
   --screenshot PATH Save the last frame as a PNG
   --keys SCRIPT     Press keys while the game runs (see below)
   --encoding NAME   The game's text encoding (default ISO-8859-1)
+  --data DIR        Keep the game's record stores in DIR (default: a
+                    temporary folder, deleted after the run)
 
 SCRIPT is a list of steps separated by commas or spaces, run in order
 from the first frame: a key name taps the key, NAME:MS holds it for MS
@@ -74,6 +76,9 @@ pub struct Options {
     pub screenshot: Option<PathBuf>,
     pub keys: Vec<Step>,
     pub encoding: Option<String>,
+    /// Where the game keeps its record stores; `None` for a temporary
+    /// folder that goes when the run ends.
+    pub data: Option<PathBuf>,
 }
 
 fn value(args: &mut impl Iterator<Item = OsString>, option: &str) -> Result<String, String> {
@@ -96,6 +101,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, String
     let mut screenshot = None;
     let mut keys = Vec::new();
     let mut encoding = None;
+    let mut data = None;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--midlet") => {
@@ -146,6 +152,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, String
                 keys = script::parse(&text)?;
             }
             Some("--encoding") => encoding = Some(value(&mut args, "--encoding")?),
+            Some("--data") => data = Some(PathBuf::from(value(&mut args, "--data")?)),
             Some(option) if option.starts_with("--") => {
                 return Err(format!("unknown option {option}"));
             }
@@ -166,6 +173,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, String
         screenshot,
         keys,
         encoding,
+        data,
     })
 }
 
@@ -213,11 +221,18 @@ pub fn run(options: &Options, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     };
     let _ = writeln!(out, "loaded {file} ({} {})", info.name, info.version);
     let _ = writeln!(out, "profile {}, 1 instance", options.profile.id);
-    let data_dir = std::env::temp_dir().join(format!(
-        "fastemu-run-{}-{}",
-        std::process::id(),
-        fastemu_core::InstanceId::next().0
-    ));
+    let temporary = options.data.is_none();
+    let data_dir = options.data.clone().unwrap_or_else(|| {
+        std::env::temp_dir().join(format!(
+            "fastemu-run-{}-{}",
+            std::process::id(),
+            fastemu_core::InstanceId::next().0
+        ))
+    });
+    if let Err(e) = std::fs::create_dir_all(&data_dir) {
+        let _ = writeln!(err, "fastemu: {}: {e}", data_dir.display());
+        return 1;
+    }
     let mut settings = InstanceSettings::default();
     if let Some(encoding) = &options.encoding {
         settings.encoding.clone_from(encoding);
@@ -245,7 +260,9 @@ pub fn run(options: &Options, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
         std::thread::sleep(Duration::from_millis(5));
     }
     print_log(&*instance, out, err);
-    let _ = std::fs::remove_dir_all(&data_dir);
+    if temporary {
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
     let _ = writeln!(out, "ran {frames} frames, {errors} errors");
     let mut code = code;
     if let Some(path) = &options.screenshot {
@@ -379,6 +396,8 @@ mod tests {
             "out.png",
             "--encoding",
             "UTF-8",
+            "--data",
+            "saves",
         ])
         .unwrap();
         assert_eq!(options.midlet, 1);
@@ -386,6 +405,7 @@ mod tests {
         assert_eq!(options.limit, Limit::Seconds(1.5));
         assert_eq!(options.screenshot, Some(PathBuf::from("out.png")));
         assert_eq!(options.encoding.as_deref(), Some("UTF-8"));
+        assert_eq!(options.data, Some(PathBuf::from("saves")));
     }
 
     #[test]
