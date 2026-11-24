@@ -13,5 +13,6 @@ mod conformance_support;
 mod support;
 
 mod events;
+mod records;
 mod resources;
 mod suites;
