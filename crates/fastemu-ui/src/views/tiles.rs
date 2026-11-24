@@ -421,6 +421,7 @@ impl FastEmuView {
     pub(super) fn render_main(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> Div {
         let theme = Theme::get(cx).clone();
         let viewport = window.viewport_size();
+        let safe = window.insets().safe_area;
         let sidebar = if self.sidebar_open {
             SIDEBAR_WIDTH
         } else {
@@ -428,8 +429,11 @@ impl FastEmuView {
         };
         let log = if self.log_open { LOG_HEIGHT } else { 0.0 };
         let area = Extent::new(
-            f32::from(viewport.width) - sidebar - 2.0 * WORKSPACE_PADDING,
-            f32::from(viewport.height) - TOOLBAR_HEIGHT - log - 2.0 * WORKSPACE_PADDING,
+            f32::from(viewport.width - safe.left - safe.right) - sidebar - 2.0 * WORKSPACE_PADDING,
+            f32::from(viewport.height - safe.top - safe.bottom)
+                - TOOLBAR_HEIGHT
+                - log
+                - 2.0 * WORKSPACE_PADDING,
         );
         let workspace = if self.tiles.is_empty() {
             Self::render_empty_workspace(cx)

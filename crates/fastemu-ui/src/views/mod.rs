@@ -456,6 +456,9 @@ impl Render for FastEmuView {
 
         let theme = Theme::get(cx).clone();
         let workspace = self.render_main(window, cx);
+        // A phone's status bar, navigation bar and camera cutout cover the
+        // window's edges; nothing goes under them.
+        let safe = window.insets().safe_area;
         div()
             .id("fastemu")
             .key_context(CONTEXT)
@@ -491,6 +494,10 @@ impl Render for FastEmuView {
             )
             .relative()
             .size_full()
+            .pt(safe.top)
+            .pb(safe.bottom)
+            .pl(safe.left)
+            .pr(safe.right)
             .flex()
             .flex_row()
             .bg(theme.background)
