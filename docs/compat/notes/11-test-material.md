@@ -10,7 +10,7 @@ manual runs on a developer's own machine.
 
 | What | License | Where | Use |
 | --- | --- | --- | --- |
-| RustJava test data: 137 test programs as `.class` files with expected output in `.txt`, plus `test.jar`, `jar/no-manifest.jar`, `jar/no-main-class.jar` | MIT | [RustJava/test-data](https://github.com/dlunch/RustJava/tree/df24aaa7a440815b12a96e2d7845fec2399cfbf3/test-data) | JVM conformance: arrays, casts, class init failures, dispatch, exceptions, strings; JAR edge cases |
+| RustJava test data: 59 test programs whose main `.class` has its expected output in a `.txt` next to it (145 `.class` files with inner and helper classes, Java sources in `src/`), plus `test.jar`, `jar/no-manifest.jar`, `jar/no-main-class.jar` | MIT | [RustJava/test-data](https://github.com/dlunch/RustJava/tree/df24aaa7a440815b12a96e2d7845fec2399cfbf3/test-data) | JVM conformance: arrays, casts, class init failures, dispatch, exceptions, strings; JAR edge cases |
 | MicroEmulator `bytecode-test-app.jar` | LGPL-2.1+ or Apache-2.0 | [microemu-javase/src/test/resources](https://github.com/barteo/microemu/tree/e47b656d983deaa67810c776662444483bdbf134/microemulator/microemu-javase/src/test/resources) | resource loading, static initializers, timers, `Throwable` handling |
 | wie `resource.jar` | MIT | [wie-skvm/tests/data](https://github.com/dlunch/wie/tree/eb5b809d693ee4f0023f06acd0ad6393006578fc/wie-skvm/tests/data) | resource lookup |
 | Stick Fight, `StickFightMIDlet.jar` (157 KB) | MIT | [Dahmalahi/STICK-FIGHT-OFFICIEL-REPO releases](https://github.com/Dahmalahi/STICK-FIGHT-OFFICIEL-REPO/releases) | a small Canvas game |
