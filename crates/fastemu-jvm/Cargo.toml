@@ -10,6 +10,16 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
+# The host's time zone for Calendar and TimeZone.getDefault: its rules
+# from /usr/share/zoneinfo, Android's tzdata or, on Windows, a bundled
+# copy of the tz database.
+jiff = { version = "1.0.2", default-features = false, features = [
+  "std",
+  "tz-system",
+  "tzdb-bundle-platform",
+  "tzdb-concatenated",
+  "tzdb-zoneinfo",
+] }
 fastemu-core.workspace = true
 parking_lot = "0.12"
 smallvec = "1"

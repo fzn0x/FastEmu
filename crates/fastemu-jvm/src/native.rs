@@ -213,11 +213,18 @@ impl NativeClass {
     /// A public abstract method, for subclasses (game classes or other
     /// native classes) to implement.
     #[must_use]
-    pub fn abstract_method(mut self, name: &str, desc: &str) -> Self {
+    pub fn abstract_method(self, name: &str, desc: &str) -> Self {
+        self.abstract_method_with(name, desc, access::PUBLIC)
+    }
+
+    /// An abstract method with explicit access flags, such as a
+    /// `protected abstract` one; `ABSTRACT` is added to them.
+    #[must_use]
+    pub fn abstract_method_with(mut self, name: &str, desc: &str, access: u16) -> Self {
         self.methods.push(NativeMethod {
             name: name.to_owned(),
             desc: desc.to_owned(),
-            access: access::PUBLIC | access::ABSTRACT,
+            access: access | access::ABSTRACT,
             body: None,
         });
         self
