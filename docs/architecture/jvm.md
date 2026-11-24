@@ -135,12 +135,12 @@ vm.spawn("main", |ctx| {
 `Vm` methods take the VM lock, so they are for host threads only. Native
 code already holds the lock; a native that called `Vm::post` or
 `Vm::stop` would deadlock. Natives use `Ctx::post` and `Ctx::stop_vm`.
-`Vm::clock` and `Ctx::clock` take no lock. A host thread that must not
-wait, such as an app's UI thread, should not call the ones that take
-it: a Java thread keeps the lock until its next safepoint or wait, and
-longer when its OS thread is not scheduled. MIDP's instances post the
-app's input from a control thread of their own
-(`docs/architecture/midp.md`).
+`Vm::clock`, `Vm::is_stopping`, `Vm::is_paused`, `Vm::downgrade` and
+`Ctx::clock` take no lock. A host thread that must not wait, such as an
+app's UI thread, should not call the ones that take it: a Java thread
+keeps the lock until its next safepoint or wait, and longer when its OS
+thread is not scheduled. MIDP's instances post the app's input from a
+control thread of their own (`docs/architecture/midp.md`).
 
 ## Values and references
 
