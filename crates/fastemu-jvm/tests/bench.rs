@@ -16,6 +16,9 @@ use support::{ClassBuilder, PUBLIC, STATIC, idx};
 const LOOP_BYTECODES: u64 = 12;
 /// Bytecodes per iteration of `calls`, counting the callee's four.
 const CALL_BYTECODES: u64 = 14;
+/// Bytecodes per iteration of `append`, not counting the `setLength` call
+/// every 1024th iteration makes.
+const APPEND_BYTECODES: u64 = 12;
 
 fn bench_class() -> Vec<u8> {
     let mut c = ClassBuilder::new("Bench", "java/lang/Object", 50, 0);
@@ -69,6 +72,55 @@ fn bench_class() -> Vec<u8> {
     let mut calls = calls.to_vec();
     calls[13] = u8::try_from(mask).expect("the constant pool is small");
     c.method(PUBLIC | STATIC, "calls", "(I)I", 3, 3, &calls, &[]);
+    // static int append(int n) {
+    //     StringBuffer sb = new StringBuffer();
+    //     String s = "0123456789012345678901234567890";
+    //     for (int i = 0; i < n; i++) {
+    //         sb.append(s);
+    //         if ((i & 1023) == 0) sb.setLength(0);
+    //     }
+    //     return sb.length();
+    // }
+    let buffer = c.class("java/lang/StringBuffer");
+    let init = c.method_ref("java/lang/StringBuffer", "<init>", "()V");
+    let add = c.method_ref(
+        "java/lang/StringBuffer",
+        "append",
+        "(Ljava/lang/String;)Ljava/lang/StringBuffer;",
+    );
+    let clear = c.method_ref("java/lang/StringBuffer", "setLength", "(I)V");
+    let length = c.method_ref("java/lang/StringBuffer", "length", "()I");
+    let text = c.string("0123456789012345678901234567890");
+    let [nh, nl] = idx(buffer);
+    let [ih, il] = idx(init);
+    let [ah, al] = idx(add);
+    let [ch, cl] = idx(clear);
+    let [lh, ll] = idx(length);
+    #[rustfmt::skip]
+    let append = [
+        0xbb, nh, nl,                 // 0: new StringBuffer
+        0x59,                         // dup
+        0xb7, ih, il,                 // invokespecial <init>
+        0x4c,                         // astore_1
+        0x12, u8::try_from(text).expect("the constant pool is small"), // ldc text
+        0x4d,                         // astore_2
+        0x03, 0x3e,                   // iconst_0 istore_3
+        0xa7, 0x00, 0x19,             // goto 38
+        0x2b, 0x2c,                   // 16: aload_1 aload_2
+        0xb6, ah, al,                 // invokevirtual append
+        0x57,                         // pop
+        0x1d, 0x11, 0x03, 0xff, 0x7e, // iload_3 sipush 1023 iand
+        0x9a, 0x00, 0x08,             // ifne 35
+        0x2b, 0x03,                   // aload_1 iconst_0
+        0xb6, ch, cl,                 // invokevirtual setLength
+        0x84, 0x03, 0x01,             // 35: iinc 3 1
+        0x1d, 0x1a,                   // 38: iload_3 iload_0
+        0xa1, 0xff, 0xe8,             // if_icmplt 16
+        0x2b,                         // aload_1
+        0xb6, lh, ll,                 // invokevirtual length
+        0xac,                         // ireturn
+    ];
+    c.method(PUBLIC | STATIC, "append", "(I)I", 3, 4, &append, &[]);
     c.build()
 }
 
@@ -97,6 +149,8 @@ fn bytecodes_per_second() {
     measure(&vm, "calls", 1_000_000, CALL_BYTECODES);
     let loop_rate = measure(&vm, "loop", 100_000_000, LOOP_BYTECODES);
     measure(&vm, "calls", 30_000_000, CALL_BYTECODES);
+    measure(&vm, "append", 1_000_000, APPEND_BYTECODES);
+    measure(&vm, "append", 20_000_000, APPEND_BYTECODES);
     assert!(loop_rate > 0.0);
 }
 
@@ -104,7 +158,7 @@ fn bytecodes_per_second() {
 fn benchmark_methods_compute_the_right_values() {
     let source = support::source(&[("Bench", bench_class())]);
     let vm = Vm::new(VmConfig::default(), Arc::new(source), Vec::new());
-    let (looped, calls) = vm.attach("check", |ctx| {
+    let (looped, calls, appended) = vm.attach("check", |ctx| {
         let l = ctx
             .call_static("Bench", "loop", "(I)I", &[Value::Int(1000)])
             .unwrap()
@@ -113,7 +167,11 @@ fn benchmark_methods_compute_the_right_values() {
             .call_static("Bench", "calls", "(I)I", &[Value::Int(1000)])
             .unwrap()
             .int();
-        (l, c)
+        let a = ctx
+            .call_static("Bench", "append", "(I)I", &[Value::Int(2000)])
+            .unwrap()
+            .int();
+        (l, c, a)
     });
     let mut sum = 0i32;
     for i in 0..1000 {
@@ -125,4 +183,7 @@ fn benchmark_methods_compute_the_right_values() {
         sum = (sum + i) & 0xffff;
     }
     assert_eq!(calls, sum);
+    // 2000 appends of 31 characters; the buffer was emptied at i = 0 and
+    // i = 1024, so it holds the 975 appends from i = 1025 to i = 1999.
+    assert_eq!(appended, 975 * 31);
 }
