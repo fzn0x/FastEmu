@@ -10,14 +10,13 @@
 
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use fastemu_jvm::classfile::encode_modified_utf8;
 use fastemu_jvm::{ArrayType, Ctx, FieldId, JResult, NativeClass, ObjRef, Payload, Value};
 
 use super::net::{self, IO_TIMEOUT};
-use super::{Options, check_range, copy_in, copy_out, opt_string_value, this, throw_io, url};
+use super::{Options, check_range, copy_in, copy_out, lock, opt_string_value, this, throw_io, url};
 
 const UDP_IMPL: &str = "fastemu/io/UDPDatagramConnectionImpl";
 const DATAGRAM_IMPL: &str = "fastemu/io/DatagramImpl";
@@ -32,11 +31,21 @@ const NOMINAL_LENGTH: i32 = 1472;
 
 /// The socket of one datagram connection.
 struct UdpShared {
-    socket: UdpSocket,
+    /// The socket, until `close` drops it so the port is free for the game
+    /// to bind again at once rather than when the collector frees the
+    /// connection object. A send or receive works on its own handle, so a
+    /// thread waiting for a datagram never holds up another one's send.
+    socket: Mutex<Option<Arc<UdpSocket>>>,
     /// For a client, the address the name gave, as text and resolved.
     target: Option<(String, SocketAddr)>,
     options: Options,
-    closed: AtomicBool,
+}
+
+impl UdpShared {
+    /// The socket, or `None` once the connection is closed.
+    fn socket(&self) -> Option<Arc<UdpSocket>> {
+        lock(&self.socket).clone()
+    }
 }
 
 /// The payload of a datagram connection object.
@@ -103,24 +112,24 @@ pub(crate) fn open(ctx: &mut Ctx<'_>, rest: &str, name: &str, options: Options) 
     let class = ctx.find_class(UDP_IMPL)?;
     let conn = ctx.new_object(class)?;
     let shared = UdpShared {
-        socket,
+        socket: Mutex::new(Some(Arc::new(socket))),
         target,
         options,
-        closed: AtomicBool::new(false),
     };
     ctx.set_payload(conn, UdpPayload(Some(Arc::new(shared))));
     Ok(conn)
 }
 
-fn shared(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<Arc<UdpShared>> {
+/// The connection `conn` and its socket, or `IOException` once closed.
+fn shared(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<(Arc<UdpShared>, Arc<UdpSocket>)> {
     let shared = match &ctx.payload::<UdpPayload>(conn)?.0 {
         Some(s) => Arc::clone(s),
         None => return throw_io(ctx, "the connection was not opened with Connector.open"),
     };
-    if shared.closed.load(Ordering::Acquire) {
+    let Some(socket) = shared.socket() else {
         return throw_io(ctx, "connection is closed");
-    }
-    Ok(shared)
+    };
+    Ok((shared, socket))
 }
 
 /// The fields of `DatagramImpl`.
@@ -183,7 +192,7 @@ fn new_datagram_for(
     size: i32,
     address: Option<Value>,
 ) -> JResult<Value> {
-    let shared = shared(ctx, conn)?;
+    let (shared, _) = shared(ctx, conn)?;
     if !(0..=MAX_LENGTH).contains(&size) {
         return illegal(ctx, &format!("invalid datagram size {size}"));
     }
@@ -212,7 +221,7 @@ fn new_datagram_for(
 /// `send`: the datagram's bytes from its offset, to its address or the
 /// connection's.
 fn send(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
-    let shared = shared(ctx, this(a))?;
+    let (shared, socket) = shared(ctx, this(a))?;
     let dgram = ctx.non_null(a[1])?;
     let address = ctx.call_interface(dgram, "getAddress", "()Ljava/lang/String;", &[])?;
     let data = ctx.call_interface(dgram, "getData", "()[B", &[])?;
@@ -240,16 +249,14 @@ fn send(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         None => Vec::new(),
     };
     let deadline = net::deadline(shared.options.timeouts.then_some(IO_TIMEOUT));
-    net::block_on(ctx, deadline, || {
-        net::again(shared.socket.send_to(&bytes, to))
-    })?;
+    net::block_on(ctx, deadline, || net::again(socket.send_to(&bytes, to)))?;
     Ok(Value::Void)
 }
 
 /// `receive`: waits for a datagram and puts it in the buffer at the
 /// offset, truncated to the room there, with the sender's address.
 fn receive(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
-    let shared = shared(ctx, this(a))?;
+    let (shared, socket) = shared(ctx, this(a))?;
     let dgram = ctx.non_null(a[1])?;
     let data = ctx.call_interface(dgram, "getData", "()[B", &[])?;
     let offset = ctx.call_interface(dgram, "getOffset", "()I", &[])?.int();
@@ -262,10 +269,10 @@ fn receive(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     // the buffer is an error, not a truncation.
     let mut buf = vec![0; MAX_LENGTH as usize];
     let (n, from) = net::block_on(ctx, deadline, || {
-        if shared.closed.load(Ordering::Acquire) {
+        if shared.socket().is_none() {
             return Err(io::Error::other("connection is closed"));
         }
-        net::again(shared.socket.recv_from(&mut buf))
+        net::again(socket.recv_from(&mut buf))
     })?;
     let n = n.min(room);
     if let Some(arr) = data.obj() {
@@ -288,7 +295,7 @@ fn connection_class() -> NativeClass {
         .payload::<UdpPayload>()
         .method("close", "()V", |ctx, a| {
             if let Some(shared) = &ctx.payload::<UdpPayload>(this(a))?.0 {
-                shared.closed.store(true, Ordering::Release);
+                lock(&shared.socket).take();
             }
             Ok(Value::Void)
         })
@@ -323,15 +330,15 @@ fn connection_class() -> NativeClass {
             |ctx, a| new_datagram_for(ctx, this(a), Some(a[1]), a[2].int(), Some(a[3])),
         )
         .method("getLocalAddress", "()Ljava/lang/String;", |ctx, a| {
-            let shared = shared(ctx, this(a))?;
-            match shared.socket.local_addr() {
+            let (_, socket) = shared(ctx, this(a))?;
+            match socket.local_addr() {
                 Ok(addr) => opt_string_value(ctx, Some(&addr.ip().to_string())),
                 Err(e) => Err(net::io_exception(ctx, &e)),
             }
         })
         .method("getLocalPort", "()I", |ctx, a| {
-            let shared = shared(ctx, this(a))?;
-            match shared.socket.local_addr() {
+            let (_, socket) = shared(ctx, this(a))?;
+            match socket.local_addr() {
                 Ok(addr) => Ok(Value::Int(i32::from(addr.port()))),
                 Err(e) => Err(net::io_exception(ctx, &e)),
             }
@@ -734,5 +741,40 @@ mod tests {
         assert_eq!(decode_utf(&[0xE2, 0x82]), None);
         assert_eq!(decode_utf(&[0xF0, 0x9F, 0x98, 0x80]), None);
         assert_eq!(decode_utf(&[0x80]), None);
+    }
+
+    #[test]
+    fn a_closed_datagram_server_frees_its_port() {
+        use std::sync::Arc;
+
+        use fastemu_core::NetworkPolicy;
+        use fastemu_jvm::{MemorySource, Vm, VmConfig};
+
+        use crate::env::InstanceEnv;
+        use crate::io::connector::READ_WRITE;
+
+        let vm = Vm::new(
+            VmConfig::default(),
+            Arc::new(MemorySource::new()),
+            crate::classes(),
+        );
+        vm.attach("test", |ctx| {
+            let mut env = InstanceEnv::for_tests("unused");
+            env.settings.network = NetworkPolicy::Allow;
+            ctx.set_extension(env);
+            let options = Options {
+                mode: READ_WRITE,
+                timeouts: false,
+            };
+            let first = open(ctx, "//:0", "datagram://:0", options).unwrap();
+            let port = ctx
+                .call_interface(first, "getLocalPort", "()I", &[])
+                .unwrap()
+                .int();
+            ctx.call_interface(first, "close", "()V", &[]).unwrap();
+            let rest = format!("//:{port}");
+            let again = open(ctx, &rest, &format!("datagram:{rest}"), options);
+            assert!(again.is_ok(), "port {port} is still taken");
+        });
     }
 }
