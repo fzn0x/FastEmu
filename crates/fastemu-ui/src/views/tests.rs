@@ -1313,3 +1313,39 @@ fn the_link_prompt_fits_a_small_screen(cx: &mut TestAppContext) {
     );
     assert!(game.events().is_empty(), "{:?}", game.events());
 }
+
+#[gpui::test]
+fn the_link_prompt_over_an_ended_game_keeps_clicks_off_its_buttons(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    let game = h.launcher.instance(0);
+    game.show(1);
+    // MIDP has the phone handle a request after the game exits, so the
+    // question shows over the ended game's Restart and Close.
+    game.ask_to_open("https://example.com/after");
+    *lock(&game.status) = InstanceStatus::Exited;
+    h.redraw();
+    assert!(h.bounds("link-prompt", 0).is_some(), "the question shows");
+    let starts = lock(&h.launcher.started).len();
+
+    h.click("link-dismiss", 0);
+    assert_eq!(h.read(|v| v.tiles.len()), 1, "Dismiss closed the game");
+    assert_eq!(h.link(0), None);
+    assert_eq!(h.cx.opened_url(), None);
+
+    game.ask_to_open("https://example.com/again");
+    h.redraw();
+    h.click("link-open", 0);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://example.com/again")
+    );
+    assert_eq!(h.read(|v| v.tiles.len()), 1, "Open closed the game");
+    assert_eq!(
+        lock(&h.launcher.started).len(),
+        starts,
+        "Open restarted the game"
+    );
+    assert_eq!(h.link(0), None);
+}

@@ -1088,6 +1088,8 @@ impl FastEmuView {
                             })),
                     ),
             );
+        // The question covers the game's screen and, over an ended game,
+        // its Restart and Close: a click on it must not reach them.
         Some(
             div()
                 .absolute()
@@ -1097,6 +1099,7 @@ impl FastEmuView {
                 .justify_center()
                 .p(px(4.0))
                 .bg(theme.scrim)
+                .block_mouse_except_scroll()
                 .child(card),
         )
     }
