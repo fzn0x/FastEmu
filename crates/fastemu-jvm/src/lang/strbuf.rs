@@ -78,6 +78,16 @@ fn len(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<usize> {
     Ok(buf(ctx, a)?.len())
 }
 
+/// Throws `OutOfMemoryError` when a buffer of `chars` characters could not
+/// fit in the heap, before the host allocates it: the heap only measures
+/// a buffer at its next collection.
+fn check_fits(ctx: &mut Ctx<'_>, chars: usize) -> JResult<()> {
+    if chars.saturating_mul(2) > ctx.heap_usage().0 {
+        return Err(ctx.out_of_memory());
+    }
+    Ok(())
+}
+
 fn index_error(ctx: &mut Ctx<'_>, message: String) -> Throw {
     ctx.new_exception("java/lang/StringIndexOutOfBoundsException", Some(&message))
 }
@@ -165,6 +175,7 @@ fn class(name: &str) -> NativeClass {
                     &capacity.to_string(),
                 );
             }
+            check_fits(ctx, capacity as usize)?;
             state(ctx, a)?.capacity = capacity as usize;
             Ok(Value::Void)
         })
@@ -192,6 +203,7 @@ fn class(name: &str) -> NativeClass {
         })
         .method("ensureCapacity", "(I)V", |ctx, a| {
             let want = a[1].int().max(0) as usize;
+            check_fits(ctx, want)?;
             state(ctx, a)?.ensure(want);
             Ok(Value::Void)
         })
@@ -225,6 +237,7 @@ fn class(name: &str) -> NativeClass {
             if n < 0 {
                 return Err(index_error(ctx, format!("String index out of range: {n}")));
             }
+            check_fits(ctx, n as usize)?;
             buf(ctx, a)?.resize(n as usize, 0);
             Ok(Value::Void)
         })
@@ -430,5 +443,34 @@ mod tests {
         let mut s: Vec<u16> = "ab\u{1F600}c".encode_utf16().collect();
         reverse(&mut s);
         assert_eq!(String::from_utf16(&s).unwrap(), "c\u{1F600}ba");
+    }
+
+    #[test]
+    fn sizes_past_the_heap_throw_out_of_memory_error() {
+        let config = crate::VmConfig {
+            heap_bytes: 1 << 20,
+            ..crate::VmConfig::default()
+        };
+        let source = std::sync::Arc::new(crate::MemorySource::new());
+        let vm = crate::Vm::new(config, source, Vec::new());
+        let thrown = vm.attach("test", |ctx| {
+            let mut thrown = Vec::new();
+            for (name, size) in [("setLength", 50_000_000), ("ensureCapacity", i32::MAX)] {
+                let sb = ctx.construct("java/lang/StringBuffer", "()V", &[]).unwrap();
+                match ctx.call_virtual(sb, name, "(I)V", &[Value::Int(size)]) {
+                    Err(Throw::Exception(e)) => thrown.push(ctx.describe_exception(e)),
+                    other => thrown.push(format!("{name} returned {other:?}")),
+                }
+            }
+            let sized = [Value::Int(i32::MAX)];
+            match ctx.construct("java/lang/StringBuffer", "(I)V", &sized) {
+                Err(Throw::Exception(e)) => thrown.push(ctx.describe_exception(e)),
+                other => thrown.push(format!("<init> returned {other:?}")),
+            }
+            thrown
+        });
+        for t in thrown {
+            assert!(t.starts_with("java.lang.OutOfMemoryError"), "{t}");
+        }
     }
 }
