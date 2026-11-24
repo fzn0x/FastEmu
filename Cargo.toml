@@ -1,0 +1,61 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# Plain `cargo build`, `test` and `clippy` cover the emulator itself, which
+# builds in seconds. The GPUI apps (fastemu-ui, fastemu, fastemu-android)
+# pull in a large dependency tree: build them with `-p fastemu` or
+# `--workspace`.
+default-members = [
+  "crates/fastemu-core",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "GPL-3.0-or-later"
+authors = ["The FastEmu contributors"]
+repository = "https://github.com/fzn0x/FastEmu"
+homepage = "https://fastemu.functionx.dev"
+
+[workspace.dependencies]
+fastemu-core = { path = "crates/fastemu-core" }
+
+[workspace.lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+# Crates that must call platform C APIs (the Android entry point) opt out in
+# their own manifests and keep each unsafe block next to a SAFETY comment.
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+assert_is_empty = "allow"
+# An emulator converts between Java's integer types all the time; these
+# casts are deliberate and follow the JVM's own rules.
+cast_lossless = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+doc_markdown = "allow"
+items_after_statements = "allow"
+many_single_char_names = "allow"
+match_same_arms = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+needless_pass_by_value = "allow"
+similar_names = "allow"
+single_match_else = "allow"
+struct_excessive_bools = "allow"
+too_many_lines = "allow"
+unreadable_literal = "allow"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = true
+# Panics stay as unwinding: a crash inside one game's virtual machine is
+# caught on that instance's threads and must not take the others down.
+panic = "unwind"

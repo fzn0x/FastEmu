@@ -1,0 +1,23 @@
+[package]
+name = "fastemu-core"
+description = "The instance API the FastEmu runtime and its apps share: frames, input, device profiles"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[features]
+# A stand-in launcher whose instances draw test patterns, for building and
+# testing the apps without the virtual machine.
+mock = []
+serde = ["dep:serde"]
+
+[dependencies]
+bytemuck = "1"
+serde = { version = "1", features = ["derive"], optional = true }
+
+[lints]
+workspace = true
