@@ -22,30 +22,30 @@ rest.
 | [`java.util`](#javautil) | 4 of 4 | 31 of 31 | 6 of 6 | 66 of 66 | 2 of 2 | 44 of 44 |
 | [`java.io`](#javaio) | 7 of 7 | 51 of 51 | 7 of 7 | 74 of 74 | 4 of 4 | 61 of 61 |
 | [`javax.microedition.midlet`](#javaxmicroeditionmidlet) | 1 of 1 | 6 of 6 | 1 of 1 | 5 of 5 | none | 1 of 1 |
-| [`javax.microedition.lcdui`](#javaxmicroeditionlcdui) | 8 of 8 | 78 of 78 | 1 of 9 | 58 of 130 | 0 of 10 | 43 of 244 |
-| [`javax.microedition.lcdui.game`](#javaxmicroeditionlcduigame) | 0 of 4 | 0 of 29 | 0 of 1 | 0 of 39 | none | 0 of 6 |
+| [`javax.microedition.lcdui`](#javaxmicroeditionlcdui) | 8 of 8 | 78 of 78 | 9 of 9 | 130 of 130 | 10 of 10 | 244 of 244 |
+| [`javax.microedition.lcdui.game`](#javaxmicroeditionlcduigame) | 4 of 4 | 29 of 29 | 1 of 1 | 39 of 39 | none | 6 of 6 |
 | [`javax.microedition.rms`](#javaxmicroeditionrms) | 3 of 3 | 11 of 11 | 4 of 4 | 18 of 18 | 3 of 3 | 26 of 26 |
 | [`javax.microedition.io`](#javaxmicroeditionio) | 3 of 3 | 4 of 4 | 5 of 5 | 20 of 20 | 11 of 11 | 106 of 106 |
 | [`javax.microedition.media`](#javaxmicroeditionmedia) | 5 of 5 | 11 of 11 | 1 of 1 | 22 of 22 | 1 of 3 | 20 of 32 |
 | [`javax.microedition.media.control`](#javaxmicroeditionmediacontrol) | 1 of 1 | 1 of 1 | 1 of 1 | 14 of 14 | 10 of 10 | 59 of 59 |
 | [`javax.microedition.media.protocol`](#javaxmicroeditionmediaprotocol) | none | none | none | none | 3 of 3 | 22 of 22 |
 | [`javax.microedition.pki`](#javaxmicroeditionpki) | none | none | none | none | 0 of 2 | 0 of 26 |
-| [`com.nokia.mid.ui`](#comnokiamidui) | 0 of 3 | 0 of 25 | 0 of 1 | 0 of 18 | none | 0 of 23 |
+| [`com.nokia.mid.ui`](#comnokiamidui) | 3 of 3 | 25 of 25 | 1 of 1 | 18 of 18 | none | 14 of 23 |
 | [`com.nokia.mid.sound`](#comnokiamidsound) | 1 of 1 | 8 of 8 | 1 of 1 | 12 of 12 | none | none |
-| [`com.siemens.mp.game`](#comsiemensmpgame) | none | none | 0 of 10 | 0 of 52 | none | 0 of 86 |
-| [`com.siemens.mp.color_game`](#comsiemensmpcolor_game) | none | none | 0 of 5 | 0 of 72 | none | none |
+| [`com.siemens.mp.game`](#comsiemensmpgame) | none | none | 10 of 10 | 52 of 52 | none | 85 of 86 |
+| [`com.siemens.mp.color_game`](#comsiemensmpcolor_game) | none | none | 5 of 5 | 72 of 72 | none | none |
 | [`com.siemens.mp`](#comsiemensmp) | none | none | none | none | 0 of 2 | 0 of 8 |
 | [`com.siemens.mp.gsm`](#comsiemensmpgsm) | none | none | none | none | 0 of 3 | 0 of 6 |
 | [`com.siemens.mp.io`](#comsiemensmpio) | none | none | none | none | 0 of 3 | 0 of 26 |
 | [`com.siemens.mp.lcdui`](#comsiemensmplcdui) | none | none | none | none | 0 of 1 | 0 of 5 |
 | [`com.siemens.mp.m55`](#comsiemensmpm55) | none | none | none | none | 0 of 1 | 0 of 19 |
-| [`com.siemens.mp.ui`](#comsiemensmpui) | none | none | 0 of 1 | 0 of 20 | none | none |
+| [`com.siemens.mp.ui`](#comsiemensmpui) | none | none | 1 of 1 | 20 of 20 | none | none |
 | [`com.siemens.mp.media`](#comsiemensmpmedia) | none | none | none | none | 0 of 7 | 0 of 53 |
 | [`com.siemens.mp.media.control`](#comsiemensmpmediacontrol) | none | none | none | none | 0 of 2 | 0 of 15 |
 | [`com.samsung.util`](#comsamsungutil) | none | none | none | none | 0 of 5 | 0 of 26 |
 | [`com.motorola.game`](#commotorolagame) | none | none | none | none | 0 of 8 | 0 of 97 |
 | [`com.motorola.funlight`](#commotorolafunlight) | none | none | none | none | 0 of 3 | 0 of 30 |
-| [`com.motorola.multimedia`](#commotorolamultimedia) | none | none | none | none | 0 of 2 | 0 of 17 |
+| [`com.motorola.multimedia`](#commotorolamultimedia) | none | none | none | none | 1 of 2 | 2 of 17 |
 | [`com.sonyericsson.capuchin`](#comsonyericssoncapuchin) | none | none | none | none | 0 of 8 | 0 of 33 |
 | [`com.velox`](#comvelox) | none | none | none | none | 0 of 1 | 0 of 12 |
 | [`mmpp.lang`](#mmpplang) | none | none | none | none | 0 of 1 | 0 of 28 |
@@ -65,7 +65,7 @@ rest.
 | [`javax.microedition.location`](#javaxmicroeditionlocation) | none | none | none | none | 0 of 13 | none |
 | [`javax.microedition.m2g`](#javaxmicroeditionm2g) | none | none | none | none | 0 of 6 | none |
 | [`org.w3c.dom.svg`](#orgw3cdomsvg) | none | none | none | none | 0 of 10 | none |
-| All | 59 of 66 | 294 of 348 | 40 of 99 | 434 of 1203 | 44 of 201 | 498 of 1521 |
+| All | 66 of 66 | 348 of 348 | 66 of 99 | 707 of 1203 | 55 of 201 | 806 of 1521 |
 
 ## Differences
 
@@ -79,6 +79,15 @@ such an override public.
 - `javax/microedition/midlet/MIDlet.pauseApp()V` (tier 1): public, the inventory says protected
 - `javax/microedition/midlet/MIDlet.destroyApp(Z)V` (tier 1): public, the inventory says protected
 - `javax/microedition/lcdui/Canvas.paint(Ljavax/microedition/lcdui/Graphics;)V` (tier 1): public, the inventory says protected
+- `javax/microedition/lcdui/CustomItem.TRAVERSE_HORIZONTAL:I` (tier 3): public, the inventory says protected
+- `javax/microedition/lcdui/CustomItem.TRAVERSE_VERTICAL:I` (tier 3): public, the inventory says protected
+- `javax/microedition/lcdui/CustomItem.KEY_PRESS:I` (tier 3): public, the inventory says protected
+- `javax/microedition/lcdui/CustomItem.KEY_RELEASE:I` (tier 3): public, the inventory says protected
+- `javax/microedition/lcdui/CustomItem.KEY_REPEAT:I` (tier 3): public, the inventory says protected
+- `javax/microedition/lcdui/CustomItem.POINTER_PRESS:I` (tier 3): public, the inventory says protected
+- `javax/microedition/lcdui/CustomItem.POINTER_RELEASE:I` (tier 3): public, the inventory says protected
+- `javax/microedition/lcdui/CustomItem.POINTER_DRAG:I` (tier 3): public, the inventory says protected
+- `javax/microedition/lcdui/CustomItem.NONE:I` (tier 3): public, the inventory says protected
 
 ## By package
 
@@ -182,40 +191,40 @@ From [midp-midlet.md](api/midp-midlet.md). Tier 1: 1 of 1 classes, 6 of 6 member
 
 ### javax.microedition.lcdui
 
-From [midp-lcdui.md](api/midp-lcdui.md). Tier 1: 8 of 8 classes, 78 of 78 members. Tier 2: 1 of 9 classes, 58 of 130 members. Tier 3: 0 of 10 classes, 43 of 244 members.
+From [midp-lcdui.md](api/midp-lcdui.md). Tier 1: 8 of 8 classes, 78 of 78 members. Tier 2: 9 of 9 classes, 130 of 130 members. Tier 3: 10 of 10 classes, 244 of 244 members.
 
 | Class | Tier | In FastEmu | Tier 1 members | Tier 2 members |
 |---|---|---|---|---|
-| `Alert` | 2 | missing | none | 0 of 9 |
-| `AlertType` | 2 | missing | none | 0 of 6 |
+| `Alert` | 2 | yes | none | 9 of 9 |
+| `AlertType` | 2 | yes | none | 6 of 6 |
 | `Canvas` | 1 | yes | 28 of 28 | 13 of 13 |
-| `Choice` | 2 | missing | none | 0 of 14 |
+| `Choice` | 2 | yes | none | 14 of 14 |
 | `Command` | 1 | yes | 1 of 1 | 7 of 7 |
 | `CommandListener` | 1 | yes | 1 of 1 | none |
 | `Display` | 1 | yes | 4 of 4 | 6 of 6 |
 | `Displayable` | 1 | yes | 4 of 4 | 4 of 4 |
 | `Font` | 1 | yes | 12 of 12 | 6 of 6 |
-| `Form` | 2 | missing | none | 0 of 8 |
+| `Form` | 2 | yes | none | 8 of 8 |
 | `Graphics` | 1 | yes | 20 of 20 | 19 of 19 |
 | `Image` | 1 | yes | 8 of 8 | 3 of 3 |
-| `Item` | 2 | missing | none | 0 of 6 |
-| `List` | 2 | missing | none | 0 of 16 |
+| `Item` | 2 | yes | none | 6 of 6 |
+| `List` | 2 | yes | none | 16 of 16 |
 | `Screen` | 2 | yes | none | none |
-| `StringItem` | 2 | missing | none | 0 of 3 |
-| `TextBox` | 2 | missing | none | 0 of 6 |
-| `TextField` | 3 | missing | none | 0 of 4 |
+| `StringItem` | 2 | yes | none | 3 of 3 |
+| `TextBox` | 2 | yes | none | 6 of 6 |
+| `TextField` | 3 | yes | none | 4 of 4 |
 
 ### javax.microedition.lcdui.game
 
-From [midp-lcdui-game.md](api/midp-lcdui-game.md). Tier 1: 0 of 4 classes, 0 of 29 members. Tier 2: 0 of 1 classes, 0 of 39 members. Tier 3: none classes, 0 of 6 members.
+From [midp-lcdui-game.md](api/midp-lcdui-game.md). Tier 1: 4 of 4 classes, 29 of 29 members. Tier 2: 1 of 1 classes, 39 of 39 members. Tier 3: none classes, 6 of 6 members.
 
 | Class | Tier | In FastEmu | Tier 1 members | Tier 2 members |
 |---|---|---|---|---|
-| `GameCanvas` | 1 | missing | 0 of 9 | 0 of 6 |
-| `Layer` | 1 | missing | 0 of 7 | 0 of 2 |
-| `LayerManager` | 2 | missing | none | 0 of 5 |
-| `Sprite` | 1 | missing | 0 of 9 | 0 of 18 |
-| `TiledLayer` | 1 | missing | 0 of 4 | 0 of 8 |
+| `GameCanvas` | 1 | yes | 9 of 9 | 6 of 6 |
+| `Layer` | 1 | yes | 7 of 7 | 2 of 2 |
+| `LayerManager` | 2 | yes | none | 5 of 5 |
+| `Sprite` | 1 | yes | 9 of 9 | 18 of 18 |
+| `TiledLayer` | 1 | yes | 4 of 4 | 8 of 8 |
 
 ### javax.microedition.rms
 
@@ -278,14 +287,14 @@ From [midp-pki.md](api/midp-pki.md). Tier 1: none classes, none members. Tier 2:
 
 ### com.nokia.mid.ui
 
-From [nokia.md](api/nokia.md). Tier 1: 0 of 3 classes, 0 of 25 members. Tier 2: 0 of 1 classes, 0 of 18 members. Tier 3: none classes, 0 of 23 members.
+From [nokia.md](api/nokia.md). Tier 1: 3 of 3 classes, 25 of 25 members. Tier 2: 1 of 1 classes, 18 of 18 members. Tier 3: none classes, 14 of 23 members.
 
 | Class | Tier | In FastEmu | Tier 1 members | Tier 2 members |
 |---|---|---|---|---|
-| `DeviceControl` | 2 | missing | none | 0 of 3 |
-| `DirectGraphics` | 1 | missing | 0 of 15 | 0 of 12 |
-| `DirectUtils` | 1 | missing | 0 of 2 | 0 of 1 |
-| `FullCanvas` | 1 | missing | 0 of 8 | 0 of 2 |
+| `DeviceControl` | 2 | yes | none | 3 of 3 |
+| `DirectGraphics` | 1 | yes | 15 of 15 | 12 of 12 |
+| `DirectUtils` | 1 | yes | 2 of 2 | 1 of 1 |
+| `FullCanvas` | 1 | yes | 8 of 8 | 2 of 2 |
 
 ### com.nokia.mid.sound
 
@@ -298,32 +307,32 @@ From [nokia.md](api/nokia.md). Tier 1: 1 of 1 classes, 8 of 8 members. Tier 2: 1
 
 ### com.siemens.mp.game
 
-From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: 0 of 10 classes, 0 of 52 members. Tier 3: none classes, 0 of 86 members.
+From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: 10 of 10 classes, 52 of 52 members. Tier 3: none classes, 85 of 86 members.
 
 | Class | Tier | In FastEmu | Tier 1 members | Tier 2 members |
 |---|---|---|---|---|
-| `ExtendedImage` | 2 | missing | none | 0 of 8 |
-| `GraphicObject` | 2 | missing | none | 0 of 3 |
-| `GraphicObjectManager` | 2 | missing | none | 0 of 9 |
-| `Light` | 2 | missing | none | 0 of 3 |
-| `Melody` | 2 | missing | none | 0 of 2 |
-| `MelodyComposer` | 2 | missing | none | 0 of 6 |
-| `Sound` | 2 | missing | none | 0 of 2 |
-| `Sprite` | 2 | missing | none | 0 of 11 |
-| `TiledBackground` | 2 | missing | none | 0 of 4 |
-| `Vibrator` | 2 | missing | none | 0 of 4 |
+| `ExtendedImage` | 2 | yes | none | 8 of 8 |
+| `GraphicObject` | 2 | yes | none | 3 of 3 |
+| `GraphicObjectManager` | 2 | yes | none | 9 of 9 |
+| `Light` | 2 | yes | none | 3 of 3 |
+| `Melody` | 2 | yes | none | 2 of 2 |
+| `MelodyComposer` | 2 | yes | none | 6 of 6 |
+| `Sound` | 2 | yes | none | 2 of 2 |
+| `Sprite` | 2 | yes | none | 11 of 11 |
+| `TiledBackground` | 2 | yes | none | 4 of 4 |
+| `Vibrator` | 2 | yes | none | 4 of 4 |
 
 ### com.siemens.mp.color_game
 
-From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: 0 of 5 classes, 0 of 72 members. Tier 3: none classes, none members.
+From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: 5 of 5 classes, 72 of 72 members. Tier 3: none classes, none members.
 
 | Class | Tier | In FastEmu | Tier 1 members | Tier 2 members |
 |---|---|---|---|---|
-| `GameCanvas` | 2 | missing | none | 0 of 17 |
-| `Layer` | 2 | missing | none | 0 of 17 |
-| `LayerManager` | 2 | missing | none | 0 of 10 |
-| `Sprite` | 2 | missing | none | 0 of 15 |
-| `TiledLayer` | 2 | missing | none | 0 of 13 |
+| `GameCanvas` | 2 | yes | none | 17 of 17 |
+| `Layer` | 2 | yes | none | 17 of 17 |
+| `LayerManager` | 2 | yes | none | 10 of 10 |
+| `Sprite` | 2 | yes | none | 15 of 15 |
+| `TiledLayer` | 2 | yes | none | 13 of 13 |
 
 ### com.siemens.mp
 
@@ -347,11 +356,11 @@ From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: n
 
 ### com.siemens.mp.ui
 
-From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: 0 of 1 classes, 0 of 20 members. Tier 3: none classes, none members.
+From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: 1 of 1 classes, 20 of 20 members. Tier 3: none classes, none members.
 
 | Class | Tier | In FastEmu | Tier 1 members | Tier 2 members |
 |---|---|---|---|---|
-| `Image` | 2 | missing | none | 0 of 20 |
+| `Image` | 2 | yes | none | 20 of 20 |
 
 ### com.siemens.mp.media
 
@@ -375,7 +384,7 @@ From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: n
 
 ### com.motorola.multimedia
 
-From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: none classes, none members. Tier 3: 0 of 2 classes, 0 of 17 members.
+From [vendors.md](api/vendors.md). Tier 1: none classes, none members. Tier 2: none classes, none members. Tier 3: 1 of 2 classes, 2 of 17 members.
 
 ### com.sonyericsson.capuchin
 
