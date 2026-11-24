@@ -97,7 +97,9 @@ vm.spawn("main", |ctx| {
   about the size a phone's VM would give them.
 - `max_frames` (4096): Java frames per thread before `StackOverflowError`.
 - `max_native_depth` (256): how many times native code may call back into
-  Java on one thread, nested, before `StackOverflowError`. Each level
+  Java on one thread, nested, before `StackOverflowError`. A native that
+  calls another native (`Vector.toString` on a vector that holds a
+  vector) counts as well as one that calls bytecode. Each level
   uses the OS thread's stack (about 40 KB in a debug build, a few KB in
   release), so this keeps a runaway recursion through natives from
   overflowing it.
@@ -135,6 +137,15 @@ vm.spawn("main", |ctx| {
 `Vm` methods take the VM lock, so they are for host threads only. Native
 code already holds the lock; a native that called `Vm::post` or
 `Vm::stop` would deadlock. Natives use `Ctx::post` and `Ctx::stop_vm`.
+A thread that never reaches a safepoint holds the lock for ever, so the
+methods a host thread uses to stop the machine wait for it only so long:
+`stop`, `pause` and `resume` 100 ms, after which they wake the waiting
+threads without the lock; `flush_output` 250 ms, then it skips the
+flush; `spawn` and `post` one second, then `spawn` fails with
+`ErrorKind::TimedOut` and `post` drops its task and logs a warning;
+`wait_finished` counts the wait for the lock into its timeout and
+returns `false` when it runs out. `attach`, `thread_count`,
+`exit_code` and `heap_stats` wait for as long as it takes.
 `Vm::clock`, `Vm::is_stopping`, `Vm::is_paused`, `Vm::downgrade` and
 `Ctx::clock` take no lock. A host thread that must not wait, such as an
 app's UI thread, should not call the ones that take it: a Java thread
@@ -201,6 +212,16 @@ and `Ctx::yield_now`. A stopping VM makes each thread return
 `Err(Throw::Stop)` from its next safepoint or wait; that unwinds every
 frame without running handlers. A paused VM parks threads at safepoints;
 waits and sleeps that end while it is paused park too.
+
+Every call from native code into Java (`Ctx::call_virtual`,
+`call_static`, `construct`) checks the stop flag first and returns
+`Err(Throw::Stop)` when it is set, so a native that loops around such
+calls, as `InputStream.skip` does around `read`, ends when the VM stops
+even if the Java methods it calls hold no backward branch. A native that
+never calls back into Java holds the lock until it returns, and a loop of
+natives that calls Java and never lets go of the lock starves the VM's
+other threads until it ends; natives that loop for long must check
+`Ctx::is_stopping` themselves.
 
 ## The heap and the collector
 
