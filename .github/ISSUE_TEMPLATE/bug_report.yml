@@ -1,0 +1,69 @@
+name: Something does not work
+description: Tell us what went wrong in FastEmu itself, apart from one game.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A single game that does not start or looks wrong is a
+        [game report](https://github.com/fzn0x/FastEmu/issues/new?template=game_report.yml).
+        Use this form for crashes, hangs, wrong behavior of the window, the
+        game list, the settings or the keys, and for games that fail in a
+        way that points at FastEmu rather than the game.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what happened, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      placeholder: |
+        1. Add the game ...
+        2. Start a second game ...
+        3. Press ...
+  - type: input
+    id: version
+    attributes:
+      label: FastEmu version
+      description: The version of the release, or the commit of a build from source.
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux, X11
+        - Linux, Wayland
+        - macOS, Apple silicon
+        - macOS, Intel
+        - Android
+    validations:
+      required: true
+  - type: input
+    id: machine
+    attributes:
+      label: Machine details
+      description: The Linux distribution, the Android version and phone model, or the graphics card, as far as it matters.
+  - type: input
+    id: game
+    attributes:
+      label: The game
+      description: Its name, its vendor, and where the file comes from. Leave empty when no game is involved.
+  - type: input
+    id: profile
+    attributes:
+      label: Device profile
+      description: The profile the game ran with, as its name appears in the game's settings. For example the screen size and key layout.
+  - type: textarea
+    id: log
+    attributes:
+      label: The log
+      description: The log lines around the problem, from the terminal or the log file.
+      render: text

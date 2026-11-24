@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: A security problem
+    url: https://github.com/fzn0x/FastEmu/security/advisories/new
+    about: Report it privately, please.
+  - name: Contributing
+    url: https://github.com/fzn0x/FastEmu/blob/main/CONTRIBUTING.md
+    about: How to build FastEmu, and how to send a change.

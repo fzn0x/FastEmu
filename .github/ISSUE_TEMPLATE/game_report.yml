@@ -1,0 +1,81 @@
+name: Game report
+description: Tell us whether a Java ME game works, plays, starts or does not start.
+labels: [game-report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One report per game. Reports of games that work help as much as
+        those of games that do not: they show what has been tried.
+        Do not attach a game's JAR: say where it comes from instead.
+  - type: input
+    id: game
+    attributes:
+      label: Game name
+      description: As the game's title screen or its JAD file spells it.
+    validations:
+      required: true
+  - type: input
+    id: vendor
+    attributes:
+      label: Vendor
+      description: The MIDlet-Vendor of the JAD file or manifest, or the publisher.
+    validations:
+      required: true
+  - type: input
+    id: game_version
+    attributes:
+      label: Game version
+      description: The MIDlet-Version of the JAD file or manifest.
+  - type: input
+    id: size
+    attributes:
+      label: JAR size
+      description: In bytes or kilobytes, as the file shows. It tells releases of the same game apart.
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Where the file comes from
+      description: The site or the phone model it was copied from.
+  - type: dropdown
+    id: result
+    attributes:
+      label: How it runs
+      options:
+        - Works, I played it through
+        - Playable, with small problems
+        - Starts, but cannot be played
+        - Does not start
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: FastEmu version
+      description: The version of the release, or the commit of a build from source.
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Android
+    validations:
+      required: true
+  - type: input
+    id: profile
+    attributes:
+      label: Device profile
+      description: The profile the game ran with.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: What goes wrong, at which screen, what you tried, and the log's last lines when the game does not start.
+      render: text
