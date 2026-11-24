@@ -558,6 +558,22 @@ fn opened_files_are_added_and_started(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn relative_paths_are_stored_absolute(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    // As `fastemu snake.jar` passes it from the shell's folder.
+    h.view.update_in(h.cx, |v, window, cx| {
+        v.add_paths(vec![PathBuf::from("snake.jar")], false, window, cx);
+    });
+    h.cx.run_until_parked();
+    let path = h.read(|v| v.library.entries()[0].path.clone());
+    assert!(path.is_absolute(), "{}", path.display());
+    assert_eq!(
+        path,
+        std::env::current_dir().expect("cwd").join("snake.jar")
+    );
+}
+
+#[gpui::test]
 fn every_layout_and_dialog_renders(cx: &mut TestAppContext) {
     let mut h = open(cx);
     h.add(&["snake.jar", "tetris.jar"]);

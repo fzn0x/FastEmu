@@ -149,6 +149,12 @@ impl FastEmuView {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        // Paths from a command line are relative to the folder the app
+        // started in; the library must find them from anywhere later.
+        let paths: Vec<PathBuf> = paths
+            .into_iter()
+            .map(|p| std::path::absolute(&p).unwrap_or(p))
+            .collect();
         let (suites, rejected) = pick_suites(&paths);
         for why in rejected {
             self.report(why.to_string(), NoticeLevel::Error, cx);
