@@ -176,6 +176,14 @@ impl Surface {
         }
     }
 
+    /// The same pixels as another kind of surface, for Nokia's
+    /// `DirectUtils.createImage(byte[], int, int)`, which decodes into a
+    /// mutable image.
+    #[must_use]
+    pub fn into_kind(self, kind: SurfaceKind) -> Self {
+        Self { kind, ..self }
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }

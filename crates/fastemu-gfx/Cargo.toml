@@ -10,8 +10,16 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
+crc32fast = "1.5.0"
 fastemu-core.workspace = true
 fontdue = "0.9.5"
+gif = "0.14.2"
+miniz_oxide = "0.9.1"
+png = "0.18.1"
+zune-jpeg = "0.5.15"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+jpeg-encoder = "0.7.1"

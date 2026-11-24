@@ -2,6 +2,7 @@
 
 pub mod anchor;
 pub mod color;
+pub mod decode;
 pub mod error;
 pub mod font;
 pub mod graphics;
@@ -12,6 +13,7 @@ pub mod transform;
 
 pub use anchor::{Anchor, AnchorPolicy};
 pub use color::{OPAQUE, blend, display_color, gray_of};
+pub use decode::ImageFormat;
 pub use error::{GfxError, Result, non_null};
 pub use font::{Face, Font, FontLibrary, Size, Style, TextRendering};
 pub use graphics::{Graphics, StrokeStyle};
