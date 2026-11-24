@@ -3,7 +3,7 @@ name: Site
 # Pull requests build and check the site. Pushes to main build it and deploy
 # it to Cloudflare with wrangler. The deploy needs two repository secrets:
 # CLOUDFLARE_API_TOKEN (a token that can edit Workers) and
-# CLOUDFLARE_ACCOUNT_ID.
+# CLOUDFLARE_ACCOUNT_ID. Without them it skips with a warning.
 
 on:
   pull_request:
@@ -35,8 +35,8 @@ jobs:
     name: Build and check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -55,7 +55,7 @@ jobs:
       - name: Check the Worker config
         working-directory: site
         run: npx --yes "wrangler@${WRANGLER_VERSION}" deploy --dry-run
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: site
           path: site/public
@@ -67,8 +67,8 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -88,7 +88,9 @@ jobs:
           [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
           [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
           if [ -n "$missing" ]; then
-            echo "::error::Cannot deploy the site. Add these repository secrets:$missing"
-            exit 1
+            # Not an error: until the secrets exist, the site is deployed by
+            # hand (wrangler deploy in site/), and main should stay green.
+            echo "::warning::Skipped the deploy. Add these repository secrets to deploy from CI:$missing"
+            exit 0
           fi
           npx --yes "wrangler@${WRANGLER_VERSION}" deploy
