@@ -161,6 +161,14 @@ fn open(cx: &mut TestAppContext) -> Harness<'_> {
 }
 
 fn open_in(cx: &mut TestAppContext, dir: tempfile::TempDir) -> Harness<'_> {
+    open_with(cx, dir, None)
+}
+
+fn open_with(
+    cx: &mut TestAppContext,
+    dir: tempfile::TempDir,
+    text_entry: Option<TextEntry>,
+) -> Harness<'_> {
     let launcher = Arc::new(FakeLauncher::default());
     let config = AppConfig {
         launcher: launcher.clone(),
@@ -169,6 +177,7 @@ fn open_in(cx: &mut TestAppContext, dir: tempfile::TempDir) -> Harness<'_> {
             data_dir: dir.path().join("data"),
             screenshot_dir: dir.path().join("shots"),
         },
+        text_entry,
     };
     cx.update(init);
     let (view, cx) = cx.add_window_view(|window, cx| FastEmuView::new(config, window, cx));
@@ -385,6 +394,39 @@ fn typing_follows_the_game_text_box(cx: &mut TestAppContext) {
             InputEvent::Text("i".into()),
         ]
     );
+}
+
+#[gpui::test]
+fn the_platform_text_entry_types_into_the_game(cx: &mut TestAppContext) {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let entry: TextEntry = {
+        let asked = Arc::clone(&asked);
+        Arc::new(move |title: &str| {
+            lock(&asked).push(title.to_owned());
+            let (answer, receiver) = oneshot::channel();
+            answer.send(Some("hello".to_owned())).ok();
+            receiver
+        })
+    };
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mut h = open_with(cx, dir, Some(entry));
+    h.add(&["chat.jar"]);
+    h.launch_first();
+    h.redraw();
+    assert!(lock(&asked).is_empty(), "no text box, no keyboard");
+    let game = h.launcher.instance(0);
+    *lock(&game.wants_text) = true;
+    h.redraw();
+    h.redraw();
+    assert_eq!(*lock(&asked), ["CHAT"], "asked once per text box");
+    assert_eq!(game.events(), vec![InputEvent::Text("hello".into())]);
+    h.view
+        .update(h.cx, |v, _| v.tiles[0].session.toggle_typing());
+    h.redraw();
+    h.view
+        .update(h.cx, |v, _| v.tiles[0].session.toggle_typing());
+    h.redraw();
+    assert_eq!(lock(&asked).len(), 2, "the text button asks again");
 }
 
 #[gpui::test]

@@ -74,6 +74,7 @@ fn open_window(files: Vec<PathBuf>, mock: bool) {
     let config = AppConfig {
         launcher,
         paths: paths::desktop(),
+        text_entry: None,
     };
     gpui_platform::application()
         .with_assets(Assets)

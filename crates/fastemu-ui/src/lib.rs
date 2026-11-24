@@ -22,4 +22,4 @@ pub mod views;
 
 pub use assets::Assets;
 pub use session::AppPaths;
-pub use views::{AppConfig, FastEmuView, init};
+pub use views::{AppConfig, FastEmuView, TextEntry, init};

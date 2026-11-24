@@ -23,9 +23,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use fastemu_core::{Key, Launcher, Notify};
+use fastemu_core::{InputEvent, Key, Launcher, Notify};
 use futures::StreamExt;
-use futures::channel::mpsc;
+use futures::channel::{mpsc, oneshot};
 use gpui::{
     Action, App, Context, FocusHandle, Focusable, IntoElement, KeyBinding,
     KeyBindingContextPredicate, ParentElement, Render, RenderImage, SharedString, Styled,
@@ -96,13 +96,22 @@ pub fn init(cx: &mut App) {
     cx.bind_keys(bindings);
 }
 
-/// What the host app hands the view: the runtime that starts games and
-/// the folders to keep files in. The desktop and Android apps each pick
-/// their own.
+/// Asks the platform for a line of text with its own keyboard, for
+/// devices without a hardware one: the Android app shows a dialog over
+/// the window. It gets the game's title; the receiver gets the typed
+/// text, or `None` when the user cancelled.
+pub type TextEntry = Arc<dyn Fn(&str) -> oneshot::Receiver<Option<String>> + Send + Sync>;
+
+/// What the host app hands the view: the runtime that starts games, the
+/// folders to keep files in, and on a phone the way to type text. The
+/// desktop and Android apps each pick their own.
 #[derive(Clone)]
 pub struct AppConfig {
     pub launcher: Arc<dyn Launcher>,
     pub paths: AppPaths,
+    /// Shown when the focused game starts taking text; `None` where a
+    /// keyboard is at hand.
+    pub text_entry: Option<TextEntry>,
 }
 
 /// A tile's identity for the life of the window, kept across restarts.
@@ -119,6 +128,9 @@ pub(crate) struct Tile {
     /// The app paused the game when it went to the background, and
     /// resumes it when it comes back.
     paused_by_app: bool,
+    /// The platform's text entry was shown for the game's current text
+    /// box.
+    text_asked: bool,
 }
 
 /// Which dialog covers the workspace, if any.
@@ -172,6 +184,7 @@ impl Wake {
 pub struct FastEmuView {
     launcher: Arc<dyn Launcher>,
     paths: AppPaths,
+    text_entry: Option<TextEntry>,
     store: Store,
     library: Library,
     settings: AppSettings,
@@ -252,6 +265,7 @@ impl FastEmuView {
         let mut view = Self {
             launcher: config.launcher,
             paths: config.paths,
+            text_entry: config.text_entry,
             store,
             library: library.value,
             settings: settings.value,
@@ -298,6 +312,35 @@ impl FastEmuView {
             tile.session.poll();
         }
         cx.notify();
+    }
+
+    /// Shows the platform's text entry when the focused game starts taking
+    /// text, once each time it does, and types the answer into the game.
+    fn ask_for_text(&mut self, cx: &mut Context<'_, Self>) {
+        let Some(entry) = self.text_entry.clone() else {
+            return;
+        };
+        let focused = self.focused;
+        for tile in &mut self.tiles {
+            if !(tile.session.typing_text() && tile.session.is_running()) {
+                tile.text_asked = false;
+                continue;
+            }
+            if tile.text_asked || Some(tile.id) != focused {
+                continue;
+            }
+            tile.text_asked = true;
+            let answer = entry(&tile.session.title);
+            let instance = Arc::clone(&tile.session.instance);
+            cx.spawn(async move |_, _| {
+                if let Ok(Some(text)) = answer.await
+                    && !text.is_empty()
+                {
+                    instance.send(InputEvent::Text(text));
+                }
+            })
+            .detach();
+        }
     }
 
     /// Stops every running game. The app calls this on quit; it is safe to
@@ -470,6 +513,7 @@ impl Focusable for FastEmuView {
 impl Render for FastEmuView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.poll_tiles();
+        self.ask_for_text(cx);
         self.animating = self.tiles.iter().any(|t| t.session.is_running());
         if self.animating {
             window.request_animation_frame();

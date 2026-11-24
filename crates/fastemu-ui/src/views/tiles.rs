@@ -146,6 +146,7 @@ impl FastEmuView {
             screen: Rc::default(),
             restarting: false,
             paused_by_app: false,
+            text_asked: false,
         });
         self.focus_tile(id, cx);
     }
