@@ -311,7 +311,8 @@ changes one of these calls `highlevel::wake_timer`.
   selected element is deleted, and in `IMPLICIT` lists the selection
   following the focus, so a soft key command sees the row the player is
   on. `rows` draws them, wrapped with `TEXT_WRAP_ON` and cut with an
-  ellipsis otherwise. A `List` wraps its focus round at the ends; select
+  ellipsis otherwise. A `List` wraps its focus round at the ends, and
+  left and right move it a screen of rows at a time; select
   fires `SELECT_COMMAND` (a static `Command("", SCREEN, 0)` that is
   never on the soft keys) or the command `setSelectCommand` chose.
 - **Text.** `text::editor::TextEditor` is the text, caret, maximum size

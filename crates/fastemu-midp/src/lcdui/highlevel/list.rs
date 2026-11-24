@@ -1,7 +1,8 @@
 //! `javax.microedition.lcdui.List`: a full screen of elements, the menu
 //! of games that do not draw their own.
 //!
-//! Up and down move the focus (wrapping round at the ends); select
+//! Up and down move the focus (wrapping round at the ends), left and
+//! right move it a screen at a time (stopping at the ends); select
 //! chooses the focused element in an `EXCLUSIVE` or `MULTIPLE` list, and
 //! in an `IMPLICIT` one fires the select command (`SELECT_COMMAND`
 //! unless the game set another), whose `commandAction` sees the focused
@@ -144,6 +145,38 @@ fn move_focus(ctx: &mut Ctx<'_>, obj: ObjRef, delta: i32) -> JResult<()> {
     changed(ctx, obj)
 }
 
+/// The row a page up (`dir` -1) or down (1) from `focus` lands on, for
+/// rows of `heights` in a view `view` pixels tall: as many rows as fit
+/// in the view, at least one, and no further than the ends.
+fn page_target(heights: &[i32], focus: usize, view: i32, dir: i32) -> usize {
+    let mut at = focus;
+    let mut used = 0;
+    while let Some(next) = at.checked_add_signed(dir as isize) {
+        let Some(&h) = heights.get(next) else {
+            break;
+        };
+        used += h;
+        if used > view && at != focus {
+            break;
+        }
+        at = next;
+    }
+    at
+}
+
+/// Moves the focus a page up (`dir` -1) or down (1).
+fn page(ctx: &mut Ctx<'_>, obj: ObjRef, dir: i32) -> JResult<()> {
+    let content = displayable::layout(ctx, obj)?.content;
+    let (_, heights, _) = measure(ctx, obj, row_width(content.width))?;
+    let model = model_of(ctx, obj)?;
+    if model.is_empty() {
+        return Ok(());
+    }
+    let at = page_target(&heights, model.focus, content.height, dir);
+    model.focus_on(at);
+    changed(ctx, obj)
+}
+
 /// What select does on the focused element.
 fn choose(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<()> {
     let l = list(ctx, obj)?;
@@ -215,6 +248,8 @@ impl ScreenHandler for ListHandler {
         match event.game_action {
             keys::UP => move_focus(ctx, obj, -1)?,
             keys::DOWN => move_focus(ctx, obj, 1)?,
+            keys::LEFT => page(ctx, obj, -1)?,
+            keys::RIGHT => page(ctx, obj, 1)?,
             keys::FIRE if event.phase == KeyPhase::Pressed => choose(ctx, obj)?,
             _ => return Ok(false),
         }
@@ -358,4 +393,25 @@ pub fn class() -> NativeClass {
             Ok(Value::Void)
         });
     choice::methods(class, access)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::page_target;
+
+    #[test]
+    fn a_page_moves_as_many_rows_as_fit() {
+        let rows = [20; 10];
+        assert_eq!(page_target(&rows, 0, 60, 1), 3);
+        assert_eq!(page_target(&rows, 3, 60, -1), 0);
+        assert_eq!(page_target(&rows, 8, 60, 1), 9, "it stops at the end");
+        assert_eq!(page_target(&rows, 1, 60, -1), 0, "and at the start");
+        assert_eq!(page_target(&rows, 9, 60, 1), 9);
+    }
+
+    #[test]
+    fn a_page_moves_at_least_one_row() {
+        assert_eq!(page_target(&[100, 100, 100], 0, 60, 1), 1);
+        assert_eq!(page_target(&[], 0, 60, 1), 0);
+    }
 }

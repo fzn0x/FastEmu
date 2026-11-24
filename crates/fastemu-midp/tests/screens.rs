@@ -92,6 +92,10 @@ fn screens_list_selects_and_fires_its_commands() {
     run.tap(Key::Up);
     run.tap(Key::Fire);
     run.wait_log("select 2 Gamma");
+    // Left pages up: every row fits, so to the first.
+    run.tap(Key::Left);
+    run.tap(Key::Fire);
+    run.wait_log("select 0 Alpha");
 }
 
 #[test]
