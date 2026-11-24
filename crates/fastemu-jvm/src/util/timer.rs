@@ -554,11 +554,20 @@ mod tests {
         let (paused_at, _) = tardiness(&vm);
         std::thread::sleep(Duration::from_millis(300));
         assert_eq!(tardiness(&vm).0, paused_at, "no runs while paused");
+        let resumed_at = Instant::now();
         vm.resume();
         std::thread::sleep(Duration::from_millis(25));
         let (resumed, worst) = tardiness(&vm);
-        // On the wall clock, 30 late runs would come at once.
-        assert!(resumed - paused_at <= 8, "{paused_at} then {resumed}");
+        let window = resumed_at.elapsed();
+        // On the wall clock, the 30 runs the pause missed would come at once,
+        // each some 300 ms late. Allow the runs the window holds at one per
+        // 10 ms, plus a few: a sleep can last far longer than asked on a
+        // busy machine (CI's macOS runners).
+        let allowed = i32::try_from(window.as_millis() / 10).unwrap_or(i32::MAX) + 4;
+        assert!(
+            resumed - paused_at <= allowed,
+            "{paused_at} then {resumed} in {window:?}"
+        );
         assert!(worst < 100, "a run seemed {worst} ms late");
         std::thread::sleep(Duration::from_millis(100));
         let (later, _) = tardiness(&vm);
