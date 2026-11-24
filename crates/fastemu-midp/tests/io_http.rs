@@ -183,8 +183,8 @@ fn every_network_open_fails_when_the_network_is_off() {
     let expected = format!(
         "http://127.0.0.1:1/ -> {off}
 https://example.com/ -> {missing}: https://example.com/
-socket://127.0.0.1:1 -> {missing}: socket://127.0.0.1:1
-socket://:0 -> {missing}: socket://:0
+socket://127.0.0.1:1 -> {off}
+socket://:0 -> {off}
 ssl://example.com:443 -> {missing}: ssl://example.com:443
 datagram://127.0.0.1:1 -> {missing}: datagram://127.0.0.1:1
 datagram://:0 -> {missing}: datagram://:0

@@ -28,6 +28,38 @@ pub(crate) fn split_scheme(name: &str) -> Result<(String, &str), String> {
     Ok((scheme.to_ascii_lowercase(), &name[colon + 1..]))
 }
 
+/// The `//host:port` part of a socket or datagram name. A server
+/// connection leaves the host out (`socket://:5000`) and may leave the
+/// port out too (`socket://:`), asking for any free port.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct HostPort {
+    /// The host name or address, without brackets; `None` for a server.
+    pub host: Option<String>,
+    /// The port; `None` when the name gives none.
+    pub port: Option<u16>,
+}
+
+/// Parses `rest`, the part after `scheme:`, as `//host:port`. Parameters
+/// after a `;` are ignored: MIDP defines none for these schemes.
+pub(crate) fn host_port(rest: &str) -> Result<HostPort, String> {
+    let Some(authority) = rest.strip_prefix("//") else {
+        return Err(format!("{rest:?} does not start with //"));
+    };
+    let authority = authority.split(';').next().unwrap_or_default();
+    if authority.contains('/') {
+        return Err(format!("unexpected path in {authority:?}"));
+    }
+    let (host, port) = split_host(authority)?;
+    let port = match port {
+        None | Some("") => None,
+        Some(p) => Some(parse_port(p)?),
+    };
+    Ok(HostPort {
+        host: (!host.is_empty()).then(|| host.to_owned()),
+        port,
+    })
+}
+
 /// The parts of an `http:` or `https:` name that `HttpConnection`'s
 /// getters return.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -220,5 +252,20 @@ mod tests {
         assert!(HttpUrl::parse("http", "///path").is_err());
         assert!(HttpUrl::parse("http", "//h:99999/").is_err());
         assert!(HttpUrl::parse("http", "//h:8a/").is_err());
+    }
+
+    #[test]
+    fn socket_names_tell_clients_from_servers() {
+        let client = host_port("//127.0.0.1:5000").unwrap();
+        assert_eq!(client.host.as_deref(), Some("127.0.0.1"));
+        assert_eq!(client.port, Some(5000));
+        let server = host_port("//:5000").unwrap();
+        assert_eq!((server.host, server.port), (None, Some(5000)));
+        let any = host_port("//:").unwrap();
+        assert_eq!((any.host, any.port), (None, None));
+        assert_eq!(host_port("//h:1;x=y").unwrap().port, Some(1));
+        assert_eq!(host_port("//[::1]:7").unwrap().host.as_deref(), Some("::1"));
+        assert!(host_port("h:1").is_err());
+        assert!(host_port("//h:1/x").is_err());
     }
 }

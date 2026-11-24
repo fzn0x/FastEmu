@@ -17,9 +17,9 @@ fastemu-gfx.workspace = true
 fastemu-jvm.workspace = true
 miniz_oxide = "0.9.1"
 parking_lot = "0.12"
-
-[dev-dependencies]
-crc32fast = "1.5.0"
+# The socket options SocketConnection exposes (linger, keep-alive, buffer
+# sizes) that std::net does not.
+socket2 = "0.6.5"
 
 [dev-dependencies]
 tempfile = "3"

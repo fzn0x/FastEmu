@@ -214,6 +214,28 @@ impl Link {
         Self { socket }
     }
 
+    /// The socket, for its addresses and options.
+    pub(crate) fn socket(&self) -> &TcpStream {
+        &self.socket
+    }
+
+    /// How many bytes a read would return at once, without waiting.
+    ///
+    /// Games poll `available()` in their main loop to read only what has
+    /// arrived, so this must be real. std::net has no `FIONREAD`, so the
+    /// socket peeks with blocking switched off for a moment. A read or
+    /// write that another thread starts meanwhile sees `WouldBlock`,
+    /// which every caller here treats as "try again".
+    pub(crate) fn available(&self) -> usize {
+        let mut probe = [0; 16 * 1024];
+        if self.socket.set_nonblocking(true).is_err() {
+            return 0;
+        }
+        let n = self.socket.peek(&mut probe).unwrap_or(0);
+        let _ = self.socket.set_nonblocking(false);
+        n
+    }
+
     /// One bounded read; `Ok(0)` at the end of the stream.
     pub(crate) fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
         (&self.socket).read(buf)
@@ -222,6 +244,11 @@ impl Link {
     /// One bounded write; returns how much it took.
     pub(crate) fn write(&self, buf: &[u8]) -> io::Result<usize> {
         (&self.socket).write(buf)
+    }
+
+    /// Pushes out what earlier writes left buffered.
+    pub(crate) fn flush(&self) -> io::Result<()> {
+        (&self.socket).flush()
     }
 
     /// Closes both directions, which also wakes a thread blocked in
