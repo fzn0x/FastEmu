@@ -324,6 +324,20 @@ fn find_signature(data: &[u8], from: usize, signature: u32) -> Option<usize> {
         .map(|p| from + p)
 }
 
+/// The first local header, central directory header or end record at or
+/// after `from`, found in one pass. Searching for each signature on its
+/// own would scan to the end of the file for every entry whose sizes sit
+/// in a data descriptor.
+fn find_next_record(data: &[u8], from: usize) -> Option<usize> {
+    data.get(from..)?
+        .windows(4)
+        .position(|w| {
+            let signature = u32::from_le_bytes([w[0], w[1], w[2], w[3]]);
+            matches!(signature, LOCAL_HEADER | CENTRAL_HEADER | END_OF_CENTRAL)
+        })
+        .map(|p| from + p)
+}
+
 /// Reads the local header at `at` and returns its entry and where the next
 /// record should start.
 fn read_local_entry(data: &[u8], at: usize) -> Option<(Entry, usize)> {
@@ -342,11 +356,7 @@ fn read_local_entry(data: &[u8], at: usize) -> Option<(Entry, usize)> {
     if flags & HAS_DESCRIPTOR != 0 && compressed == 0 {
         // The sizes follow the data. The data ends where the next record
         // starts, less the descriptor in front of it.
-        let following = [LOCAL_HEADER, CENTRAL_HEADER, END_OF_CENTRAL]
-            .into_iter()
-            .filter_map(|sig| find_signature(data, data_start, sig))
-            .min()
-            .unwrap_or(data.len());
+        let following = find_next_record(data, data_start).unwrap_or(data.len());
         let mut end = following;
         for len in [16, 12] {
             if let Some(start) = following.checked_sub(len)
@@ -559,6 +569,33 @@ mod tests {
                 b"after"
             );
         }
+    }
+
+    /// A JAR the Java tools wrote (sizes in data descriptors) that lost its
+    /// central directory is scanned in one pass, not one pass per entry.
+    #[test]
+    fn many_described_entries_scan_quickly() {
+        let names: Vec<String> = (0..4000).map(|i| format!("r/{i}.bin")).collect();
+        let data = [7u8; 256];
+        let entries: Vec<TestEntry<'_>> = names
+            .iter()
+            .map(|name| TestEntry {
+                name: name.as_bytes(),
+                data: &data,
+                deflate: false,
+                descriptor: true,
+            })
+            .collect();
+        let bytes = write(&entries, false);
+        let start = std::time::Instant::now();
+        let archive = ZipArchive::new(bytes).unwrap();
+        let took = start.elapsed();
+        assert_eq!(archive.entries().len(), 4000);
+        assert_eq!(
+            archive.read(archive.find(b"r/3999.bin").unwrap()).unwrap(),
+            data
+        );
+        assert!(took < std::time::Duration::from_secs(2), "took {took:?}");
     }
 
     #[test]
