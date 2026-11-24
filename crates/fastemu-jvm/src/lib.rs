@@ -30,6 +30,7 @@ mod thread;
 mod util;
 mod value;
 mod vm;
+mod wait;
 
 pub use class::{ArrayType, ClassId, PayloadFactory};
 pub use ctx::{ArrayElem, Ctx, FieldId, GlobalRef, JResult, StaticFieldId, Throw, Wake};

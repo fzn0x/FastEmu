@@ -156,17 +156,26 @@ them.
 ## Threads and the VM lock
 
 Every Java thread is an OS thread. A VM has one mutex over its state (the
-VM lock) and one condition variable.
+VM lock) and one wait queue, which works as a condition variable
+(`src/wait`).
 
 - A thread runs Java only while it holds the lock, so at most one thread
   of a VM runs at a time and natives never see another thread change the
   heap under them.
 - The interpreter gives other threads a turn every 4096 backward
   branches or calls (a safepoint) with a fair handoff of the lock.
-- Blocking operations wait on the condition variable, which releases the
-  lock: `Thread.sleep`, `Object.wait`, `Thread.join`, a contended
+- Blocking operations wait on the wait queue, which releases the lock:
+  `Thread.sleep`, `Object.wait`, `Thread.join`, a contended
   `monitorenter`, class initialization another thread is running, and
   natives that call `Ctx::wait_until`, `Ctx::sleep`, `Ctx::wait_posted`.
+- Deadlines are precise to about a millisecond on every platform, so a
+  game loop that sleeps 10 ms a frame gets its frame rate. Each waiting
+  thread waits on a signal of its own: on Windows an event and a
+  high-resolution waitable timer, since condition variables there time
+  out on the 15.6 ms system tick (a 10 ms sleep took 16 ms); elsewhere a
+  mutex and condition variable, whose timeouts are already precise.
+  Nothing spins, and a notify, an interrupt or a stop still wakes a
+  waiter at once.
 - `Ctx::without_lock(f)` runs `f` with the lock released, for slow work
   that does not touch the VM: file and network I/O, image decoding.
 - Wakeups are not precise: every change (a monitor released, a notify, a
@@ -602,4 +611,7 @@ What natives and games can rely on:
 - `tests/native_api.rs` covers this page's API: native classes extended
   by bytecode, threads, posted tasks, global roots, waiting, pause,
   resume and stop, diagnostics.
+- `tests/timing.rs` measures how late sleeps and timed waits wake (run
+  it with `--nocapture`) and how quickly an interrupt or a stop ends
+  them.
 - `tests/bench.rs` is the benchmark.

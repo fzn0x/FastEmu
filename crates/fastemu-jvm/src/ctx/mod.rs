@@ -80,20 +80,14 @@ impl<'vm> Ctx<'vm> {
         self.park_stack();
     }
 
-    /// Releases the VM lock until the condition variable wakes this thread
-    /// or `deadline` passes. Returns whether the deadline passed.
+    /// Releases the VM lock until the wait queue wakes this thread or
+    /// `deadline` passes. Returns whether the deadline passed.
     pub(crate) fn wait_raw(&mut self, deadline: Option<Instant>) -> JResult<bool> {
         if self.shared.is_stopping() {
             return Err(Throw::Stop);
         }
         self.park_stack();
-        let timed_out = match deadline {
-            Some(d) => self.shared.cond.wait_until(&mut self.state, d).timed_out(),
-            None => {
-                self.shared.cond.wait(&mut self.state);
-                false
-            }
-        };
+        let timed_out = self.shared.cond.wait(&mut self.state, deadline);
         self.unpark_stack();
         if self.shared.is_stopping() {
             return Err(Throw::Stop);

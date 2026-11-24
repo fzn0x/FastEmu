@@ -9,7 +9,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use fastemu_core::{LogLevel, LogLine};
-use parking_lot::{Condvar, Mutex};
+use parking_lot::Mutex;
 
 use crate::class::{ClassId, ClassTable};
 use crate::ctx::{Ctx, JResult};
@@ -20,6 +20,7 @@ use crate::native::NativeClass;
 use crate::source::ClassSource;
 use crate::thread::{self, ThreadEntry, ThreadId};
 use crate::value::ObjRef;
+use crate::wait::WaitQueue;
 
 /// Receives what the virtual machine prints: `System.out` and
 /// `System.err` line by line, uncaught exceptions, and warnings such as
@@ -172,7 +173,8 @@ pub(crate) struct VmState {
 /// The parts of a virtual machine every thread shares.
 pub(crate) struct VmShared {
     pub(crate) state: Mutex<VmState>,
-    pub(crate) cond: Condvar,
+    /// Where blocked threads wait; every change notifies it.
+    pub(crate) cond: WaitQueue,
     pub(crate) stopping: AtomicBool,
     pub(crate) paused: AtomicBool,
     pub(crate) config: VmConfig,
@@ -200,9 +202,9 @@ impl VmShared {
             .expect("a running thread keeps its virtual machine alive")
     }
 
-    /// Wakes every thread waiting on the VM condition variable. Taking
-    /// the lock first makes sure a thread that checked its condition is
-    /// already waiting, so the wakeup is not lost.
+    /// Wakes every thread waiting on the VM's wait queue. Taking the lock
+    /// first makes sure a thread that checked its condition is already in
+    /// the queue, so the wakeup is not lost.
     pub(crate) fn wake_all(&self) {
         drop(self.state.lock());
         self.cond.notify_all();
@@ -330,7 +332,7 @@ impl Vm {
         };
         let shared = Arc::new_cyclic(|this| VmShared {
             state: Mutex::new(state),
-            cond: Condvar::new(),
+            cond: WaitQueue::default(),
             stopping: AtomicBool::new(false),
             paused: AtomicBool::new(false),
             config,
@@ -442,13 +444,8 @@ impl Vm {
         let deadline = timeout.map(|t| Instant::now() + t);
         let mut state = self.shared.state.lock();
         while state.live_threads > 0 {
-            match deadline {
-                Some(d) => {
-                    if self.shared.cond.wait_until(&mut state, d).timed_out() {
-                        return state.live_threads == 0;
-                    }
-                }
-                None => self.shared.cond.wait(&mut state),
+            if self.shared.cond.wait(&mut state, deadline) {
+                return state.live_threads == 0;
             }
         }
         true

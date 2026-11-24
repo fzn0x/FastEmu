@@ -1,8 +1,8 @@
 //! Java monitors: `synchronized`, `wait`, `notify` and `notifyAll`.
 //!
 //! A monitor exists only while some thread owns it or waits on it. Every
-//! blocked thread waits on the VM's one condition variable, which releases
-//! the VM lock, and checks its own condition again when woken.
+//! blocked thread waits on the VM's one wait queue, which releases the VM
+//! lock, and checks its own condition again when woken.
 
 use std::time::Instant;
 
