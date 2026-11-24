@@ -19,6 +19,7 @@ mod gc;
 mod heap;
 mod init;
 mod interp;
+mod io;
 mod lang;
 mod monitor;
 mod native;
@@ -35,3 +36,10 @@ pub use source::{ClassSource, DirSource, MemorySource};
 pub use thread::ThreadId;
 pub use value::{ObjRef, Value};
 pub use vm::{Diagnostic, DiagnosticSink, LogSink, Task, Vm, VmConfig, WeakVm};
+
+/// Every class of the CLDC 1.1 library: `java.lang` and `java.io`.
+fn library() -> Vec<NativeClass> {
+    let mut all = lang::classes();
+    all.extend(io::classes());
+    all
+}

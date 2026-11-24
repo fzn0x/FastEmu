@@ -1,5 +1,5 @@
-//! The CLDC 1.1 `java.lang` classes (and the few `java.io` classes they
-//! need), implemented in Rust as [`NativeClass`]es.
+//! The CLDC 1.1 `java.lang` classes, implemented in Rust as
+//! [`NativeClass`]es, and the helpers the other library modules share.
 //!
 //! Where CLDC and Java SE differ in small ways, these classes follow what
 //! `javac --release 8` output expects, so the same programs run here and
@@ -9,7 +9,6 @@
 pub(crate) mod class;
 mod dtoa;
 pub(crate) mod float_fmt;
-pub(crate) mod io;
 pub(crate) mod math;
 pub(crate) mod number;
 pub(crate) mod object;
@@ -24,8 +23,8 @@ use crate::ctx::{Ctx, JResult};
 use crate::native::NativeClass;
 use crate::value::{ObjRef, Value};
 
-/// Every library class.
-pub(crate) fn library() -> Vec<NativeClass> {
+/// Every `java.lang` class.
+pub(crate) fn classes() -> Vec<NativeClass> {
     let mut all = Vec::new();
     all.extend(object::classes());
     all.extend(class::classes());
@@ -34,7 +33,6 @@ pub(crate) fn library() -> Vec<NativeClass> {
     all.extend(number::classes());
     all.extend(math::classes());
     all.extend(system::classes());
-    all.extend(io::classes());
     all.extend(thread::classes());
     all.extend(throwable::classes());
     all.extend(weak::classes());

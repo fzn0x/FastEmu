@@ -174,7 +174,7 @@ fn get_resource_as_stream(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let source = Arc::clone(ctx.state.classes.source());
     let bytes = ctx.without_lock(|| source.resource(&path));
     match bytes {
-        Some(bytes) => Ok(super::io::new_byte_array_stream(ctx, &bytes)?.into()),
+        Some(bytes) => Ok(crate::io::bytes::new_byte_array_stream(ctx, &bytes)?.into()),
         None => Ok(Value::NULL),
     }
 }

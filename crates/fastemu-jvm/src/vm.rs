@@ -267,7 +267,7 @@ impl Vm {
     /// `Class`, `Thread`, `Throwable`) with one that cannot link.
     pub fn new(config: VmConfig, source: Arc<dyn ClassSource>, natives: Vec<NativeClass>) -> Vm {
         static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-        let mut library: HashMap<String, NativeClass> = lang::library()
+        let mut library: HashMap<String, NativeClass> = crate::library()
             .into_iter()
             .map(|c| (c.name.clone(), c))
             .collect();
