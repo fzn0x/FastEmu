@@ -101,8 +101,10 @@ struct Fields {
 }
 
 impl Fields {
+    /// Wraps round as Java's `long` does for dates at the ends of its
+    /// range, which a game may set.
     fn of(millis: i64, offset: i64) -> Self {
-        let local = millis + offset;
+        let local = millis.wrapping_add(offset);
         let (year, month, day) = civil_from_days(local.div_euclid(DAY_MS));
         let in_day = local.rem_euclid(DAY_MS);
         Self {
@@ -118,11 +120,10 @@ impl Fields {
     fn millis(self, offset: i64) -> i64 {
         let day = self.day.clamp(1, days_in_month(self.year, self.month));
         let days = days_from_civil(self.year, self.month, day);
-        days * DAY_MS
-            + i64::from(self.hour) * 3_600_000
-            + i64::from(self.minute) * 60_000
-            + self.rest
-            - offset
+        let in_day = i64::from(self.hour) * 3_600_000 + i64::from(self.minute) * 60_000 + self.rest;
+        days.wrapping_mul(DAY_MS)
+            .wrapping_add(in_day)
+            .wrapping_sub(offset)
     }
 
     fn get(self, part: Part) -> i64 {
@@ -181,9 +182,12 @@ impl DateState {
     /// `millis` with the parts the mode does not show reset: midnight for
     /// `DATE`, 1970-01-01 for `TIME`.
     fn normalize(&self, millis: i64) -> i64 {
-        let local = millis + self.offset;
+        let local = millis.wrapping_add(self.offset);
         match self.mode {
-            DATE => local.div_euclid(DAY_MS) * DAY_MS - self.offset,
+            DATE => local
+                .div_euclid(DAY_MS)
+                .wrapping_mul(DAY_MS)
+                .wrapping_sub(self.offset),
             TIME => local.rem_euclid(DAY_MS) - self.offset,
             _ => millis,
         }
@@ -539,6 +543,25 @@ mod tests {
         let (text, focus) = s.text();
         assert_eq!(text, "--/--/---- --:--");
         assert_eq!(focus, 0..2);
+    }
+
+    #[test]
+    fn the_farthest_dates_do_not_overflow() {
+        for millis in [i64::MAX, i64::MIN] {
+            for mode in [DATE, TIME, DATE_TIME] {
+                let mut s = DateState {
+                    mode,
+                    offset: 3_600_000,
+                    ..DateState::default()
+                };
+                s.set(Some(millis));
+                let _ = s.text();
+                for d in [9, 9, 1, 2, 9, 9, 9, 9, 2, 3, 5, 9] {
+                    s.digit(d, millis);
+                }
+                let _ = s.text();
+            }
+        }
     }
 
     #[test]
