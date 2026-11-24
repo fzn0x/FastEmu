@@ -79,4 +79,21 @@ pub(crate) mod testing {
     pub fn graphics(target: &Surface) -> Graphics {
         Graphics::new(target, font()).expect("a drawable surface")
     }
+
+    /// Each game runs on its own threads, so its surfaces, state and fonts
+    /// must move between threads, and font libraries are shared.
+    #[test]
+    fn public_types_cross_threads() {
+        fn send_sync<T: Send + Sync>() {}
+        send_sync::<Surface>();
+        send_sync::<Graphics>();
+        send_sync::<Font>();
+        send_sync::<FontLibrary>();
+        send_sync::<crate::GfxError>();
+        let font = font();
+        let width = std::thread::spawn(move || font.str_width("threads"))
+            .join()
+            .expect("the thread finishes");
+        assert_eq!(width, library().default_font().str_width("threads"));
+    }
 }
