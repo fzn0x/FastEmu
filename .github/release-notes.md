@@ -1,6 +1,6 @@
 ### Get it
 
-The release workflow replaces `{version}`, `{tag}` and `{repo}`.
+<!-- The release workflow replaces {version}, {tag} and {repo}. -->
 
 | System | Download |
 | --- | --- |
