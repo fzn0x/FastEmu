@@ -8,7 +8,7 @@
 //! it. Many instances run side by side, each on its own threads.
 //!
 //! Nothing in this crate depends on how the runtime works inside, so the
-//! apps build and test against the [`mock`] launcher (feature `mock`) as
+//! apps build and test against the `mock` module's launcher (feature `mock`) as
 //! well as the real one.
 
 pub mod device;
