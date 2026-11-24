@@ -190,6 +190,11 @@ fn open(source: &Source, group: Option<&Group>, probe: Option<&Group>) -> Opened
                     let duration = player.duration().unwrap_or(UNKNOWN_LENGTH_US);
                     Opened::silent(duration, Some(*format), content_type)
                 }
+                // The group closed: the instance is ending, and silence is
+                // all it needs.
+                Err(fastemu_audio::AudioError::Closed) => {
+                    Opened::silent(UNKNOWN_LENGTH_US, Some(*format), content_type)
+                }
                 Err(error) => Opened {
                     silenced: Some(format!("{} that does not decode ({error})", format.name())),
                     ..Opened::silent(UNKNOWN_LENGTH_US, Some(*format), content_type)
