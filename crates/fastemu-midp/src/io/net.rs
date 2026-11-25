@@ -459,29 +459,43 @@ pub(crate) fn resolve(ctx: &mut Ctx<'_>, host: &str, port: u16) -> JResult<Socke
     }
 }
 
+/// Tries each of `addrs` in turn with `attempt` until one connects. The
+/// addresses share the time up to `deadline`: each gets what is left,
+/// and none is tried once it has passed, so a helper the game stopped
+/// waiting for ends by the game's deadline, not 30 s for each address.
+fn connect_each<S>(
+    addrs: impl IntoIterator<Item = SocketAddr>,
+    deadline: Instant,
+    mut attempt: impl FnMut(&SocketAddr, Duration) -> io::Result<S>,
+) -> Result<S, ConnectError> {
+    let mut last = None;
+    for addr in addrs {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            last = Some(io::ErrorKind::TimedOut.into());
+            break;
+        }
+        match attempt(&addr, left) {
+            Ok(s) => return Ok(s),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.map_or(ConnectError::Unknown, ConnectError::Io))
+}
+
 /// Connects to `host:port`, trying each of its addresses, and sets the
-/// slice timeouts on the new socket.
+/// slice timeouts on the new socket. The lookup, the wait for a helper's
+/// place and every address share one [`CONNECT_TIMEOUT`].
 pub(crate) fn connect(ctx: &mut Ctx<'_>, host: &str, port: u16) -> JResult<TcpStream> {
     let name = host.to_owned();
-    let result = off_thread(
-        ctx,
-        Instant::now() + CONNECT_TIMEOUT,
-        "connect",
-        move || {
-            let addrs: Vec<SocketAddr> = match (name.as_str(), port).to_socket_addrs() {
-                Ok(a) => a.collect(),
-                Err(_) => return Err(ConnectError::Unknown),
-            };
-            let mut last = None;
-            for addr in addrs {
-                match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
-                    Ok(s) => return Ok(s),
-                    Err(e) => last = Some(e),
-                }
-            }
-            Err(last.map_or(ConnectError::Unknown, ConnectError::Io))
-        },
-    )?;
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+    let result = off_thread(ctx, deadline, "connect", move || {
+        let addrs: Vec<SocketAddr> = match (name.as_str(), port).to_socket_addrs() {
+            Ok(a) => a.collect(),
+            Err(_) => return Err(ConnectError::Unknown),
+        };
+        connect_each(addrs, deadline, TcpStream::connect_timeout)
+    })?;
     let stream = match result {
         Ok(s) => s,
         Err(ConnectError::Unknown) => {
