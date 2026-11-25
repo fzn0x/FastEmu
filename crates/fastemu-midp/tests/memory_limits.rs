@@ -30,7 +30,10 @@ MIDlet-1: BigImage, , m.BigImage\r\n\
 MIDlet-2: ImageFile, , m.ImageFile\r\n\
 MIDlet-3: Streams, , m.Streams\r\n\
 MIDlet-4: Tiles, , m.Tiles\r\n\
-MIDlet-5: Sprites, , m.Sprites\r\n";
+MIDlet-5: Sprites, , m.Sprites\r\n\
+MIDlet-6: Canvases, , m.Canvases\r\n\
+MIDlet-7: GameBuffer, , m.GameBuffer\r\n\
+MIDlet-8: Customs, , m.Customs\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 mod midlet {
@@ -39,7 +42,14 @@ mod midlet {
     pub const STREAMS: usize = 2;
     pub const TILES: usize = 3;
     pub const SPRITES: usize = 4;
+    pub const CANVASES: usize = 5;
+    pub const GAME_BUFFER: usize = 6;
+    pub const CUSTOMS: usize = 7;
 }
+
+/// What the back buffer of a shown canvas takes of the heap on the default
+/// phone, 240 by 320 pixels of 4 bytes.
+const SCREEN_BYTES: i64 = 240 * 320 * 4;
 
 /// The MIDlets, compiled once against the shared stubs and this test's
 /// own, or `None` (after saying why) when there is no JDK.
@@ -322,4 +332,67 @@ fn many_sprites_that_keep_one_big_frame_sequence_end_in_out_of_memory() {
     let count = numbers(&line, "sprites ")[0];
     assert!((1..10).contains(&count), "{log}");
     run.wait_log("done");
+}
+
+#[test]
+fn a_shown_canvas_counts_its_back_buffer_and_canvases_kept_end_in_out_of_memory() {
+    let Some(jar) = suite("canvases", &[]) else {
+        return;
+    };
+    let mut run = launch(&jar, midlet::CANVASES, HEAP);
+    let first = run.wait_log("first canvas counts ");
+    let log = run.dump();
+    let counted = numbers(&first, "first canvas counts ")[0];
+    assert!(counted >= SCREEN_BYTES, "{first}; {log}");
+    // 307200 bytes each: the heap of 1 MiB holds three and a bit.
+    let shown = run.wait_log("canvases ");
+    assert!(shown.ends_with("then OutOfMemoryError"), "{log}");
+    let count = numbers(&shown, "canvases ")[0];
+    assert!((1..10).contains(&count), "{log}");
+    run.wait_log("done");
+}
+
+#[test]
+fn a_game_canvas_buffer_the_heap_cannot_hold_is_refused_before_it_is_made() {
+    let Some(jar) = suite("game-buffer", &[]) else {
+        return;
+    };
+    // The buffer is 307200 bytes.
+    let mut run = launch(&jar, midlet::GAME_BUFFER, 250 * 1024);
+    run.wait_log("done");
+    let log = run.dump();
+    assert!(run.has("game canvas OutOfMemoryError"), "{log}");
+    let changed = run.wait_log("game canvas free changed ");
+    let used = numbers(&changed, "game canvas free changed ")[0];
+    assert!((0..8192).contains(&used), "{log}");
+}
+
+#[test]
+fn custom_items_count_their_surfaces_and_screens_not_shown_give_their_buffers_back() {
+    let Some(jar) = suite("customs", &[]) else {
+        return;
+    };
+    let mut run = launch(&jar, midlet::CUSTOMS, HEAP);
+    run.wait_log("done");
+    let log = run.dump();
+    // The item of 240 by 8192 pixels, 7.8 MB, is not made.
+    assert!(run.has("custom big painted false"), "{log}");
+    assert!(
+        run.has("a CustomItem is too large for the heap; it is left blank"),
+        "{log}"
+    );
+    // The form's own buffer and the surface of the small item, at least 80
+    // by 100 pixels, are counted.
+    let form = run.wait_log("custom form counts ");
+    let counted = numbers(&form, "custom form counts ")[0];
+    assert!(counted >= SCREEN_BYTES + 80 * 100 * 4, "{log}");
+    // Ten forms are shown in turn and kept: only the one on the screen
+    // holds a buffer, so the heap of 1 MiB, which holds three, has room.
+    assert!(run.has("custom forms 10 shown"), "{log}");
+    let forms = run.wait_log("custom forms count ");
+    let counted = numbers(&forms, "custom forms count ")[0];
+    assert!(
+        counted < 2 * SCREEN_BYTES && counted >= SCREEN_BYTES,
+        "{log}"
+    );
 }

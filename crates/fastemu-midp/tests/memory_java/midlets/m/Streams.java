@@ -22,6 +22,11 @@ public class Streams extends MIDlet {
 
         public int read(byte[] b, int off, int len) {
             calls++;
+            if (bytes >= 64L * 1024 * 1024) {
+                // The stream ends in the end, so a runtime without a limit
+                // reads 64 MiB and not all the memory there is.
+                return -1;
+            }
             bytes += len;
             return len;
         }
@@ -37,7 +42,9 @@ public class Streams extends MIDlet {
 
         public int read(byte[] b, int off, int len) {
             calls++;
-            return 0;
+            // Ends after 5000 reads, so a runtime without a limit does not
+            // spin for ever.
+            return calls > 5000 ? -1 : 0;
         }
     }
 
