@@ -95,6 +95,10 @@ impl Source for PcmSource {
             .unwrap_or(usize::MAX)
             .min(self.pcm.frames());
     }
+
+    fn memory_bytes(&self) -> usize {
+        self.pcm.samples.len() * size_of::<i16>()
+    }
 }
 
 #[cfg(test)]
@@ -107,6 +111,12 @@ mod tests {
             channels,
             samples,
         }))
+    }
+
+    #[test]
+    fn the_samples_are_the_memory() {
+        assert_eq!(source(1, vec![0; 300]).memory_bytes(), 600);
+        assert_eq!(source(2, Vec::new()).memory_bytes(), 0);
     }
 
     #[test]

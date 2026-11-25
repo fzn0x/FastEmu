@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::midi::Synth;
-use crate::midi::smf::Sequence;
+use crate::midi::smf::{Event, Sequence};
 use crate::source::Source;
 
 /// Frames rendered per synthesizer call.
@@ -112,6 +112,11 @@ impl Source for MidiSource {
         self.synth.message(status, data1, data2);
         true
     }
+
+    /// The parsed events and the frame each falls on.
+    fn memory_bytes(&self) -> usize {
+        self.sequence.events.len() * size_of::<Event>() + self.frames.len() * size_of::<u64>()
+    }
 }
 
 #[cfg(test)]
@@ -162,6 +167,15 @@ pub(crate) mod tests {
             0x60, 0xFF, 0x2F, 0x00,
         ];
         Arc::new(smf::parse(&smf(0, 96, &[&track])).unwrap())
+    }
+
+    #[test]
+    fn the_events_and_their_frames_are_the_memory() {
+        let sequence = file();
+        // Six messages, each a 16-byte event and an 8-byte frame.
+        assert_eq!(sequence.events.len(), 6);
+        let source = MidiSource::new(sequence, Box::new(Recorder::default()), 1000);
+        assert_eq!(source.memory_bytes(), 6 * 24);
     }
 
     #[test]

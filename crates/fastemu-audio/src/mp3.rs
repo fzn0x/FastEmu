@@ -207,6 +207,12 @@ impl Source for Mp3Source {
         self.error.take()
     }
 
+    /// The file, which the source keeps to decode from, and the frame it
+    /// decoded last.
+    fn memory_bytes(&self) -> usize {
+        self.data.len() + self.pending.capacity() * size_of::<f32>()
+    }
+
     fn seek(&mut self, frame: u64) {
         let frame = frame.min(self.total);
         self.pending.clear();
@@ -279,6 +285,12 @@ mod tests {
         // ffmpeg's sine source has an amplitude of 1/8.
         let peak = middle.iter().fold(0.0f32, |m, v| m.max(v.abs()));
         assert!((0.1..0.15).contains(&peak), "{peak}");
+    }
+
+    #[test]
+    fn the_file_is_the_memory_once_the_tag_is_stripped() {
+        let source = Mp3Source::new(SINE).unwrap();
+        assert_eq!(source.memory_bytes(), strip_id3(SINE).len());
     }
 
     #[test]

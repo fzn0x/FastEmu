@@ -27,6 +27,15 @@ pub(crate) trait Source: Send {
         None
     }
 
+    /// The bytes of host memory the source holds for its sound: decoded
+    /// samples, the file an MP3 is decoded from as it plays, parsed
+    /// events. A group adds them up against its budget when a player is
+    /// made (see [`crate::GroupLimits`]). Memory that does not grow with
+    /// the sound, such as a synthesizer's buffers, is left out.
+    fn memory_bytes(&self) -> usize {
+        0
+    }
+
     /// Sends a MIDI channel message to the synthesizer behind the source,
     /// as MMAPI's `MIDIControl.shortMidiEvent` does. Returns whether the
     /// source has a synthesizer to take it.

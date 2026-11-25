@@ -158,6 +158,10 @@ impl Source for ToneSource {
         self.index = self.starts[1..].partition_point(|&end| end <= self.pos);
         self.phase = 0.0;
     }
+
+    fn memory_bytes(&self) -> usize {
+        self.events.len() * size_of::<ToneEvent>() + self.starts.len() * size_of::<u64>()
+    }
 }
 
 #[cfg(test)]
@@ -181,6 +185,15 @@ mod tests {
         assert!((note_frequency(69) - 440.0).abs() < 1e-3);
         assert!((note_frequency(60) - 261.6256).abs() < 1e-2);
         assert!((note_frequency(81) - 880.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn the_events_and_their_starts_are_the_memory() {
+        let notes: Arc<[ToneEvent]> = vec![ToneEvent::note(69, 1000, 100); 10].into();
+        let source = ToneSource::new(notes, 8000);
+        // Ten events and eleven starts of 8 bytes.
+        assert_eq!(source.memory_bytes(), 10 * size_of::<ToneEvent>() + 11 * 8);
+        assert_eq!(ToneSource::new(Arc::from([]), 8000).memory_bytes(), 8);
     }
 
     #[test]
