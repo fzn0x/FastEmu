@@ -174,6 +174,7 @@ instead, as they throw no `MediaException`.
 | One sound in any format: decoded samples, the file of an MP3, the events of a MIDI file or a list of tones | 16 MiB | `MediaException`; a Nokia `Sound` stays uninitialized, and a Samsung or Siemens sound stays silent, with a warning | [audio.md][audio-players] |
 | Sound of a game, every API together | 32 MiB and 128 players | `OutOfMemoryError`, after one collection; `ToneControl.setSequence` throws it without one | [audio.md][audio-players] |
 | Players started at once | 32 for a game, 128 for all games | `MediaException` from `Player.start`; a Nokia, Samsung or Siemens sound stays silent | [audio.md][audio-players] |
+| Time the audio thread spends rendering sound, in the desktop and Android apps | half of real time on average for all games together: an equal part for each game that plays sound; a game saves what it leaves unused, up to 20 ms of render time, and what it would save past that goes to the games that saved less; each game's oldest sound plays whatever it costs, and a game spends what it saved past its part, about a quarter of its part in each slice of 128 frames | the sounds the game started last fade out, or fall silent at once if nothing of them was heard, and wait in place, still started, with their media time held, until its sound fits again; no exception or event tells the game | [audio.md][audio-budget] |
 | `playTone` tones playing | 16 | the oldest stops | [audio.md][audio-players] |
 | Loop events of a player | one every 20 ms of sound | the loops between are not reported | [audio.md][audio-players] |
 | Events of a MIDI file | 65536 | `MediaException`; a Nokia `Sound` stays uninitialized, and a Samsung or Siemens sound stays silent, with a warning | [audio.md][audio-formats] |
@@ -187,12 +188,13 @@ instead, as they throw no `MediaException`.
 | Sound read from a stream | counted on the heap as it is read, so streams read at once share the heap's room; never more than the heap or 32 MiB | `OutOfMemoryError` | [media.md][media-players] |
 | Sound events waiting | 1024 for a game, 4096 in the engine for all games; twice that for the events that end a run | the repeats are dropped first; `CLOSED` never is | [media.md][media-events] |
 | An MP3 seek the reader cannot do | 8 s of sound caught up in each render call | silence until the place is reached | [audio.md][audio-gaps] |
-| Hold of the audio thread on the shared mixer | one slice of 128 frames, with the lock free between slices | another game's call waits for the slice under way, or about a millisecond while the slices are short | [audio.md][audio-locking] |
+| Hold of the audio thread on the shared mixer | one slice of 128 frames, with the lock handed to a waiting call after each slice | another game's call waits for the slice under way | [audio.md][audio-locking] |
 
 [audio-players]: docs/architecture/audio.md#players
 [audio-formats]: docs/architecture/audio.md#formats
 [audio-gaps]: docs/architecture/audio.md#gaps
 [audio-locking]: docs/architecture/audio.md#threads-and-locking
+[audio-budget]: docs/architecture/audio.md#render-budget
 [media-players]: docs/architecture/media.md#players
 [media-events]: docs/architecture/media.md#listeners-and-the-event-thread
 
@@ -350,12 +352,32 @@ section says is in scope.
 
 **Sound**
 
-- Nothing limits the time the sound engine takes to render, and a seek
-  in a MIDI file replays up to 65536 events with the mixer held. One
-  game that starts 32 MIDI players, or that seeks in a long MIDI file in
-  a loop, can make the sound of every game stutter. It cannot stop their
-  sound. This is one way a runaway game reaches the others, beside the
-  processor time above.
+- A seek in a MIDI file replays up to 65536 events with the mixer held,
+  about a millisecond each time. A game that seeks in a long MIDI file
+  in a loop can make the sound of every game stutter. It cannot stop
+  their sound. This is one way a runaway game reaches the others,
+  beside the processor time above.
+- A game can pass the render budget in the table in one slice. It can
+  take up to two and a half times its part after slices in which it took
+  less. On top of that comes its oldest sound, which only the other
+  limits of sound hold, such as 512 MIDI messages and 8 s of MP3 caught
+  up in each render call, up to two more sounds whose cost it learns
+  only once they rendered, and the fade-outs of the audible sounds it
+  holds back. Measured on a desktop that other work shared, four games
+  that each started 32 MIDI players at once, and four or eight games
+  whose silent MIDI players all started their notes at once, or that
+  closed those players every 200 ms and started new ones, made at most
+  2 buffers of a run late, by 1.3 ms in all. One game that started 32
+  MIDI players beside a game playing a real game's MIDI file made 1
+  buffer late, by 5.4 ms, in one of two runs, most likely the busy
+  machine pausing the thread. When the players are heard before their
+  notes, the fades of the ones held back render too: four such games
+  made 2 of 375 buffers late in each run, by 1.2 to 1.4 ms in all. The
+  budget reads the system's clock, so time the system takes from the
+  audio thread is charged to the game whose sound was rendering: on a
+  busy computer a normal game's newer sounds can pause. A computer too
+  slow to render even the oldest sound of every game in time still
+  stutters.
 
 **Class files and suites**
 
