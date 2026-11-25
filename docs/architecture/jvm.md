@@ -246,11 +246,11 @@ to find the timers the game dropped. It refuses only if no thread can
 end. It never waits for a thread that runs the game's code, which could
 wait for a monitor the caller holds: one that runs a task, or reports
 what a task threw. During a pause it waits until the resume. No
-collection runs when every timer thread has a task. So a game that makes a `Timer` for each
-screen and drops it never runs out of threads. A game that keeps its
-timers, or makes them faster than their tasks run, gets the error once
-the machine has 64 threads: after about 62 timers, beside the event
-thread and a lifecycle thread.
+collection runs when every timer thread has a task. So a game that makes
+a `Timer` for each screen and drops it never runs out of threads. A game
+that keeps its timers, or makes them faster than their tasks run, gets
+the error once the machine has 64 threads: after about 62 timers, beside
+the event thread and a lifecycle thread.
 
 Monitors have an owner, a recursion count, threads waiting to enter and
 a wait set. `wait`, `notify` and `notifyAll` without owning the monitor
