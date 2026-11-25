@@ -9,7 +9,7 @@ use fastemu_core::{
     DeviceProfile, Instance, InstanceId, InstanceSettings, LaunchError, LaunchRequest, Launcher,
     LogLevel, LogLine, SuiteInfo,
 };
-use fastemu_jvm::{Vm, VmConfig};
+use fastemu_jvm::{Vm, VmConfig, VmLimits};
 
 use crate::env::InstanceEnv;
 use crate::host::HostLink;
@@ -55,7 +55,10 @@ impl MidpLauncher {
             .cloned()
             .ok_or(LaunchError::NoSuchMidlet(request.midlet))?;
         let id = InstanceId::next();
-        let host = HostLink::new(id, request.notify.clone());
+        // One set of limits for the machine, its log and its JAR, so a line
+        // is cut at the same size wherever it comes from.
+        let limits = VmLimits::default();
+        let host = HostLink::with_limits(id, request.notify.clone(), limits);
         for note in &suite.notes {
             host.log(LogLine {
                 level: LogLevel::Warn,
@@ -77,6 +80,7 @@ impl MidpLauncher {
             log: host.log_sink(),
             diagnostics: None,
             allow_exit: false,
+            limits,
             ..VmConfig::default()
         };
         let vm = Vm::new(config, source.clone(), crate::classes(&request.profile));

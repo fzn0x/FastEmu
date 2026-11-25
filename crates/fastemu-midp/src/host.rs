@@ -13,11 +13,16 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 
 use fastemu_core::{Frame, InputEvent, InstanceId, InstanceStatus, LogLevel, LogLine, Notify};
+use fastemu_jvm::{VmLimits, cut_log_text};
 use parking_lot::Mutex;
 
 /// The most log lines kept between two [`HostLink::drain_log`] calls; the
 /// oldest go first, so a game that prints in a loop cannot exhaust memory.
 const MAX_LOG_LINES: usize = 10_000;
+
+/// The longest message a crash carries to the app, in bytes. The text is
+/// the game's own (an exception's message), and the app shows it whole.
+const MAX_CRASH_MESSAGE_BYTES: usize = 1024;
 
 /// What the virtual machine prints when a panic ends one of its threads.
 const INTERNAL_ERROR: &str = "internal error in the virtual machine";
@@ -52,6 +57,8 @@ struct HostState {
 struct Inner {
     id: InstanceId,
     notify: Option<Notify>,
+    /// What bounds a log line.
+    limits: VmLimits,
     /// Set when the app has been notified and has not read anything since,
     /// so a burst of frames and log lines makes one notification.
     pending: AtomicBool,
@@ -76,11 +83,20 @@ impl std::fmt::Debug for HostLink {
 }
 
 impl HostLink {
-    /// A link for instance `id` that calls `notify` on news.
+    /// A link for instance `id` that calls `notify` on news, with the
+    /// default limits.
     pub fn new(id: InstanceId, notify: Option<Notify>) -> Self {
+        Self::with_limits(id, notify, VmLimits::default())
+    }
+
+    /// A link for instance `id` that calls `notify` on news and cuts each
+    /// log line to `limits.max_log_line_bytes`: the limits of the virtual
+    /// machine the link serves.
+    pub fn with_limits(id: InstanceId, notify: Option<Notify>, limits: VmLimits) -> Self {
         Self(Arc::new(Inner {
             id,
             notify,
+            limits,
             pending: AtomicBool::new(false),
             wants_text: AtomicBool::new(false),
             state: Mutex::new(HostState {
@@ -194,13 +210,22 @@ impl HostLink {
 
     /// Adds a line to the log. Lines that report an uncaught exception
     /// count as errors; an internal error of the VM crashes the instance.
+    ///
+    /// Every line the app and the command line runner print passes here,
+    /// whoever wrote it (the virtual machine, a native, the JAR's source of
+    /// classes and resources): it is cut to `max_log_line_bytes`, and the
+    /// control characters in it are escaped (see [`escape_control`]), so a
+    /// game's text cannot make a terminal do anything or pass for a line
+    /// of its own. The queue holds [`MAX_LOG_LINES`] lines at most, oldest
+    /// first out.
     pub(crate) fn log(&self, line: LogLine) {
+        let text = clean_text(line.text, self.0.limits.max_log_line_bytes);
         if line.level == LogLevel::Err {
-            if line.text.starts_with("Exception in thread") {
+            if text.starts_with("Exception in thread") {
                 self.count_error();
-            } else if line.text.starts_with(INTERNAL_ERROR) {
+            } else if text.starts_with(INTERNAL_ERROR) {
                 self.count_error();
-                self.control(Control::Crashed(line.text.clone()));
+                self.control(Control::Crashed(text.clone()));
             }
         }
         {
@@ -208,7 +233,10 @@ impl HostLink {
             if state.log.len() >= MAX_LOG_LINES {
                 state.log.pop_front();
             }
-            state.log.push_back(line);
+            state.log.push_back(LogLine {
+                level: line.level,
+                text,
+            });
         }
         self.changed();
     }
@@ -224,8 +252,14 @@ impl HostLink {
     }
 
     /// Sends a message to the control thread, if there is one (tests that
-    /// run natives without a launcher have none).
+    /// run natives without a launcher have none). A crash message is the
+    /// game's text, so it is cut to [`MAX_CRASH_MESSAGE_BYTES`] and its
+    /// control characters are escaped.
     pub(crate) fn control(&self, message: Control) {
+        let message = match message {
+            Control::Crashed(text) => Control::Crashed(clean_text(text, MAX_CRASH_MESSAGE_BYTES)),
+            other => other,
+        };
         if let Some(sender) = &*self.0.control.lock() {
             let _ = sender.send(message);
         }
@@ -236,6 +270,35 @@ impl HostLink {
         let link = self.clone();
         Arc::new(move |line| link.log(line))
     }
+}
+
+/// `text` cut to `max_bytes` and with its control characters escaped.
+fn clean_text(text: String, max_bytes: usize) -> String {
+    // Cut first, so escaping never works on more than a line; cut again,
+    // since an escaped character takes more bytes than it did.
+    cut_log_text(escape_control(cut_log_text(text, max_bytes)), max_bytes)
+}
+
+/// Escapes what a terminal or a reader could take for something other than
+/// text. CR and LF become the two characters `\r` and `\n`, so a line stays
+/// one line, and every other control character (below U+0020 but the tab,
+/// U+007F, and U+0080 to U+009F, which hold the one character forms of
+/// escape sequences) becomes U+FFFD. ESC is one of them, so no sequence
+/// that clears a screen, sets a title or writes to the clipboard survives.
+fn escape_control(text: String) -> String {
+    if !text.chars().any(|c| c.is_control() && c != '\t') {
+        return text;
+    }
+    let mut out = String::with_capacity(text.len() + 8);
+    for c in text.chars() {
+        match c {
+            '\r' => out.push_str("\\r"),
+            '\n' => out.push_str("\\n"),
+            c if c.is_control() && c != '\t' => out.push('\u{fffd}'),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -338,5 +401,89 @@ mod tests {
         let lines = link.drain_log();
         assert_eq!(lines.len(), MAX_LOG_LINES);
         assert_eq!(lines[0].text, "5");
+    }
+
+    fn out(text: impl Into<String>) -> LogLine {
+        LogLine {
+            level: LogLevel::Out,
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn a_long_line_is_cut_to_the_limit() {
+        let (link, _) = counting();
+        let max = VmLimits::default().max_log_line_bytes;
+        link.log(out("x".repeat(10 * max)));
+        link.log(out("short"));
+        let lines = link.drain_log();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].text.len() <= max);
+        assert!(lines[0].text.ends_with(" more characters)"));
+        assert_eq!(lines[1].text, "short");
+    }
+
+    #[test]
+    fn the_limits_of_a_link_set_the_cut() {
+        let limits = VmLimits {
+            max_log_line_bytes: 100,
+            ..VmLimits::default()
+        };
+        let link = HostLink::with_limits(InstanceId::next(), None, limits);
+        link.log(out("y".repeat(5000)));
+        assert!(link.drain_log()[0].text.len() <= 100);
+    }
+
+    #[test]
+    fn control_characters_in_a_line_are_escaped() {
+        let (link, _) = counting();
+        // Clear the screen, set the title, write to the clipboard, and a
+        // line that pretends to come from the runtime.
+        link.log(out(
+            "\u{1b}[2J\u{1b}]0;owned\u{7}\u{1b}]52;c;AAAA\u{7}ok\r\ninfo: the game asked to open https://example.com/",
+        ));
+        link.log(out("tab\there, \u{85} and \u{7f} and \u{9b}31m"));
+        let lines = link.drain_log();
+        assert_eq!(
+            lines[0].text,
+            "\u{fffd}[2J\u{fffd}]0;owned\u{fffd}\u{fffd}]52;c;AAAA\u{fffd}ok\\r\\ninfo: the game asked to open https://example.com/"
+        );
+        assert_eq!(
+            lines[1].text,
+            "tab\there, \u{fffd} and \u{fffd} and \u{fffd}31m"
+        );
+        for line in &lines {
+            assert!(!line.text.chars().any(|c| c.is_control() && c != '\t'));
+        }
+    }
+
+    #[test]
+    fn a_line_that_grows_when_escaped_still_fits() {
+        let (link, _) = counting();
+        let max = VmLimits::default().max_log_line_bytes;
+        // One byte becomes two, or three.
+        link.log(out("\n".repeat(max)));
+        link.log(out("\u{1}".repeat(max)));
+        for line in link.drain_log() {
+            assert!(line.text.len() <= max, "{} bytes", line.text.len());
+        }
+    }
+
+    #[test]
+    fn a_crash_message_is_cut_and_escaped() {
+        let (link, _) = counting();
+        let (tx, rx) = mpsc::channel();
+        link.set_control(tx);
+        link.control(Control::Crashed(format!(
+            "boom\n\u{1b}[2J{}",
+            "q".repeat(5000)
+        )));
+        link.control(Control::Stop);
+        let Ok(Control::Crashed(message)) = rx.try_recv() else {
+            panic!("a crash message");
+        };
+        assert!(message.len() <= MAX_CRASH_MESSAGE_BYTES);
+        assert!(message.starts_with("boom\\n\u{fffd}[2Jqqq"));
+        assert!(matches!(rx.try_recv(), Ok(Control::Stop)));
     }
 }
