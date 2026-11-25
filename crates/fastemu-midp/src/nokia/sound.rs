@@ -177,7 +177,12 @@ fn state_code(track: &mut Track) -> i32 {
 fn start(ctx: &mut Ctx<'_>, this: ObjRef) -> JResult<()> {
     let serial = data(ctx, this)?.track.serial();
     events::hold(ctx, serial, this);
-    let _ = data(ctx, this)?.track.start(Instant::now());
+    // A refused start (too many sounds playing) is silence, as on a phone
+    // that cannot play one more. No event would end a run that never
+    // began, so the sound is let go at once.
+    if data(ctx, this)?.track.start(Instant::now()).is_err() {
+        events::release(ctx, serial);
+    }
     events::wake(ctx);
     Ok(())
 }

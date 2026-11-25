@@ -51,3 +51,19 @@ fn nokia_sounds_play_and_report_their_state() {
     );
     drop(engine);
 }
+
+#[test]
+fn a_sound_that_cannot_start_is_not_held() {
+    let (engine, group) = audio();
+    check(
+        "NokiaStarted",
+        Some(group),
+        r"
+        the 32nd is playing: 0
+        the 33rd: 1
+        after a stop: 0
+        refused sounds are collected: true
+        ",
+    );
+    drop(engine);
+}
