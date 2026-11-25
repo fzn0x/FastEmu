@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  Versi modern dan lebih cepat dari MicroEmu dan J2ME Loader dengan dukungan multi instance, tersedia di Windows, Linux, MacOS dan Android, dibangun dengan Zed GPUI.
+  Modern and faster version of MicroEmu and J2ME Loader with multi instances support, available in Windows, Linux, MacOS and Android built in Zed GPUI.
 </p>
 
 <p align="center">
