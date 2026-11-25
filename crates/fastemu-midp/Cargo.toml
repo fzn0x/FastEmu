@@ -16,7 +16,7 @@ fastemu-core.workspace = true
 fastemu-gfx.workspace = true
 fastemu-jvm.workspace = true
 miniz_oxide = "0.9.1"
-parking_lot = "0.12"
+parking_lot = "0.13"
 # HTTPS and ssl:// connections: TLS 1.2 and 1.3 in pure Rust, so the same
 # code builds for every desktop target and for Android without a C
 # toolchain. The roots are Mozilla's list.
