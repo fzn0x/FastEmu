@@ -326,6 +326,16 @@ pub fn class() -> NativeClass {
         )
         .method("callSerially", "(Ljava/lang/Runnable;)V", |ctx, a| {
             if let Some(runnable) = a[1].obj() {
+                // Real games queue a handful. Past the limit the queue is
+                // full of work the event thread has not got to, as on a
+                // phone whose memory is gone.
+                let most = ctx.limits().max_posted;
+                if state(ctx).serial.len() >= most {
+                    return ctx.throw(
+                        "java/lang/OutOfMemoryError",
+                        "too many callSerially calls are waiting",
+                    );
+                }
                 let global = Arc::new(ctx.new_global(runnable));
                 state(ctx).serial.push_back(global);
                 ctx.notify_waiters();
