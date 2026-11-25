@@ -891,8 +891,8 @@ however many string entries and fields name it. An interface a class
 names more than once is added once. The file itself, which the JAR
 source caps at 4 MiB (`MAX_CLASS_BYTES`; the largest class of the test
 folder has 200 KB), is parsed before any of this, and a refused class
-holds a few times its size while it is. The classes that wait for it are charged already, so
-it is the only class outside the count.
+holds a few times its size while it is. The classes that wait for it
+are charged already, so it is the only class outside the count.
 
 **Diagnostics.** Something a game needs that FastEmu lacks throws the
 usual error and is reported once to the diagnostics hook and the log, by
