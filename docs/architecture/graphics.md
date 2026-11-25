@@ -35,7 +35,7 @@ coordinates are translated by `translate(x, y)` (which wraps around like
 Java's `int`) and then computed in 64-bit integers, so no Java argument
 can overflow them. Only the part of a primitive inside the clip is ever
 walked, so a line or circle millions of pixels long costs no more than
-the clip's size, except that outlines wider or taller than 65 536 pixels
+the clip's size, except that outlines wider or taller than 65536 pixels
 are not drawn at all.
 
 ### Coverage of each primitive
@@ -316,16 +316,16 @@ throws as `IllegalArgumentException` (or `IOException` for
   top-down; run-length compressed files are refused. 32-bit files whose
   alpha mask is set but all zero are shown opaque.
 
-PNG, GIF and BMP images wider or taller than 16384 pixels, or over the
-pixel limit, fail with `OutOfMemoryError` before their pixels are
-allocated. zune-jpeg refuses a JPEG frame header over 16384 pixels a
-side while it reads the headers, so such a JPEG is a decode error. A
-GIF's first frame is decoded at its own size before it is placed on the
-logical screen: the `gif` crate's memory limit holds it to 2^25 pixels,
-and the heap check sees only the screen. The wrapper
-checks the declared size against the heap first, as the Images section
-says, so a PNG that declares 2^25 pixels does not make `decode_stream`
-reserve its 128 MiB buffer on a heap of a few MiB.
+Images over the pixel limit, and PNG, GIF and BMP images wider or taller
+than 16384 pixels, fail with `OutOfMemoryError` before their pixels are
+allocated. zune-jpeg refuses a JPEG frame header over 16384 pixels a side
+while it reads the headers, so such a JPEG is a decode error. A GIF's
+first frame is decoded at its own size before it is placed on the logical
+screen: the `gif` crate's memory limit holds it to 2^25 pixels, and the
+heap check sees only the screen. The wrapper checks the declared size
+against the heap first, as the Images section says, so a PNG that declares
+2^25 pixels does not make `decode_stream` reserve its 128 MiB buffer on a
+heap of a few MiB.
 
 A panic inside a decoder (png, gif or zune-jpeg) is caught in
 `Surface::decode`, and so in `decode_range`, and becomes a decode error
