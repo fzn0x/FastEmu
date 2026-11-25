@@ -137,8 +137,9 @@ const TURN_SLICE: Duration = Duration::from_millis(100);
 /// - `decode` never calls Java: a game's code that made an image there
 ///   would wait for the turn its own thread holds. Reading a resource,
 ///   asking the heap, decoding and making the `Image` run no game code.
-/// - It is not reentrant: a thread in its turn that asked for it again
-///   would wait for itself. Debug builds panic on that.
+/// - It is not reentrant: a thread in its turn must not ask for it again.
+///   Debug builds panic on that; release builds run the inner decode in
+///   the turn the thread holds, rather than wait for themselves.
 ///
 /// A thread that waited while its game was stopped returns `Throw::Stop`
 /// without decoding.
