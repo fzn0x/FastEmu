@@ -886,6 +886,31 @@ mod tests {
         }
 
         #[test]
+        fn a_tone_played_after_a_player_started_waits_before_it() {
+            // No share and no burst: only the oldest sound of a game plays.
+            let (engine, _clock) = engine_with(Some(RenderBudget {
+                share: 0.0,
+                burst: Duration::ZERO,
+            }));
+            let group = engine.create_group();
+            let wav = crate::wav::tests::pcm16_wav(RATE, 1, &vec![1000; 32_000]);
+            let player = group.create_player(&wav, None).unwrap();
+            player.start().unwrap();
+            group.play_tone(69, 50, 100).unwrap();
+            // 200 ms, four times the tone.
+            slices(&engine, 50);
+            assert!(player.media_time().unwrap() > 0);
+            // The tone waits in place, so it has not ended.
+            let tones = engine
+                .lock()
+                .slots
+                .values()
+                .filter(|slot| slot.voice.one_shot)
+                .count();
+            assert_eq!(tones, 1);
+        }
+
+        #[test]
         fn the_sound_started_last_waits_first() {
             let (engine, clock) = engine_with(Some(RenderBudget {
                 share: 0.0,
