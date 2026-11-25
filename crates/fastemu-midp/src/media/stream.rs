@@ -4,6 +4,11 @@
 //! is copied straight out of its buffer. Any other stream, the game's own
 //! classes included, is read through its `read(byte[], int, int)` method,
 //! so overrides run as on a phone.
+//!
+//! What is read lands in a host buffer the heap does not see yet, so the
+//! reading asks the heap before every chunk: a stream that never ends, or
+//! one longer than the heap could hold, ends in `OutOfMemoryError` at the
+//! size of the heap, and never at more than [`MAX_BYTES`].
 
 use fastemu_core::LogLevel;
 use fastemu_jvm::{ArrayType, Ctx, JResult, ObjRef, Value};
@@ -13,8 +18,8 @@ const BYTE_ARRAY_STREAM: &str = "java/io/ByteArrayInputStream";
 /// Bytes asked for per `read` call.
 const CHUNK: usize = 16 * 1024;
 
-/// More sound data than this from one stream is cut off: a phone would
-/// have run out of memory long before.
+/// More sound data than this from one stream is cut off, whatever the
+/// heap: a phone would have run out of memory long before.
 const MAX_BYTES: usize = 32 * 1024 * 1024;
 
 /// Reads the `java.io.InputStream` `stream` to its end. An `IOException`
@@ -57,7 +62,9 @@ fn read_chunks(ctx: &mut Ctx<'_>, stream: ObjRef, byte_reads: bool) -> JResult<V
             out.extend(ctx.array::<i8>(buffer)?[..count].iter().map(|&b| b as u8));
         }
         // Checked after either kind of read, so a stream that never ends
-        // one byte at a time is cut off too.
+        // one byte at a time is cut off too. The heap refuses what it
+        // could never hold with the next chunk: `OutOfMemoryError`.
+        ctx.check_alloc(out.len() + CHUNK)?;
         if out.len() >= MAX_BYTES {
             ctx.log(
                 LogLevel::Warn,
@@ -94,6 +101,9 @@ fn read_byte_array_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<Option<V
     if end > len || at > end {
         return Ok(None);
     }
+    // The buffer is in the heap already; the copy needs room beside it.
+    let end = end.min(at + MAX_BYTES);
+    ctx.check_alloc(end - at)?;
     let bytes = ctx.array::<i8>(array)?[at..end]
         .iter()
         .map(|&b| b as u8)
