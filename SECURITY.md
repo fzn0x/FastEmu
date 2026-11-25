@@ -122,7 +122,7 @@ links to the page that describes the limit.
 
 | Limit | Bound | When a game reaches it | Described in |
 | --- | --- | --- | --- |
-| Log line | 4096 bytes | printed text is split into lines of that size; other lines are cut, with a note of how much went | [jvm.md][jvm-limits] |
+| Log line | 4096 bytes | printed text is split into lines of 4096 bytes as the game encodes it; a line still longer once decoded or escaped, and any other long line, is cut, with a note of how much went | [jvm.md][jvm-limits] |
 | Log kept between two reads of the app | 10000 lines and 1 MiB | the oldest lines go first | [midp.md][midp-log] |
 | Message of a crash | 1 KiB | cut | [midp.md][midp-status] |
 
