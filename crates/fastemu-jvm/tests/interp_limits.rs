@@ -354,8 +354,9 @@ fn a_frame_past_the_slot_limit_throws_stack_overflow_error() {
 #[test]
 fn the_default_slot_limit_allows_frames_of_a_real_game_and_not_gigabytes() {
     let vm = vm_with(HEAP, VmLimits::default(), Vec::new());
-    // 131,072 slots hold 32 frames of 4,002, and a recursion of small
-    // frames reaches the limit on frames (4,096) first.
+    // A frame of this method moves the stack on by about 2,000 slots, so
+    // 131,072 slots hold about 63 of them, and a recursion of small frames
+    // reaches the limit on frames (4,096) first.
     assert_eq!(call_int(&vm, "Deep", "probeBig", Some(20)), 20);
     assert_eq!(call_int(&vm, "Deep", "probeBig", Some(100)), -1);
     assert_eq!(call_int(&vm, "Deep", "probeSmall", Some(3000)), 3000);
