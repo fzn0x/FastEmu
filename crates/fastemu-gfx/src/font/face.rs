@@ -51,6 +51,12 @@ impl FaceFile {
     }
 }
 
+/// The most glyphs above U+00FF one face and size keeps. Games with large
+/// alphabets, such as Chinese, use a few thousand a size; a game that asks
+/// for every code unit would otherwise fill the process-wide cache for as
+/// long as the app runs.
+const MAX_OTHER_GLYPHS: usize = 4096;
+
 /// A rasterized glyph: coverage from 0 (none) to 255 (full), row-major.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Glyph {
@@ -146,12 +152,13 @@ impl SizedFace {
             .cloned();
         let glyph = cached.unwrap_or_else(|| {
             let glyph = Arc::new(self.rasterize(unit));
-            self.others
-                .write()
-                .unwrap_or_else(PoisonError::into_inner)
-                .entry(unit)
-                .or_insert(glyph)
-                .clone()
+            let mut others = self.others.write().unwrap_or_else(PoisonError::into_inner);
+            // A full cache starts over; a glyph that is drawing keeps its
+            // own reference.
+            if others.len() >= MAX_OTHER_GLYPHS && !others.contains_key(&unit) {
+                others.clear();
+            }
+            others.entry(unit).or_insert(glyph).clone()
         });
         f(&glyph)
     }
@@ -266,6 +273,19 @@ mod tests {
         for unit in "MW.Жλ".encode_utf16() {
             assert_eq!(face.advance(unit), w);
         }
+    }
+
+    #[test]
+    fn the_glyph_cache_is_bounded() {
+        // A height no other test uses, so the cache starts empty.
+        let face = sized_face(FaceFile::Sans, 37);
+        let widths: Vec<i32> = (0x0100..0x0100 + 5000).map(|u| face.advance(u)).collect();
+        let kept = || face.others.read().unwrap().len();
+        assert!(kept() > 0 && kept() <= MAX_OTHER_GLYPHS, "{}", kept());
+        // The cache starts over, and what it gives is the same again.
+        let again: Vec<i32> = (0x0100..0x0100 + 5000).map(|u| face.advance(u)).collect();
+        assert_eq!(again, widths);
+        assert!(kept() <= MAX_OTHER_GLYPHS);
     }
 
     #[test]
