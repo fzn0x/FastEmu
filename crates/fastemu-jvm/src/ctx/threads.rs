@@ -121,7 +121,9 @@ impl Ctx<'_> {
     ///
     /// The thread is one of the game's: it counts against
     /// [`crate::VmLimits::max_threads`], and past that this throws
-    /// `OutOfMemoryError`, as `Thread.start` does.
+    /// `OutOfMemoryError` at once. Unlike `Thread.start` and `new Timer()`,
+    /// it never collects or waits for the threads of dropped timers to
+    /// end, so it lets no other thread run.
     pub fn spawn_thread(
         &mut self,
         name: &str,

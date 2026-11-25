@@ -21,7 +21,9 @@
 //! As on Java SE, a timer's thread holds its queue, not the timer. The
 //! queue holds its timer weakly, in the machine's weak table, so the
 //! collection that finds a timer dropped marks its queue ([`reap`]), and
-//! the thread ends once no task is left.
+//! the thread ends once no task is left. At the thread limit,
+//! `Thread.start` and `new Timer()` collect once and wait for such
+//! threads to end ([`make_room`]).
 
 use std::time::{Duration, Instant};
 
@@ -83,6 +85,9 @@ struct Queue {
     /// Set by the collection that finds the timer dropped. Nothing can
     /// schedule on it again, so its thread ends once no task is left.
     reaped: bool,
+    /// While the thread runs a task, and reports what the task threw:
+    /// both run the game's code.
+    running: bool,
 }
 
 impl Default for Queue {
@@ -92,6 +97,7 @@ impl Default for Queue {
             next_order: 0,
             open: true,
             reaped: false,
+            running: false,
         }
     }
 }
@@ -200,6 +206,10 @@ fn turn(ctx: &mut Ctx<'_>, queue_ref: &GlobalRef) -> JResult<bool> {
         q.remove(t_obj);
         q.insert(next, t_obj);
     }
+    // Until the report is done too: it calls the exception's `toString`,
+    // which is the game's code, and `make_room` must never wait for a
+    // thread that runs the game's code.
+    queue(ctx, q_obj)?.running = true;
     match ctx.call_virtual(t_obj, "run", "()V", &[]) {
         Ok(_) => {}
         Err(Throw::Stop) => return Err(Throw::Stop),
@@ -209,6 +219,7 @@ fn turn(ctx: &mut Ctx<'_>, queue_ref: &GlobalRef) -> JResult<bool> {
             queue(ctx, q_obj)?.remove(t_obj);
         }
     }
+    queue(ctx, q_obj)?.running = false;
     Ok(true)
 }
 
@@ -304,16 +315,29 @@ fn date_time(ctx: &mut Ctx<'_>, date: Value) -> JResult<i64> {
 /// `new Timer()`: the queue, and the thread that runs it. The thread counts
 /// against the game's threads, so past `max_threads` the constructor throws
 /// `OutOfMemoryError` and leaves the timer as no constructor ran on it,
-/// with no queue.
+/// with no queue. It first makes room if it can ([`make_room`]).
 fn init(ctx: &mut Ctx<'_>, timer: ObjRef) -> JResult<Value> {
+    // First: it may collect and let other threads run. `timer` is this
+    // native's argument, so a root.
+    make_room(ctx)?;
     let class = ctx.find_class(QUEUE)?;
     let q_obj = ctx.new_object(class)?;
     let serial = ctx.static_field_id(TIMER, "serialNumber", "I")?;
     let n = ctx.get_static(serial)?.int();
     let queue_ref = ctx.new_global(q_obj);
     ctx.spawn_thread(&format!("Timer-{n}"), move |ctx| {
-        while ctx.local_frame(|ctx| turn(ctx, &queue_ref))? {}
-        Ok(())
+        let ended = loop {
+            match ctx.local_frame(|ctx| turn(ctx, &queue_ref)) {
+                Ok(true) => {}
+                other => break other,
+            }
+        };
+        // On every way out, before the thread can run the game's code
+        // again (the report of an error it returns): `make_room` counts
+        // the threads in the weak table as ones that end without it.
+        let q_obj = queue_ref.get(ctx);
+        ctx.state.weak.remove(&q_obj);
+        ended.map(|_| ())
     })?;
     // The thread cannot run before this native returns, and a timer that
     // got no thread has changed nothing.
@@ -346,6 +370,70 @@ pub(crate) fn reap(state: &mut VmState) -> bool {
         }
     }
     any
+}
+
+/// The timer threads that have no task to run, now or later, as two
+/// counts. The first holds those that end at their next turn without
+/// running the game's code, since their timer is cancelled or dropped.
+/// The second holds the others, whose timer a collection may find
+/// dropped. A thread that runs a task, or has one that is not cancelled,
+/// is in neither.
+fn spare(state: &VmState) -> (usize, usize) {
+    let (mut ending, mut idle) = (0, 0);
+    for &key in state.weak.keys() {
+        let Some(q) = state.heap.get(key).payload::<Queue>() else {
+            continue;
+        };
+        let has_task = q.slots.iter().any(|s| {
+            state
+                .heap
+                .get(s.task)
+                .payload::<Task>()
+                .is_none_or(|t| t.phase != Phase::Cancelled)
+        });
+        if q.running || has_task {
+            continue;
+        }
+        if q.reaped || !q.open {
+            ending += 1;
+        } else {
+            idle += 1;
+        }
+    }
+    (ending, idle)
+}
+
+/// Makes room for one more game thread when the machine has none left,
+/// as a phone's collector frees the threads of the timers nobody holds.
+/// If a timer thread has no task left, one collection finds the timers
+/// the game dropped, then this waits for the threads of the dropped and
+/// cancelled timers to end. It returns at once when there is room, or
+/// when no timer thread could end; the caller then refuses as before.
+///
+/// It may collect and let other threads run, so `Thread.start` and
+/// `new Timer()` call it before anything else. The wait counts only
+/// threads that end without running the game's code, so it cannot wait
+/// on a monitor the caller holds. A stop ends it; a pause lasts it until
+/// the resume, as the ending threads park.
+pub(crate) fn make_room(ctx: &mut Ctx<'_>) -> JResult<()> {
+    let max = ctx.limits().max_threads;
+    if ctx.state.live_threads < max {
+        return Ok(());
+    }
+    let (ending, idle) = spare(&ctx.state);
+    if ending == 0 {
+        if idle == 0 {
+            return Ok(());
+        }
+        ctx.gc();
+    }
+    // A thread that waits for the due time of a task the game has since
+    // cancelled looks again now.
+    ctx.notify_waiters();
+    while ctx.state.live_threads >= max && spare(&ctx.state).0 > 0 {
+        ctx.wait_raw(None)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn classes() -> Vec<NativeClass> {
@@ -708,6 +796,25 @@ mod tests {
         assert!(vm.wait_finished(Some(Duration::from_secs(10))));
     }
 
+    /// A machine that may have `max_threads` threads.
+    fn limited(max_threads: usize, natives: Vec<NativeClass>) -> Vm {
+        let config = VmConfig {
+            limits: crate::VmLimits {
+                max_threads,
+                ..crate::VmLimits::default()
+            },
+            ..VmConfig::default()
+        };
+        Vm::new(config, Arc::new(MemorySource::new()), natives)
+    }
+
+    /// Starts a plain `Thread`, whose `run` does nothing, and says whether
+    /// it started.
+    fn start_thread(ctx: &mut Ctx<'_>) -> bool {
+        let thread = ctx.construct("java/lang/Thread", "()V", &[]).unwrap();
+        ctx.call_virtual(thread, "start", "()V", &[]).is_ok()
+    }
+
     /// A timer that nothing references and that has no task ends its
     /// thread once a collection finds it: the machine then has no thread
     /// left, which `wait_finished` waits for without a fixed sleep.
@@ -728,6 +835,67 @@ mod tests {
         let left = vm.thread_count();
         vm.stop();
         assert!(ended, "{left} threads left");
+    }
+
+    /// At the thread limit, `new Timer()` collects once and waits for the
+    /// threads of the timers the game dropped, so dropping them never runs
+    /// the game out of threads.
+    #[test]
+    fn dropped_timers_leave_room_for_new_ones() {
+        let vm = limited(4, Vec::new());
+        let made = vm.attach("test", |ctx| {
+            (0..20)
+                .take_while(|_| ctx.local_frame(|ctx| ctx.construct(TIMER, "()V", &[]).is_ok()))
+                .count()
+        });
+        vm.stop();
+        assert!(vm.wait_finished(Some(Duration::from_secs(10))));
+        assert_eq!(made, 20);
+    }
+
+    /// A timer the game cancels gives its thread back: a start at the
+    /// limit right after the cancel waits for that thread to end, where
+    /// before it was refused unless the thread had ended already.
+    #[test]
+    fn a_start_at_the_limit_waits_for_the_thread_of_a_cancelled_timer() {
+        let vm = limited(3, Vec::new());
+        let (started, collections) = vm.attach("test", |ctx| {
+            let cancelled = ctx.construct(TIMER, "()V", &[]).unwrap();
+            let kept = ctx.construct(TIMER, "()V", &[]).unwrap();
+            ctx.call_virtual(cancelled, "cancel", "()V", &[]).unwrap();
+            let before = ctx.state.heap.stats().collections;
+            let started = start_thread(ctx);
+            let collections = ctx.state.heap.stats().collections - before;
+            ctx.call_virtual(kept, "cancel", "()V", &[]).unwrap();
+            (started, collections)
+        });
+        assert!(started, "the start was refused");
+        // A thread was already ending, so nothing had to be collected.
+        assert_eq!(collections, 0);
+        assert!(vm.wait_finished(Some(Duration::from_secs(10))));
+    }
+
+    /// At the limit, with no timer thread that could end, a start is
+    /// refused as before, and without a collection.
+    #[test]
+    fn a_start_at_the_limit_collects_only_when_a_timer_has_no_task() {
+        let vm = limited(2, vec![count()]);
+        let (started, collections) = vm.attach("test", |ctx| {
+            let timer = ctx.construct(TIMER, "()V", &[]).unwrap();
+            let task = ctx.construct("test/Count", "()V", &[]).unwrap();
+            let once = "(Ljava/util/TimerTask;J)V";
+            let hour = Value::Long(3_600_000);
+            ctx.call_virtual(timer, "schedule", once, &[task.into(), hour])
+                .unwrap();
+            let before = ctx.state.heap.stats().collections;
+            let started = start_thread(ctx);
+            let collections = ctx.state.heap.stats().collections - before;
+            ctx.call_virtual(timer, "cancel", "()V", &[]).unwrap();
+            (started, collections)
+        });
+        assert!(!started, "a thread past the limit");
+        assert_eq!(collections, 0);
+        assert!(vm.wait_finished(Some(Duration::from_secs(10))));
     }
 
     /// A timer the game holds survives collections and runs what it is
