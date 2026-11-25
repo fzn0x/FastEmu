@@ -453,6 +453,15 @@ impl Input for BodyInput {
         };
         let mut filled = 0;
         while filled < buf.len() {
+            if filled > 0 {
+                // A server that sends a byte at a time makes every try
+                // succeed, so the stop is looked for between them.
+                match net::check(ctx, None) {
+                    Ok(()) => {}
+                    Err(Throw::Stop) => return Err(Throw::Stop),
+                    Err(Throw::Exception(_)) => break,
+                }
+            }
             let dst = &mut buf[filled..];
             let read = net::block_on(ctx, net::deadline(self.timeout), || {
                 if self.closed.load(Ordering::Acquire) {

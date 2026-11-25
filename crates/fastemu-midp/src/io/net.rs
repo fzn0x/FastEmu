@@ -136,13 +136,30 @@ fn is_retry(e: &io::Error) -> bool {
     )
 }
 
+/// Checks, with the lock held, whether the VM is stopping (`Throw::Stop`),
+/// whether the thread was interrupted or `deadline` passed
+/// (`InterruptedIOException`). [`block_on`] does it between its tries; a
+/// loop that calls it for each piece of a larger job does it between
+/// pieces, because a peer that sends or takes a little at a time makes
+/// every try succeed, and a loop of such tries would never get to it.
+pub(crate) fn check(ctx: &mut Ctx<'_>, deadline: Option<Instant>) -> JResult<()> {
+    if ctx.is_stopping() {
+        return Err(Throw::Stop);
+    }
+    if ctx.take_interrupt() {
+        return Err(interrupted(ctx, "interrupted"));
+    }
+    if deadline.is_some_and(|d| Instant::now() >= d) {
+        return Err(interrupted(ctx, "timed out"));
+    }
+    Ok(())
+}
+
 /// Runs `attempt` with the VM lock released until it gives a value.
 ///
 /// `attempt` makes one bounded try (one system call that waits at most
 /// [`SLICE`]) and returns `Ok(None)` when it has nothing yet. Between
-/// tries this checks, with the lock held, whether the VM is stopping
-/// (`Throw::Stop`), whether the thread was interrupted or `deadline`
-/// passed (`InterruptedIOException`). An I/O error becomes an
+/// tries this [`check`]s, with the lock held. An I/O error becomes an
 /// `IOException` ([`io_exception`]).
 pub(crate) fn block_on<T>(
     ctx: &mut Ctx<'_>,
@@ -155,15 +172,7 @@ pub(crate) fn block_on<T>(
             Ok(None) => {}
             Err(e) => return Err(io_exception(ctx, &e)),
         }
-        if ctx.is_stopping() {
-            return Err(Throw::Stop);
-        }
-        if ctx.take_interrupt() {
-            return Err(interrupted(ctx, "interrupted"));
-        }
-        if deadline.is_some_and(|d| Instant::now() >= d) {
-            return Err(interrupted(ctx, "timed out"));
-        }
+        check(ctx, deadline)?;
     }
 }
 
@@ -388,15 +397,23 @@ impl Link {
     }
 }
 
-/// Writes all of `bytes` to `link`, blocking with the lock released.
+/// Writes all of `bytes` to `link`, blocking with the lock released. A
+/// stopping VM ends it before it starts, and it is [`check`]ed between
+/// the pieces a peer takes.
 pub(crate) fn write_all(
     ctx: &mut Ctx<'_>,
     link: &Link,
     bytes: &[u8],
     deadline: Option<Instant>,
 ) -> JResult<()> {
+    if ctx.is_stopping() {
+        return Err(Throw::Stop);
+    }
     let mut sent = 0;
     while sent < bytes.len() {
+        if sent > 0 {
+            check(ctx, deadline)?;
+        }
         let rest = &bytes[sent..];
         let n = block_on(ctx, deadline, || match again(link.write(rest))? {
             Some(0) => Err(io::ErrorKind::WriteZero.into()),
