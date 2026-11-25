@@ -67,10 +67,44 @@ pub(crate) struct SecurityDetails {
     cipher_suite: String,
 }
 
+/// The socket as rustls reads it. rustls reads again and again inside one
+/// call while a handshake message or a record is incomplete, so a peer
+/// that sends a byte within every slice would keep the call from ever
+/// ending, and the caller would never look for a stop or its deadline.
+/// A call takes in one read. Any other read in it says `WouldBlock`, as
+/// a slice that brought nothing more does, and the caller tries again
+/// with what rustls has kept.
+struct Socket {
+    tcp: TcpStream,
+    /// This call has read already.
+    read: bool,
+}
+
+impl Read for Socket {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.read {
+            return Err(io::ErrorKind::WouldBlock.into());
+        }
+        let n = self.tcp.read(buf)?;
+        self.read = true;
+        Ok(n)
+    }
+}
+
+impl Write for Socket {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.tcp.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.tcp.flush()
+    }
+}
+
 /// A TLS client session over a socket. The stream is locked for each
 /// bounded read or write, with the VM lock released.
 pub(crate) struct Session {
-    stream: Mutex<StreamOwned<ClientConnection, TcpStream>>,
+    stream: Mutex<StreamOwned<ClientConnection, Socket>>,
     /// What [`Session::details`] reports, taken once the handshake is
     /// done. Natives ask for it with the VM lock held, and locking the
     /// stream then could wait for another thread's read slice.
@@ -81,6 +115,7 @@ impl Session {
     /// One bounded step of the handshake: `Ok(true)` once it is done.
     pub(crate) fn handshake(&self) -> io::Result<bool> {
         let mut guard = lock(&self.stream);
+        guard.sock.read = false;
         let StreamOwned { conn, sock } = &mut *guard;
         if conn.is_handshaking() {
             conn.complete_io(sock)?;
@@ -91,7 +126,9 @@ impl Session {
     /// One bounded read of plaintext. A peer that closes the socket
     /// without TLS's close message ends the stream, as browsers accept.
     pub(crate) fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-        match lock(&self.stream).read(buf) {
+        let mut guard = lock(&self.stream);
+        guard.sock.read = false;
+        match guard.read(buf) {
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(0),
             other => other,
         }
@@ -135,7 +172,7 @@ impl Session {
         let StreamOwned { conn, sock } = &mut *guard;
         if socket.set_nonblocking(true).is_ok() {
             while conn.wants_read() {
-                if !matches!(conn.read_tls(sock), Ok(n) if n > 0) {
+                if !matches!(conn.read_tls(&mut sock.tcp), Ok(n) if n > 0) {
                     break;
                 }
             }
@@ -153,7 +190,7 @@ impl Session {
             .clone()
     }
 
-    fn read_details(guard: &StreamOwned<ClientConnection, TcpStream>) -> SecurityDetails {
+    fn read_details(guard: &StreamOwned<ClientConnection, Socket>) -> SecurityDetails {
         let version = match guard.conn.protocol_version() {
             Some(ProtocolVersion::TLSv1_3) => "3.4",
             Some(ProtocolVersion::TLSv1_2) => "3.3",
@@ -187,7 +224,10 @@ pub(crate) fn connect(ctx: &mut Ctx<'_>, host: &str, port: u16) -> JResult<Link>
     let socket = net::connect(ctx, host, port)?;
     let session = ClientConnection::new(config, name)
         .map_err(io::Error::other)
-        .and_then(|conn| Ok(StreamOwned::new(conn, socket.try_clone()?)));
+        .and_then(|conn| {
+            let tcp = socket.try_clone()?;
+            Ok(StreamOwned::new(conn, Socket { tcp, read: false }))
+        });
     let session = match session {
         Ok(stream) => Session {
             stream: Mutex::new(stream),
