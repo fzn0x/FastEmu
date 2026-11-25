@@ -28,13 +28,17 @@ MIDlet-Vendor: FastEmu\r\n\
 MIDlet-Version: 1.0\r\n\
 MIDlet-1: BigImage, , m.BigImage\r\n\
 MIDlet-2: ImageFile, , m.ImageFile\r\n\
-MIDlet-3: Streams, , m.Streams\r\n";
+MIDlet-3: Streams, , m.Streams\r\n\
+MIDlet-4: Tiles, , m.Tiles\r\n\
+MIDlet-5: Sprites, , m.Sprites\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 mod midlet {
     pub const BIG_IMAGE: usize = 0;
     pub const IMAGE_FILE: usize = 1;
     pub const STREAMS: usize = 2;
+    pub const TILES: usize = 3;
+    pub const SPRITES: usize = 4;
 }
 
 /// The MIDlets, compiled once against the shared stubs and this test's
@@ -267,4 +271,55 @@ fn an_image_stream_that_never_ends_is_an_io_exception_at_16_mib() {
         empty, "empty IOException the stream gives no data calls 1000",
         "{log}"
     );
+}
+
+#[test]
+fn a_tiled_layer_the_heap_cannot_hold_is_an_out_of_memory_error_before_its_grid() {
+    let Some(jar) = suite("tiles", &[]) else {
+        return;
+    };
+    let mut run = launch(&jar, midlet::TILES, HEAP);
+    run.wait_log("done ");
+    let log = run.dump();
+    // 4096 by 4096 cells are 64 MiB.
+    assert!(run.has("big layer OutOfMemoryError"), "{log}");
+    // A layer that fits works.
+    assert!(run.has("small layer 20x20 cell 3"), "{log}");
+    // A layer is 360000 bytes: they end in the error at the heap, and a
+    // heap that is let go makes layers again.
+    let kept = run.wait_log("layers ");
+    assert!(kept.ends_with("then OutOfMemoryError"), "{log}");
+    let count = numbers(&kept, "layers ")[0];
+    assert!((1..10).contains(&count), "{log}");
+}
+
+#[test]
+fn animated_tiles_stop_at_32767_with_an_out_of_memory_error() {
+    let Some(jar) = suite("animated", &[]) else {
+        return;
+    };
+    let mut run = launch(&jar, midlet::TILES, HEAP);
+    let line = run.wait_log("animated ");
+    let log = run.dump();
+    assert_eq!(
+        line, "animated 32767 then OutOfMemoryError last -32767",
+        "{log}"
+    );
+    // The tiles made before the error work.
+    assert!(run.has("animated tile 1 shows 1"), "{log}");
+}
+
+#[test]
+fn many_sprites_that_keep_one_big_frame_sequence_end_in_out_of_memory() {
+    let Some(jar) = suite("sprites", &[]) else {
+        return;
+    };
+    let mut run = launch(&jar, midlet::SPRITES, HEAP);
+    let line = run.wait_log("sprites ");
+    let log = run.dump();
+    // The array is 400 KB and each sprite keeps another copy.
+    assert!(line.ends_with("kept then OutOfMemoryError"), "{log}");
+    let count = numbers(&line, "sprites ")[0];
+    assert!((1..10).contains(&count), "{log}");
+    run.wait_log("done");
 }
