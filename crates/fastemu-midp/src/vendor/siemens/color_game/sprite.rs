@@ -252,8 +252,15 @@ fn set_frame(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
 }
 
 fn set_frame_sequence(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
+    let this = ctx.non_null(a[0])?;
+    // The sprite keeps a copy of the array, which the heap counts a second
+    // time, so a game cannot give many sprites the same big array.
     let sequence = match a[1].obj() {
-        Some(array) => Some(ctx.array::<i32>(array)?.to_vec()),
+        Some(array) => {
+            let length = ctx.array::<i32>(array)?.len();
+            ctx.check_alloc(length.saturating_mul(4))?;
+            Some(ctx.array::<i32>(array)?.to_vec())
+        }
         None => None,
     };
     let raw = sprite(ctx, a[0])?.raw_frames;
@@ -267,6 +274,7 @@ fn set_frame_sequence(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     }
     let s = sprite(ctx, a[0])?;
     (s.sequence, s.index) = (sequence, 0);
+    ctx.recount(this);
     Ok(Value::Void)
 }
 
@@ -290,7 +298,14 @@ fn set_image(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
 }
 
 fn copy(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
+    let this = ctx.non_null(a[0])?;
     let other = ctx.non_null(a[1])?;
+    // The copy has a frame sequence of its own.
+    let sequence_bytes = match &ctx.payload::<LayerData>(other)?.kind {
+        Kind::Sprite(state) => state.heap_bytes(),
+        _ => 0,
+    };
+    ctx.check_alloc(sequence_bytes)?;
     let from = ctx.payload::<LayerData>(other)?;
     let Kind::Sprite(state) = &from.kind else {
         return ctx.throw("java/lang/IllegalStateException", "not a sprite");
@@ -305,6 +320,7 @@ fn copy(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         kind: Kind::Sprite(state.clone()),
     };
     *layer(ctx, a[0])? = copy;
+    ctx.recount(this);
     Ok(Value::Void)
 }
 
