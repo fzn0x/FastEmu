@@ -12,7 +12,8 @@
 //! is still loading therefore sees no `pauseApp` and no second `startApp`
 //! beside it. `destroyApp` alone does not wait, so a game that never
 //! returns from `startApp` can still be stopped; the calls still waiting
-//! then give up.
+//! then give up. A `startApp` whose turn comes while the app has the game
+//! paused waits for the resume, so a frozen game never shows as running.
 //!
 //! `platformRequest` hands web links to the app, which asks the user
 //! before it opens one; see [`platform_request`].
@@ -173,8 +174,19 @@ fn shown(class_name: &str) -> String {
 
 /// Calls `startApp`. A `MIDletStateChangeException` leaves the MIDlet
 /// paused, as MIDP says; any other exception crashes the instance.
+///
+/// A `startApp` that comes while the app has the machine paused waits for
+/// the resume before it marks the MIDlet running (see
+/// `HostLink::set_running_unless`). A MIDlet that paused itself gets no
+/// `pauseApp` when the app pauses it, so nothing else keeps a `startApp`
+/// still on its way, such as one the MIDlet's own `resumeRequest` asked
+/// for, from showing a frozen game as running.
 fn start_app(ctx: &mut Ctx<'_>, midlet: ObjRef) -> JResult<()> {
-    env(ctx).host.set_status(InstanceStatus::Running);
+    let host = env(ctx).host.clone();
+    while !host.set_running_unless(|| ctx.is_paused()) {
+        // A safepoint: it parks until the resume.
+        ctx.yield_now()?;
+    }
     match ctx.call_virtual(midlet, "startApp", "()V", &[]) {
         Ok(_) => Ok(()),
         Err(Throw::Stop) => Err(Throw::Stop),
@@ -413,9 +425,81 @@ pub fn classes() -> Vec<NativeClass> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use fastemu_core::link::MAX_LINK_BYTES;
+    use fastemu_jvm::{MemorySource, Vm, VmConfig};
 
     use super::*;
+    use crate::env::InstanceEnv;
+    use crate::host::HostLink;
+
+    /// A machine whose MIDlet, already made, is all natives: its
+    /// `startApp` counts the calls in `starts`.
+    fn machine(starts: Arc<AtomicUsize>) -> (Vm, HostLink) {
+        let env = InstanceEnv::for_tests("unused");
+        let host = env.host.clone();
+        let mut classes = crate::classes(&fastemu_core::default_profile());
+        classes.push(
+            NativeClass::new("t/Natives")
+                .extends(CLASS)
+                .method("<init>", "()V", |_, _| Ok(Value::Void))
+                .method("startApp", "()V", move |_, _| {
+                    starts.fetch_add(1, Ordering::SeqCst);
+                    Ok(Value::Void)
+                })
+                .method("pauseApp", "()V", |_, _| Ok(Value::Void))
+                .method("destroyApp", "(Z)V", |_, _| Ok(Value::Void)),
+        );
+        let config = VmConfig {
+            log: host.log_sink(),
+            ..VmConfig::default()
+        };
+        let vm = Vm::new(config, Arc::new(MemorySource::new()), classes);
+        vm.attach("test", move |ctx| -> JResult<()> {
+            ctx.set_extension(env);
+            let made = ctx.construct("t/Natives", "()V", &[])?;
+            let global = Arc::new(ctx.new_global(made));
+            midlet_state(ctx).midlet = Some(global);
+            Ok(())
+        })
+        .expect("making the MIDlet");
+        (vm, host)
+    }
+
+    #[test]
+    fn a_start_app_that_comes_while_the_app_has_the_game_paused_waits_for_the_resume() {
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (vm, host) = machine(Arc::clone(&starts));
+        // As the control thread leaves a game the app paused while a
+        // startApp the game asked for was on its way.
+        vm.pause();
+        host.set_status(InstanceStatus::Paused);
+        let watch = {
+            let (vm, host, starts) = (vm.clone(), host.clone(), Arc::clone(&starts));
+            move || {
+                // This takes the VM lock, so it runs once the startApp
+                // below has let go of it: parked for the pause, or done.
+                vm.thread_count();
+                let seen = (host.peek_status(), starts.load(Ordering::SeqCst));
+                vm.resume();
+                seen
+            }
+        };
+        let watcher = vm.attach("MIDlet", move |ctx| {
+            let watcher = std::thread::spawn(watch);
+            lifecycle(ctx, Lifecycle::Resume, 0).expect("startApp");
+            watcher
+        });
+        let seen = watcher.join().expect("the watcher");
+        assert_eq!(
+            seen,
+            (InstanceStatus::Paused, 0),
+            "during the pause: the status and the startApp calls"
+        );
+        assert_eq!(host.peek_status(), InstanceStatus::Running);
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn web_links_are_http_or_https_with_a_host() {

@@ -222,14 +222,26 @@ impl Controller {
         });
     }
 
+    /// Pauses a running MIDlet. One that paused itself (`notifyPaused`, or
+    /// a `startApp` that asked to stay paused) freezes the same way but
+    /// gets no `pauseApp`, which MIDP calls only on an active MIDlet.
     fn pause(&mut self) {
-        if self.frozen || self.host.peek_status() != InstanceStatus::Running {
+        if self.frozen {
             return;
         }
+        let running = match self.host.peek_status() {
+            InstanceStatus::Running => true,
+            InstanceStatus::Paused => false,
+            _ => return,
+        };
         on_event_thread(&self.vm, LIFECYCLE_TIMEOUT, |ctx| {
             lcdui::event::set_visible(ctx, false)
         });
-        self.call(Lifecycle::Pause, LIFECYCLE_TIMEOUT);
+        if running {
+            self.call(Lifecycle::Pause, LIFECYCLE_TIMEOUT);
+        }
+        // A startApp still on its way sees the machine paused before this
+        // sets Paused, and waits for the resume (`midlet::start_app`).
         self.vm.pause();
         if let Some(group) = &self.group {
             group.set_paused(true);

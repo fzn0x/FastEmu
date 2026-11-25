@@ -306,6 +306,30 @@ impl HostLink {
         self.changed();
     }
 
+    /// Sets the status to `Running` as a `startApp` starts, unless
+    /// `paused()` says the app has paused the virtual machine. Returns
+    /// `false` only then, and the `startApp` waits for the resume.
+    ///
+    /// `paused` is read under the status lock. The control thread pauses
+    /// the machine first and sets `Paused` after, under that lock, so a
+    /// `startApp` that comes during a pause never marks the frozen game
+    /// running: it either sets `Running` before the pause's `Paused`, or
+    /// it sees the pause.
+    pub(crate) fn set_running_unless(&self, paused: impl FnOnce() -> bool) -> bool {
+        {
+            let mut state = self.0.state.lock();
+            if paused() {
+                return false;
+            }
+            if state.status.is_finished() || state.status == InstanceStatus::Running {
+                return true;
+            }
+            state.status = InstanceStatus::Running;
+        }
+        self.changed();
+        true
+    }
+
     /// Shows a new frame. The frame it replaces is freed after the lock is
     /// released, so the app's `frame` never waits for that.
     pub(crate) fn present(&self, frame: Frame) {
