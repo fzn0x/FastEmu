@@ -478,6 +478,7 @@ fn io_failure(ctx: &mut Ctx<'_>, what: &str, path: &Path, e: &io::Error) -> Thro
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use fastemu_jvm::{MemorySource, Vm, VmConfig};
 
@@ -658,5 +659,243 @@ mod tests {
             // is under it.
             assert!(rms(ctx).may_add_store(&other("vendor", "game")));
         });
+    }
+
+    /// A clock that sleeps no time: a sleep moves it on, and is written
+    /// down. `on_sleep` runs at each sleep, with the VM lock released.
+    #[derive(Default)]
+    struct FakeClock {
+        now: std::sync::Mutex<Duration>,
+        slept: std::sync::Mutex<Vec<Duration>>,
+        on_sleep: std::sync::Mutex<Option<Box<dyn Fn() + Send>>>,
+    }
+
+    impl Clock for FakeClock {
+        fn now(&self) -> Duration {
+            *self.now.lock().unwrap()
+        }
+
+        fn sleep(&self, how_long: Duration) {
+            *self.now.lock().unwrap() += how_long;
+            self.slept.lock().unwrap().push(how_long);
+            if let Some(hook) = &*self.on_sleep.lock().unwrap() {
+                hook();
+            }
+        }
+    }
+
+    impl FakeClock {
+        fn sleeps(&self) -> usize {
+            self.slept.lock().unwrap().len()
+        }
+
+        fn slept(&self) -> Duration {
+            self.slept.lock().unwrap().iter().sum()
+        }
+
+        fn longest(&self) -> Duration {
+            self.slept
+                .lock()
+                .unwrap()
+                .iter()
+                .max()
+                .copied()
+                .unwrap_or_default()
+        }
+    }
+
+    /// Runs `body` on a virtual machine with the record store classes
+    /// whose record stores are in `dir`, and returns what it logged.
+    fn with_log(dir: &Path, body: impl FnOnce(&mut Ctx<'_>)) -> Vec<String> {
+        let lines: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+        let sink = Arc::clone(&lines);
+        let config = VmConfig {
+            log: Arc::new(move |line| sink.lock().unwrap().push(line.text)),
+            ..VmConfig::default()
+        };
+        let vm = Vm::new(
+            config,
+            Arc::new(MemorySource::new()),
+            crate::classes(&fastemu_core::default_profile()),
+        );
+        let env = InstanceEnv::for_tests(dir);
+        vm.attach("test", move |ctx| {
+            ctx.set_extension(env);
+            body(ctx);
+        });
+        let lines = lines.lock().unwrap().clone();
+        lines
+    }
+
+    /// Makes the machine's write budget `burst` and `rate` on a fake
+    /// clock, and returns the clock.
+    fn fake_budget(ctx: &mut Ctx<'_>, burst: u64, rate: u64) -> Arc<FakeClock> {
+        let clock = Arc::new(FakeClock::default());
+        let rms = rms(ctx);
+        rms.clock = clock.clone();
+        rms.budget = WriteBudget::new(burst, rate, clock.now());
+        clock
+    }
+
+    fn near(actual: Duration, expected: Duration) {
+        let off = actual.abs_diff(expected);
+        assert!(
+            off < Duration::from_millis(2),
+            "{actual:?} is not {expected:?}"
+        );
+    }
+
+    /// A store with one record of `len` bytes that starts with `tag`.
+    fn store_of(name: &StoreName, tag: u8, len: usize) -> StoreData {
+        let mut data = StoreData::new(name.clone(), 0);
+        let mut record = vec![0; len];
+        record[0] = tag;
+        data.add(record, 0).unwrap();
+        data
+    }
+
+    #[test]
+    fn saves_past_the_burst_wait_for_the_refill_and_stay_on_the_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let name = StoreName::from_text("save").unwrap();
+        let key = StoreKey {
+            owner: Owner::Own,
+            name: name.clone(),
+        };
+        let size = store_of(&name, 0, 100 << 10).size();
+        let lines = with_log(dir.path(), |ctx| {
+            // 256 KiB at once, then 1 MiB a second.
+            let clock = fake_budget(ctx, 256 << 10, 1 << 20);
+            for tag in 1..=20u8 {
+                save(ctx, &key, store_of(&name, tag, 100 << 10)).unwrap();
+                // Whatever the wait, each save is on the disk when it returns.
+                let on_disk = disk::read(&disk::store_path(&disk::rms_dir(dir.path()), &name))
+                    .unwrap()
+                    .unwrap();
+                let loaded = StoreData::decode(&on_disk, &name, 0);
+                assert_eq!(loaded.data.records[&1][0], tag);
+            }
+            // The first two saves fit in the burst; each later one waits for
+            // the writes before it, and the last does not wait for itself.
+            let paid_for = 19 * size - (256 << 10);
+            near(
+                clock.slept(),
+                Duration::from_secs_f64(paid_for as f64 / (1 << 20) as f64),
+            );
+            assert_eq!(clock.longest(), SLICE);
+            assert!(clock.sleeps() > 20);
+        });
+        // Said once, and said what it was about.
+        let said: Vec<_> = lines
+            .iter()
+            .filter(|l| l.contains("wait for the disk"))
+            .collect();
+        assert_eq!(said.len(), 1, "{lines:?}");
+        assert!(said[0].contains("1024 KiB a second"), "{said:?}");
+    }
+
+    #[test]
+    fn saves_that_stay_in_the_burst_never_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        let name = StoreName::from_text("save").unwrap();
+        let key = StoreKey {
+            owner: Owner::Own,
+            name: name.clone(),
+        };
+        let lines = with_log(dir.path(), |ctx| {
+            // The clock stands still, so nothing refills: only the burst
+            // of the defaults is there.
+            let clock = fake_budget(ctx, WRITE_BURST, WRITE_RATE);
+            for tag in 0..100u8 {
+                save(ctx, &key, store_of(&name, tag, 100)).unwrap();
+            }
+            assert_eq!(clock.sleeps(), 0);
+        });
+        assert!(
+            !lines.iter().any(|l| l.contains("wait for the disk")),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn a_stopping_machine_ends_the_wait_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let name = StoreName::from_text("save").unwrap();
+        let key = StoreKey {
+            owner: Owner::Own,
+            name: name.clone(),
+        };
+        with_log(dir.path(), |ctx| {
+            // 100 KiB is 100 seconds of debt.
+            let clock = fake_budget(ctx, 4096, 1 << 10);
+            save(ctx, &key, store_of(&name, 1, 100 << 10)).unwrap();
+            assert_eq!(clock.sleeps(), 0);
+            let vm = ctx.vm();
+            *clock.on_sleep.lock().unwrap() = Some(Box::new(move || vm.stop()));
+            let stopped = save(ctx, &key, store_of(&name, 2, 100 << 10));
+            assert!(matches!(stopped, Err(Throw::Stop)), "{stopped:?}");
+            // It slept one slice, saw the flag and left.
+            assert_eq!(clock.sleeps(), 1);
+            assert_eq!(clock.longest(), SLICE);
+            // The next one does not even sleep.
+            let again = save(ctx, &key, store_of(&name, 3, 100 << 10));
+            assert!(matches!(again, Err(Throw::Stop)), "{again:?}");
+            assert_eq!(clock.sleeps(), 1);
+            // The store still holds what the first save wrote.
+            let on_disk = disk::read(&disk::store_path(&disk::rms_dir(dir.path()), &name))
+                .unwrap()
+                .unwrap();
+            assert_eq!(StoreData::decode(&on_disk, &name, 0).data.records[&1][0], 1);
+        });
+    }
+
+    #[test]
+    fn a_write_that_fails_is_paid_for_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let name = StoreName::from_text("save").unwrap();
+        let key = StoreKey {
+            owner: Owner::Own,
+            name: name.clone(),
+        };
+        // A folder where the file goes: the rename over it fails.
+        std::fs::create_dir_all(disk::store_path(&disk::rms_dir(dir.path()), &name)).unwrap();
+        with_log(dir.path(), |ctx| {
+            let clock = fake_budget(ctx, 8192, 1 << 10);
+            let failed = save(ctx, &key, store_of(&name, 1, 100 << 10));
+            assert!(matches!(failed, Err(Throw::Exception(_))), "{failed:?}");
+            // 100 KiB of debt at 1 KiB a second.
+            let wait = rms(ctx).budget.wait(clock.now());
+            assert!(wait > Duration::from_secs(90), "{wait:?}");
+        });
+    }
+
+    #[test]
+    fn a_damaged_store_opened_again_and_again_is_paid_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let name = StoreName::from_text("save").unwrap();
+        let key = StoreKey {
+            owner: Owner::Own,
+            name: name.clone(),
+        };
+        let folder = disk::rms_dir(dir.path());
+        let damaged = vec![0xAA; 10 << 10];
+        disk::write_atomic(&disk::store_path(&folder, &name), &damaged).unwrap();
+        with_log(dir.path(), |ctx| {
+            // 16 KiB at once, then 10 KiB a second.
+            let clock = fake_budget(ctx, 16 << 10, 10 << 10);
+            for _ in 0..10 {
+                assert!(load(ctx, &key).unwrap());
+                rms(ctx).unload(&key);
+            }
+            // Ten copies of 10 KiB, the last one not waited for.
+            near(clock.slept(), Duration::from_secs_f64(7.4));
+        });
+        // The copy is the file as it was, and the file is as it was.
+        let copy = disk::store_path(&folder, &name).with_extension("bad");
+        assert_eq!(std::fs::read(copy).unwrap(), damaged);
+        assert_eq!(
+            std::fs::read(disk::store_path(&folder, &name)).unwrap(),
+            damaged
+        );
     }
 }
