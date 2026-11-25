@@ -393,12 +393,12 @@ neither. A change that adds a payload adds a row.
 | `Queue`, `TimerData`, `Task` (`Timer`) | one slot per scheduled `TimerTask` | bounded by the task objects, which can be scheduled only once |
 | `ReaderState`, `WriterState`, `PrintState` | decoder state, a pending character | fixed |
 | `Mirror`, `Instant`, `Seed`, `Zone`, calendar `State` | numbers and short ids | fixed |
-| `ImageData`, the buffer of `DisplayableData`, `LayerData` (tiled layers, sprites) | pixels and tile grids | #32: `check_alloc` before building, `recount` on change |
+| `ImageData`, the buffer of `DisplayableData`, the surface of a `CustomItem`, `LayerData` (tiled layers, sprites) | pixels, tile grids, animated tiles, frame sequences | `check_alloc` before building and `recount` on change (#32); a displayable buffer and an item surface are made on the event thread, so they are counted and not refused |
 | screen state of `DisplayableData`, `ItemData` | list items and text | #33 |
 | `PlayerData`, `SoundData`, `Clip` | sound source bytes and decoded audio | #34 |
 | `HttpPayload`, `SocketPayload`, `ServerPayload`, `UdpPayload`, `InputPayload`, `OutputPayload` | socket and body buffers | #38, with its own caps |
 | `StoreHandle`, `EnumState` | listeners and the ids of an enumeration | `heap_bytes`; the size of a record store by #40 |
-| `GraphicData`, `UiImage`, `ExtendedData`, `LayerData` (Siemens) | pictures and tile grids | #32 and #33 |
+| `GraphicData`, `UiImage`, `ExtendedData`, `LayerData` (Siemens) | pictures and tile grids | bitmaps, copies and tile layers: `check_alloc` before building, `recount` on change (#32); `GraphicData`: #33 |
 | `Composer`, `MelodyData` (Siemens) | notes and MIDI bytes | `heap_bytes`; a note added to a `Composer` is not recounted yet |
 | `ManagerData` (`LayerManager`), `Manager` (Siemens layers) | a list of layer references | bounded: a layer is in the list once |
 | `Manager` (Siemens graphic objects) | a list of object references | #33: `addObject` adds the same object again and again |
