@@ -23,7 +23,7 @@ use fastemu_jvm::{
 
 use super::NATIVE_MEM;
 use crate::env::env;
-use crate::lcdui::image::{SharedSurface, new_image, surface_of};
+use crate::lcdui::image::{SharedSurface, new_image, reserve_decoded, reserve_pixels, surface_of};
 use crate::lcdui::throw_gfx;
 use crate::suite::source::normalize;
 
@@ -55,6 +55,24 @@ fn pixel_count(width: i32, height: i32) -> Result<usize, GfxError> {
 fn packed_len(width: i32, height: i32, bits_per_pixel: u32) -> usize {
     let per_byte = (8 / bits_per_pixel) as usize;
     (width as usize).div_ceil(per_byte) * height as usize
+}
+
+/// Asks the heap for the picture that `bytes` bytes of `bits_per_pixel`
+/// packed pixels unpack to, before it is made. A picture takes 32 times
+/// the bytes of a one-bit bitmap, so an array that fits the heap can make
+/// an image that does not. A size or array the unpacking refuses passes,
+/// to be refused with the exception MIDP names.
+fn reserve_unpacked(
+    ctx: &mut Ctx<'_>,
+    bytes: usize,
+    width: i32,
+    height: i32,
+    bits_per_pixel: u32,
+) -> JResult<()> {
+    if pixel_count(width, height).is_err() || packed_len(width, height, bits_per_pixel) > bytes {
+        return Ok(());
+    }
+    reserve_pixels(ctx, width.into(), height.into())
 }
 
 /// Reads `bits_per_pixel` packed pixels, rows of whole bytes, high bits
@@ -198,6 +216,7 @@ fn load(ctx: &mut Ctx<'_>, name: Value) -> JResult<ObjRef> {
     let Some(bytes) = bytes else {
         return Err(io_error(ctx, &format!("resource not found: {name}")));
     };
+    reserve_decoded(ctx, &bytes)?;
     match ctx.without_lock(move || Surface::decode(&bytes)) {
         Ok(surface) => new_image(ctx, surface),
         Err(GfxError::OutOfMemory) => Err(throw_gfx(ctx, &GfxError::OutOfMemory)),
@@ -227,6 +246,7 @@ fn rgb_image(
             &format!("bitmap type {kind} is not supported"),
         ));
     }
+    reserve_unpacked(ctx, data.len(), width, height, 8)?;
     image_or_throw(ctx, from_332(&data, width, height))
 }
 
@@ -288,13 +308,23 @@ pub fn class() -> NativeClass {
         .constant("COLOR_BMP_8BIT", "I", Value::Int(COLOR_BMP_8BIT))
         .method_with("<init>", "()V", access::PROTECTED, |_, _| Ok(Value::Void))
         .method("<init>", "(II)V", |ctx, a| {
+            reserve_pixels(ctx, a[1].int().into(), a[2].int().into())?;
             let image = image_or_throw(ctx, Surface::new_mutable(a[1].int(), a[2].int()))?;
             wrap(ctx, a[0], image)
         })
         .method("<init>", &format!("({ui})V"), |ctx, a| {
             let other = ctx.non_null(a[1])?;
             let copy = match ctx.payload::<UiImage>(other)?.image {
-                Some(image) => Some(surface_of(ctx, image)?.lock().clone()),
+                Some(image) => {
+                    let pixels = surface_of(ctx, image)?;
+                    let (width, height) = {
+                        let surface = pixels.lock();
+                        (surface.width(), surface.height())
+                    };
+                    reserve_pixels(ctx, width.into(), height.into())?;
+                    let copy = pixels.lock().clone();
+                    Some(copy)
+                }
                 None => None,
             };
             match copy {
@@ -307,12 +337,14 @@ pub fn class() -> NativeClass {
         })
         .method("<init>", "([BII)V", |ctx, a| {
             let bits = bytes(ctx, a[1])?;
+            reserve_unpacked(ctx, bits.len(), a[2].int(), a[3].int(), 1)?;
             let image = image_or_throw(ctx, from_1bpp(&bits, None, a[2].int(), a[3].int()))?;
             wrap(ctx, a[0], image)
         })
         .method("<init>", "([BIIZ)V", |ctx, a| {
             let bits = bytes(ctx, a[1])?;
             let (w, h) = (a[2].int(), a[3].int());
+            reserve_unpacked(ctx, bits.len(), w, h, if a[4].boolean() { 2 } else { 1 })?;
             let surface = if a[4].boolean() {
                 from_2bpp(&bits, w, h)
             } else {
@@ -328,6 +360,7 @@ pub fn class() -> NativeClass {
         })
         .method("<init>", "([B)V", |ctx, a| {
             let data: Vec<u8> = bytes(ctx, a[1])?.iter().map(|&b| b as u8).collect();
+            reserve_decoded(ctx, &data)?;
             let decoded = ctx.without_lock(move || Surface::decode(&data));
             let image = image_or_throw(ctx, decoded)?;
             wrap(ctx, a[0], image)
@@ -357,6 +390,7 @@ pub fn class() -> NativeClass {
             &format!("([BII){IMAGE}"),
             |ctx, a| {
                 let bits = bytes(ctx, a[0])?;
+                reserve_unpacked(ctx, bits.len(), a[1].int(), a[2].int(), 1)?;
                 let surface = from_1bpp(&bits, None, a[1].int(), a[2].int());
                 Ok(image_or_throw(ctx, surface)?.into())
             },
@@ -369,6 +403,7 @@ pub fn class() -> NativeClass {
             &format!("([BII){IMAGE}"),
             |ctx, a| {
                 let bits = bytes(ctx, a[0])?;
+                reserve_unpacked(ctx, bits.len(), a[1].int(), a[2].int(), 2)?;
                 let surface = from_2bpp(&bits, a[1].int(), a[2].int());
                 Ok(image_or_throw(ctx, surface)?.into())
             },

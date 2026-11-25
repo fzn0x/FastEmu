@@ -17,7 +17,7 @@ use crate::lcdui::canvas;
 use crate::lcdui::display;
 use crate::lcdui::displayable::{self, Kind};
 use crate::lcdui::font::default_font;
-use crate::lcdui::image::{SharedSurface, new_image, surface_of};
+use crate::lcdui::image::{SharedSurface, new_image, reserve_pixels, surface_of};
 use crate::lcdui::{Rect, throw_gfx};
 
 pub(crate) const CLASS: &str = "com/siemens/mp/game/ExtendedImage";
@@ -82,9 +82,9 @@ fn construct(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let this = ctx.non_null(a[0])?;
     let image = ctx.non_null(a[1])?;
     let shared = surface_of(ctx, image)?;
-    let (width, mutable, opaque) = {
+    let (width, height, mutable, opaque) = {
         let s = shared.lock();
-        (s.width(), s.is_mutable(), s.is_opaque())
+        (s.width(), s.height(), s.is_mutable(), s.is_opaque())
     };
     if width % 8 != 0 {
         return ctx.throw(ILLEGAL_ARGUMENT, "the width is not a multiple of 8");
@@ -92,6 +92,7 @@ fn construct(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let image = if mutable {
         image
     } else {
+        reserve_pixels(ctx, width.into(), height.into())?;
         let copy = shared.lock().clone().into_kind(SurfaceKind::Mutable);
         new_image(ctx, copy)?
     };
