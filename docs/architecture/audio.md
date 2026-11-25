@@ -106,6 +106,21 @@ milliseconds pre-rendered) in the mix instead of keeping the player
 around; the tail list is capped so closing a game with a hundred players
 stays cheap.
 
+A game's sound is capped, because the Java heap never sees it. A group
+holds at most 128 players and 32 MiB of sound (`GroupLimits`; the host
+changes them with `Group::set_limits`, tests with tiny values). The bytes
+are what each source says it holds (`Source::memory_bytes`): the samples
+of decoded sound, the file of an MP3, the events of a MIDI file or a
+tone sequence. They are added up from the sources the group holds now,
+so a closed or dropped player gives its bytes back, and a tone sequence
+that replaces another counts in its place. `Group::insert` checks both
+limits, and every player is made there: MMAPI players, tone players,
+beeps, and the Nokia, Samsung and Siemens sounds. `playTone` tones are
+not players and keep their own cap of 16, below. A sound that is bigger
+than the whole budget is `TooLarge`; any other request the group has no
+room for is `OutOfMemory`, which closing a player cures. A request the
+group refuses leaves nothing behind.
+
 `Group::play_tone` (for `Manager.playTone`) plays a tone with no handle
 that leaves the mixer when it ends. A group keeps at most 16 such tones;
 a new one replaces the oldest, because games call `playTone` in loops.
@@ -133,7 +148,12 @@ should report.
   data size of zero or past the end runs to the end of the file, a RIFF
   size is ignored, a missing pad byte after an odd chunk is noticed, a
   torn last frame is dropped, and a lost chunk walk searches for `data`.
-  Wider than stereo keeps the front left and right.
+  Wider than stereo keeps the front left and right. A file decodes up
+  front, to at most four times its size (ADPCM) and twice for mu-law,
+  A-law and 8-bit PCM. What it will decode to is worked out from the
+  bytes there are, never from a size the header claims, and a file that
+  would decode to more than 16 MiB (`MAX_DECODED_BYTES`) is `TooLarge`
+  before anything is allocated.
 - **MIDI**: standard MIDI files, format 0 and 1 (format 2 plays as 1),
   bare or in RMID. Tracks are merged and timed in microseconds through the
   tempo map (SMPTE division too); running status is followed; system
@@ -149,7 +169,11 @@ should report.
 - **AMR narrowband**: the RFC 4867 storage format (`#!AMR\n`), mono 8 kHz,
   decoded up front. Frames of other codecs are concealed like lost frames;
   a file cut short keeps what decoded. AMR wideband (`#!AMR-WB\n`) and the
-  multi-channel AMR header are not supported.
+  multi-channel AMR header are not supported. A frame can be one byte (a
+  NO_DATA frame becomes 160 concealed samples, 320 bytes), so the frame
+  headers are counted first and a file of more than ten minutes (30000
+  frames, 9.6 MB of samples) is `TooLarge` before any frame is decoded.
+  The samples are reserved once, with `try_reserve_exact`.
 - **Tone sequences**: the JSR-135 `ToneControl` grammar: `VERSION 1`,
   optional `TEMPO` (5 to 127, times 4 bpm) and `RESOLUTION` (1 to 127) in
   either order, blocks (`BLOCK_START n ... BLOCK_END n`, defined before
@@ -257,7 +281,7 @@ the engine's view of it.
 | --------------------------------------------- | ------ |
 | `Manager.createPlayer(InputStream, type)`     | Read the stream to the end and keep the bytes and type in the Java `Player` (UNREALIZED). |
 | `Manager.createPlayer(locator)`               | `device://tone`: keep a flag, and on realize call `group.create_tone_player()`. `file://`, `resource` paths and `http://` (when the network policy allows): fetch the bytes, then as above. Other `device://` locators: `MediaException`. |
-| `Player.realize()`                            | `group.create_player(&bytes, Some(type))`; map errors (see below). Drop the Java copy of the bytes afterwards. |
+| `Player.realize()`                            | `group.create_player(&bytes, Some(type))`; map errors (see below). Drop the Java copy of the bytes afterwards, which the Java heap counted until then. A game whose group is full gets one collection and a second try before the error. |
 | `Player.prefetch()`                           | `player.prefetch()` (realizing first if needed) |
 | `Player.start()`                              | `player.start()` (realizing and prefetching first if needed) |
 | `Player.stop()`                               | `player.stop()` |
@@ -280,9 +304,10 @@ Errors map to exceptions:
 
 | `AudioError`                          | Java exception |
 | ------------------------------------- | -------------- |
-| `Unsupported`, `Malformed`            | `MediaException` |
+| `Unsupported`, `Malformed`, `TooLarge` | `MediaException` |
 | `InvalidToneSequence`, `InvalidArgument` | `IllegalArgumentException` |
 | `InvalidState`, `Closed`              | `IllegalStateException` |
+| `OutOfMemory`                         | `OutOfMemoryError` |
 
 Events map to `PlayerListener` constants and event data:
 

@@ -395,7 +395,8 @@ neither. A change that adds a payload adds a row.
 | `Mirror`, `Instant`, `Seed`, `Zone`, calendar `State` | numbers and short ids | fixed |
 | `ImageData`, the buffer of `DisplayableData`, the surface of a `CustomItem`, `LayerData` (tiled layers, sprites) | pixels, tile grids, animated tiles, frame sequences | `check_alloc` before building and `recount` on change (#32); a displayable buffer and an item surface are made on the event thread, so they are counted and not refused |
 | screen state of `DisplayableData` (`ListState`, `TextBoxState`), `ItemData` (`ChoiceGroup`, `TextField`) | the elements of a choice and the text of an editor | `heap_bytes` at the room of the vector (16 bytes an element, 2 a unit of text); recounted when elements or text change, and a vector that lost items gives room back; a constructor or edit that makes a text longer calls `check_alloc` first |
-| `PlayerData`, `SoundData`, `Clip` | sound source bytes and decoded audio | #34 |
+| `PlayerData` | the sound bytes kept until `realize` | `heap_bytes`; recounted when `realize` or `close` drops them; `check_alloc` before the copy; a stream read asks the heap per chunk |
+| `PlayerData`, `SoundData`, `Clip` (decoded audio in the engine) | decoded samples, MP3 files, MIDI events | not on the heap: the instance's sound group allows 32 MiB and 128 players, 16 MiB for one sound ([audio.md](audio.md)) |
 | `HttpPayload`, `SocketPayload`, `ServerPayload`, `UdpPayload`, `InputPayload`, `OutputPayload` | socket and body buffers | #38, with its own caps |
 | `StoreHandle`, `EnumState` | listeners and the ids of an enumeration | `heap_bytes`; the size of a record store by #40 |
 | `GraphicData` (Siemens sprites and backgrounds) | frames and tiles | `heap_bytes`; the constructors call `check_alloc` before cutting the pictures and recount |

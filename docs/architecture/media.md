@@ -69,6 +69,15 @@ its own `read(byte[], int, int)`, so a game's stream classes behave as on
 a phone. An `IOException` from the stream passes through. The player
 starts UNREALIZED and keeps the bytes until `realize`.
 
+The bytes count on the Java heap while the player keeps them
+(`PlayerData::heap_bytes`, counted when the player is made, recounted
+when `realize` or `close` drops them), as they did in the game's own
+stream. A stream is read into a host buffer, so the read asks the heap
+before every chunk (`Ctx::check_alloc`): a stream that never ends, or
+that is longer than the heap could hold, ends in `OutOfMemoryError` at
+the size of the heap, and never reads more than 32 MiB. A sound of a
+format nothing plays keeps no bytes at all.
+
 `realize` decodes with the VM lock released (`Ctx::without_lock`), so
 other Java threads of the game keep running while a long MP3 or MIDI
 file is parsed; `prefetch` and `start` realize first when needed. After
@@ -76,10 +85,22 @@ that the bytes are dropped: the engine keeps the decoded sound. If the
 player is closed, or realized by another thread, while it decodes, the
 new sound is dropped.
 
+The decoded sound is not on the Java heap: a phone kept it apart, and a
+few megabytes of it would fill a game's 2 MiB heap. The instance's sound
+group bounds it instead: 128 players and 32 MiB of sound for the game,
+and 16 MiB for one sound ([audio.md](audio.md)). `realize` throws what
+the engine refuses for size: `MediaException` for a sound that decodes to
+more than 16 MiB (or an AMR file of more than ten minutes), and
+`OutOfMemoryError` when the game holds all the sound or all the players
+it may. The player stays UNREALIZED with its bytes, so it can realize
+once the game has closed others. Before `OutOfMemoryError` the game gets
+one collection and a second try (`make_sound`): games make a player for
+each sound and drop it unclosed, and a phone's collector freed those.
+
 | Call | What happens |
 | --- | --- |
 | `getState` | UNREALIZED (100) before `realize`, then the track's state: REALIZED 200, PREFETCHED 300, STARTED 400; CLOSED 0 after `close` or when the instance's group closed. Never throws. |
-| `realize`, `prefetch` | As above; nothing on a player already there. |
+| `realize`, `prefetch` | As above; nothing on a player already there. `MediaException` for a sound that is too large, `OutOfMemoryError` when the game's sound group is full. |
 | `start` | Prefetches, then starts. The state is STARTED when `start` returns, however short the sound. After the end it plays again from the start. Nothing on a started player. |
 | `stop` | Stops and keeps the media time; nothing on a player that is not started. |
 | `deallocate` | Back to REALIZED, stopping first; nothing while UNREALIZED. |
@@ -114,6 +135,11 @@ FastEmu cannot play never throws (rule 14 of
 - Each is logged once at `LogLevel::Warn` with the declared type and the
   first 16 bytes, so the format can be added later. An instance logs 16
   such lines, then says it stops.
+
+A sound that is too large, or a game that holds all the sound it may, is
+not silence: it throws (see Players), so a game cannot take the whole of
+the computer's memory by making sounds, and one that cannot hold a sound
+says so.
 
 ### Locators
 
@@ -229,7 +255,8 @@ thread.
 | `Sound(byte[], FORMAT_TONE)` | A Smart Messaging ringing tone, or whatever format the bytes show. |
 | `Sound(byte[], FORMAT_WAV)` | WAV, or whatever format the bytes show (MIDI given as WAV plays). |
 | `Sound(freq, duration)` | A beep; a frequency outside 0 to 20000 Hz or a duration of 0 or less throws `IllegalArgumentException`. |
-| Data that does not decode | No exception: the sound is `SOUND_UNINITIALIZED` and `play` does nothing (J2ME Loader does the same; Turrican spams errors otherwise). A format other than 1 or 5 throws `IllegalArgumentException`; `null` data `NullPointerException`. |
+| Data that does not decode | No exception: the sound is `SOUND_UNINITIALIZED` and `play` does nothing (J2ME Loader does the same; Turrican spams errors otherwise), and so it is for a sound that decodes to more than 16 MiB. A format other than 1 or 5 throws `IllegalArgumentException`; `null` data `NullPointerException`. |
+| A full sound group | `OutOfMemoryError` from `Sound(...)` or `init`, after one collection, when the game holds 128 players or 32 MiB of sound with MMAPI players and Nokia sounds together. The old sound stays. |
 | `init(...)` | Replaces the sound; the old one is closed quietly. |
 | `play(loop)` | Stops a playing sound, then plays from the start; 0 loops forever, a negative loop throws. |
 | `stop`, `resume` | Stop and keep the place; resume from it. |
@@ -269,8 +296,11 @@ thread.
   `playTone`, wrong and missing content types, undecodable data,
   `MIDIControl`, `StopTimeControl`, hundreds of players opened, closed
   and forgotten, an instance without an engine, `DataSource` and Nokia
-  `Sound`. Without a JDK they pass with a note unless
-  `FASTEMU_REQUIRE_JAVA=1`.
+  `Sound`. `MediaMemory` and `NokiaMemory` cover what a game's sound
+  costs: the heap counting a player's bytes and dropping them, the
+  32 MiB and 128 player limits, forgotten players making room, an AMR
+  file of empty frames and a stream that never ends. Without a JDK they
+  pass with a note unless `FASTEMU_REQUIRE_JAVA=1`.
 
 ## Gaps
 
@@ -284,6 +314,7 @@ thread.
   lands a few milliseconds late, and later when the engine renders in
   large steps.
 - Players that are reachable but idle keep their decoded sound; only
-  closed and collected players free it.
+  closed and collected players free it. A game holds at most 32 MiB of it
+  and 128 players, and past that it gets `OutOfMemoryError`.
 - Which classes a game sees (Nokia's on a Nokia profile only) is for the
   launcher to decide; `classes()` returns them all.

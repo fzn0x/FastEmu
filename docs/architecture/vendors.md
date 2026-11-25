@@ -164,7 +164,10 @@ end.
 `vendor::clip` opens a player for a vendor sound in the instance's group,
 with the VM lock released, and logs a warning when the engine refuses the
 data. Without a group (the headless runner, tests) there is no player and
-the vendor classes behave as if the sound played.
+the vendor classes behave as if the sound played. The players are the
+same as MMAPI's, so a game holds at most 128 of them and 32 MiB of sound
+for all its APIs together: a sound that is too large stays silent, and a
+game whose group is full gets `OutOfMemoryError`, after one collection.
 
 ## Testing
 
