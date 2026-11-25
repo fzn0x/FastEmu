@@ -185,6 +185,17 @@ counts already. A file is checked by the size its header declares,
 declares 16384 by 2048 pixels never reaches the decoder on a small heap.
 A file whose size cannot be read goes to the decoder, which refuses it.
 
+The image decodes of one game take turns, one at a time, as its resource
+reads do. A turn runs from before the file is read or copied until the
+image is counted on the heap. The decode runs with the VM lock released,
+and the heap check before it reserves nothing, so threads that decoded at
+once could each hold a file and an image the heap had not counted. A
+thread whose turn has not come waits without the VM lock and holds
+nothing of its file. A thread that waited while its game was closed
+decodes nothing. So a game's image calls hold one file and one decode
+beside its heap at most. `createImage(byte[], offset, length)` and
+`DirectUtils.createImage` copy only the part of the array they decode.
+
 `Image.createImage(InputStream)` reads at most 16 MiB. A stream that gives
 more ends with `IOException`, and so does one whose `read` returns no
 bytes 1000 times in a row.
