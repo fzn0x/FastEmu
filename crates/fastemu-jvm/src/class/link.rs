@@ -158,9 +158,10 @@ pub(super) fn from_class_file(file: ClassFile) -> Result<ClassDef, LoadError> {
 }
 
 /// The value of the `ConstantValue` attribute of a static field. A string
-/// is made once for every field that names it: a class file can give
-/// thousands of fields one long string, and each would otherwise hold a
-/// copy.
+/// is made once for each text that fields name, by the entry that holds
+/// its text, however many string entries name that entry: a class file can
+/// give thousands of fields one long text, and each would otherwise hold a
+/// copy. `strings` has the copies made so far, by the index of the text.
 fn constant_value(
     cp: &ConstantPool,
     index: u16,
@@ -172,12 +173,12 @@ fn constant_value(
         (Constant::Long(v), Kind::Long) => Value::Long(*v),
         (Constant::Float(v), Kind::Float) => Value::Float(*v),
         (Constant::Double(v), Kind::Double) => Value::Double(*v),
-        (Constant::String(_), Kind::Ref) => {
-            if let Some(text) = strings.get(&index) {
+        (Constant::String(utf8), Kind::Ref) => {
+            if let Some(text) = strings.get(utf8) {
                 return Some(ConstValue::String(Arc::clone(text)));
             }
             let text: Arc<[u16]> = cp.string(index).ok()?.into();
-            strings.insert(index, Arc::clone(&text));
+            strings.insert(*utf8, Arc::clone(&text));
             return Some(ConstValue::String(text));
         }
         _ => return None,
@@ -452,7 +453,8 @@ mod tests {
     }
 
     /// A class file whose static fields `f0`, `f1`, ... name the string
-    /// constants `constants`: entry 2 and entry 4 of its pool.
+    /// constants `constants`. Entries 2 and 5 of its pool are strings of
+    /// the same long text, and entry 4 is a string of a short one.
     fn with_string_constants(constants: &[u16]) -> ClassFile {
         let fields = constants
             .iter()
@@ -473,6 +475,7 @@ mod tests {
                 Constant::String(1),
                 utf8("short"),
                 Constant::String(3),
+                Constant::String(1),
             ]),
             access: access::PUBLIC | access::SUPER,
             name: "a/A".into(),
@@ -485,16 +488,18 @@ mod tests {
     }
 
     #[test]
-    fn fields_that_name_one_string_constant_share_its_text() {
-        let def = from_class_file(with_string_constants(&[2, 2, 4, 2])).unwrap();
+    fn fields_that_name_one_text_share_it_whatever_string_entry_they_name() {
+        let def = from_class_file(with_string_constants(&[2, 2, 4, 5, 2, 5])).unwrap();
         let text = |i: usize| match &def.fields[i].constant {
             Some(ConstValue::String(text)) => Arc::clone(text),
             other => panic!("{other:?}"),
         };
-        // Each field holding a copy would make a class of 65535 fields
-        // that name a long string take gigabytes.
-        assert!(Arc::ptr_eq(&text(0), &text(1)));
-        assert!(Arc::ptr_eq(&text(0), &text(3)));
+        // A class file can hold thousands of string entries that name one
+        // text, so a copy for each entry, or each field, would make a class
+        // of 65535 fields take gigabytes before its size was judged.
+        for i in [1, 3, 4, 5] {
+            assert!(Arc::ptr_eq(&text(0), &text(i)), "field {i}");
+        }
         assert!(!Arc::ptr_eq(&text(0), &text(2)));
         assert_eq!((text(0).len(), text(2).len()), (1000, 5));
     }
