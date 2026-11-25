@@ -62,6 +62,11 @@ FNV-1a hash of the whole name). The store opens only when it was made
 with `AUTHMODE_ANY`, and it can be changed only when it was also made
 writable; otherwise the call throws `SecurityException`.
 
+The list of another suite's folder is remembered only when the folder
+holds a store, and for 16 suites at most. For any other name the call
+reads the folder again, and a game that tries thousands of vendor names
+leaves nothing behind in the virtual machine.
+
 **Stores are not shared between instances yet.** The folder of another
 suite sits inside this instance's own data folder, and nothing puts
 another instance's stores there, so in practice such a store is missing

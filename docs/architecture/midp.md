@@ -74,8 +74,10 @@ named.
   class it is called on; `JarSource` then turns `\` into `/`, collapses
   slashes and `.` segments, strips leading slashes, matches exactly and
   without case, and finally drops leading directories one at a time. Each
-  miss is logged once at `LogLevel::Warn`. Classes under `java/` and
-  `javax/` never load from the JAR.
+  miss is logged once at `LogLevel::Warn`, with the name cut to 255
+  characters. After 256 different misses the source logs once that it
+  stops, and keeps no more names; what the JAR has still loads. Classes
+  under `java/` and `javax/` never load from the JAR.
 
 Natives that read resources by name use `env(ctx).source` (the same
 `JarSource`) inside `Ctx::without_lock`. `Image.createImage(String)`
@@ -139,11 +141,13 @@ Each pass of `lcdui::event::run`:
    `Ctx::post` from natives). The app's input arrives this way, from the
    control thread; other modules may post work for the event thread the
    same way, for example `PlayerListener` events read from
-   `Group::subscribe` on a host thread;
+   `Group::subscribe` on a host thread. At most `max_posted` (10000)
+   tasks wait; a task posted past that is dropped, with one warning;
 2. delivers the queued input events;
 3. sends `keyRepeated` when the held key's time comes;
 4. relays out the shown displayable if its commands, title, ticker or
-   full-screen mode changed (`sizeChanged` when its size did);
+   full-screen mode changed (`sizeChanged` when its size did). The
+   request waits once however often the game makes it;
 5. applies the latest `setCurrent`: `sizeChanged` if the size differs
    from the last one the displayable heard, `hideNotify` on the old one,
    `showNotify` on the new one, a full repaint;
@@ -163,7 +167,10 @@ a game's exception.
 
 `setCurrent` only records the latest request; `getCurrent` returns it at
 once. `callSerially` always queues (running it inline overflows the stack
-of games that re-post from `run`); `null` is ignored.
+of games that re-post from `run`); `null` is ignored. At most
+`max_posted` (10000) runnables wait, as many as tasks may be posted; the
+call after that throws `OutOfMemoryError`, which a game can catch, and
+the runnables already queued still run. Games queue a handful.
 
 ## Repaints and frames
 
@@ -276,6 +283,10 @@ name: OK, Back, Cancel, Exit, Help, Stop or Select.
 | `Instance::stop` | `destroyApp(true)` (up to 1 s), then every thread stops and the sound group closes | `Exited` |
 | `notifyDestroyed` | every thread stops, no `destroyApp` | `Exited` |
 
+The message of `Crashed` is the game's own text, an exception's message
+for one. It is cut to 1 KiB and its control characters are escaped, as
+the log's lines are (see [The log](#the-log)).
+
 Exceptions in callbacks, posted tasks and game threads are logged and
 the game keeps running; only the cases above end it. Dropping a
 `MidpInstance` stops it.
@@ -295,6 +306,30 @@ two seconds.
 manifest, an exact name before one that differs in case.
 `checkPermission` answers network permissions from the network policy
 and denies the rest.
+
+## The log
+
+Every line an instance logs passes `HostLink::log`, whether the VM, a
+native or `JarSource` wrote it, and the app and the command line runner
+print only what comes out of it. The link:
+
+- cuts a line to the machine's `max_log_line_bytes` (4096) with the same
+  ` ... (N more characters)` note the VM uses, and the launcher gives the
+  link, the `JarSource` and the VM one `VmLimits`, so the cut is the same
+  everywhere;
+- escapes control characters, since a game chooses much of the text
+  (`System.out`, an sms address, a push connection string, a missing
+  name): CR and LF become the two characters `\r` and `\n`, and every
+  other control character below U+0020 but the tab, U+007F and U+0080 to
+  U+009F becomes U+FFFD. ESC is one, so no sequence that clears a screen,
+  sets a title or writes to the clipboard reaches a terminal, and no line
+  can pass for a message of FastEmu's;
+- keeps at most 10000 lines and 1 MiB of text between two `drain_log`
+  calls, dropping the oldest first. A line is at most 4096 bytes, so the
+  megabyte holds at least 256 of them.
+
+The app's own buffer of a game's log (`fastemu-ui`'s `LogBuffer`) keeps
+2000 lines and 1 MiB of text, whichever is reached first.
 
 ## Links
 
