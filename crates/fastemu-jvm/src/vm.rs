@@ -187,7 +187,11 @@ pub(crate) struct VmState {
     pub(crate) weak: HashMap<ObjRef, Option<ObjRef>>,
     pub(crate) globals: Vec<Option<ObjRef>>,
     pub(crate) free_globals: Vec<u32>,
+    /// Tasks posted and not yet run, at most `limits.max_posted`.
     pub(crate) posted: VecDeque<Task>,
+    /// Whether a posted task was dropped for lack of room, which is
+    /// logged once.
+    pub(crate) posted_full: bool,
     pub(crate) extensions: HashMap<TypeId, Box<dyn Any + Send>>,
     pub(crate) properties: HashMap<String, String>,
     /// Bytes printed to `System.out` and `System.err` since the last line
@@ -204,6 +208,25 @@ pub(crate) struct VmState {
     pub(crate) wk: WellKnown,
     pub(crate) exit_code: Option<i32>,
     pub(crate) live_threads: usize,
+}
+
+impl VmState {
+    /// Queues `task` for [`Ctx::run_posted`], unless `limits.max_posted`
+    /// tasks wait already. Then the task comes back to the caller to drop,
+    /// and the first time that happens a warning goes to the log.
+    pub(crate) fn push_posted(&mut self, shared: &VmShared, task: Task) -> Option<Task> {
+        if self.posted.len() < shared.config.limits.max_posted {
+            self.posted.push_back(task);
+            return None;
+        }
+        if !std::mem::replace(&mut self.posted_full, true) {
+            shared.log(
+                LogLevel::Warn,
+                "too many tasks wait for the virtual machine; later ones are dropped",
+            );
+        }
+        Some(task)
+    }
 }
 
 /// The parts of a virtual machine every thread shares.
@@ -383,6 +406,7 @@ impl Vm {
             globals: Vec::new(),
             free_globals: Vec::new(),
             posted: VecDeque::new(),
+            posted_full: false,
             extensions: HashMap::new(),
             properties,
             out_line: Vec::new(),
@@ -481,10 +505,12 @@ impl Vm {
     /// as one wedged in a native does, the task is dropped without running
     /// and a warning goes to the log: waiting longer would only hold up
     /// the host thread, which is often the one that has to stop the
-    /// machine.
+    /// machine. So is a task posted while [`crate::VmLimits::max_posted`] others
+    /// wait, which only a thread that never drains them lets happen; the
+    /// first one dropped for that logs a warning too.
     pub fn post(&self, task: impl FnOnce(&mut Ctx<'_>) -> JResult<()> + Send + 'static) {
-        match self.shared.state.try_lock_for(WEDGED_LOCK_WAIT) {
-            Some(mut state) => state.posted.push_back(Box::new(task)),
+        let rejected = match self.shared.state.try_lock_for(WEDGED_LOCK_WAIT) {
+            Some(mut state) => state.push_posted(&self.shared, Box::new(task)),
             None => {
                 self.shared.log(
                     LogLevel::Warn,
@@ -492,8 +518,11 @@ impl Vm {
                 );
                 return;
             }
+        };
+        // A task that found no room is dropped here, with the lock free.
+        if rejected.is_none() {
+            self.shared.cond.notify_all();
         }
-        self.shared.cond.notify_all();
     }
 
     /// Asks every thread to end: each unwinds at its next safepoint,

@@ -151,10 +151,17 @@ impl Ctx<'_> {
 
     /// Queues `task` for [`Ctx::run_posted`], as [`crate::Vm::post`] does.
     /// Natives use this one: `Vm::post` takes the VM lock, which the
-    /// calling thread already holds.
+    /// calling thread already holds. A task posted while
+    /// [`crate::VmLimits::max_posted`] others wait is dropped, and the
+    /// first one dropped logs a warning.
     pub fn post(&mut self, task: impl FnOnce(&mut Ctx<'_>) -> JResult<()> + Send + 'static) {
-        self.state.posted.push_back(Box::new(task));
-        self.shared.cond.notify_all();
+        if self
+            .state
+            .push_posted(self.shared, Box::new(task))
+            .is_none()
+        {
+            self.shared.cond.notify_all();
+        }
     }
 
     /// Asks every thread to stop, as [`crate::Vm::stop`] does, from native
