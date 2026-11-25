@@ -667,8 +667,12 @@ Decoding also checks the operand stack, as a small part of a verifier:
 every reachable instruction must have one stack height however it is
 reached, stay within `max_stack`, never pop an empty stack, never run
 past the end of the code, and name constant pool entries of the right
-kind. Code that fails throws `VerifyError` on its first call; javac and
-ProGuard output always passes. There is no type verifier beyond that.
+kind. A return must also leave as many slots as the method's descriptor
+says: none for `void`, two for `long` and `double`, one for the rest.
+Code that fails throws `VerifyError` on its first call; javac and
+ProGuard output always passes. Code that no path reaches is not
+checked, as phones accept the dead code that obfuscators leave. There is
+no type verifier beyond that; see "What the interpreter runs".
 Constant pool references resolve lazily, on first execution, into
 per-class caches; a failed resolution is not cached and throws again.
 `invokeinterface` caches the last receiver class per constant pool
@@ -746,6 +750,28 @@ Speed, from the benchmark (`cargo test -p fastemu-jvm --release --test
 bench -- --ignored --nocapture`): about 590 million bytecodes per second
 on a tight arithmetic loop and 190 million with a static call in every
 iteration, on the development machine. Phones ran 1 to 20 million.
+
+What a crafted class can do is limited, as there is no type verifier.
+Decoding checks what the interpreter counts on. A reachable return that
+leaves another number of slots than the descriptor says throws
+`VerifyError` at the first call. A return gives the caller the slots the
+descriptor declares, whatever came back, so the caller's operand stack
+never drifts from what the stack walk counted. `invokevirtual` runs the
+entry of the receiver's vtable only when its selector (the name and the
+descriptor) is the one the call names. A receiver that does not have the
+method throws `IncompatibleClassChangeError`. A call takes its arguments
+off the stack with a checked subtraction.
+
+Values are not typed. Bytecode can hand a native an object or an array
+of another class than it reads, or throw an object that is not a
+`Throwable`. Hundreds of natives read their arguments with accessors
+that panic on the wrong type, so this stays a known limit: a crafted
+class can stop its own game with an internal error. The panic ends the
+thread that ran it, logs `internal error in the virtual machine` and
+stops that game, which the host shows as crashed. No other game is
+affected. The report of an uncaught exception has its own guard, so a
+thread that threw a plain `Object` still ends, releases its monitors and
+wakes the threads that join it.
 
 ## The class library
 
@@ -894,6 +920,11 @@ What natives and games can rely on:
   reaches every implicit conversion.
 - `tests/old_bytecode.rs` runs `jsr`/`ret` and a version 45.3 class built
   with the small assembler in `tests/support`.
+- `tests/bad_bytecode.rs` runs methods a damaged or crafted class could
+  hold: bad stack heights and constant pool operands, returns of the
+  wrong width (called a thousand times, so a leak shows), virtual calls
+  on an object of another class, and a thread that throws a plain
+  `Object`.
 - `tests/class_limits.rs` loads deep array names, long chains of classes
   and of interfaces in both load orders and a 40 layer interface diamond,
   each under a deadline, on a VM thread.
