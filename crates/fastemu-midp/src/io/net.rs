@@ -640,14 +640,23 @@ mod tests {
     use crate::env::InstanceEnv;
     use crate::io::connector::{Options, READ_WRITE};
 
-    /// Runs `f` on a VM with the MIDP classes whose instance may use the
-    /// network.
-    fn with_network(f: impl FnOnce(&mut Ctx<'_>)) {
-        let vm = Vm::new(
+    /// A VM with the MIDP classes.
+    fn machine() -> Vm {
+        Vm::new(
             VmConfig::default(),
             Arc::new(MemorySource::new()),
             crate::classes(&fastemu_core::default_profile()),
-        );
+        )
+    }
+
+    /// Runs `f` on a VM with the MIDP classes whose instance may use the
+    /// network.
+    fn with_network(f: impl FnOnce(&mut Ctx<'_>)) {
+        with_network_on(&machine(), f);
+    }
+
+    /// Runs `f` on `vm`, in an instance that may use the network.
+    fn with_network_on(vm: &Vm, f: impl FnOnce(&mut Ctx<'_>)) {
         vm.attach("test", |ctx| {
             let mut env = InstanceEnv::for_tests("unused");
             env.settings.network = NetworkPolicy::Allow;
@@ -933,6 +942,49 @@ mod tests {
             );
             assert_eq!(count_started(&started), 1);
             ctx.take_interrupt();
+        });
+    }
+
+    #[test]
+    fn a_stopping_game_starts_no_helper() {
+        with_network(|ctx| {
+            let (ran, started) = mpsc::channel();
+            ctx.stop_vm();
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let result = off_thread(ctx, deadline, "test", move || {
+                let _ = ran.send(());
+            });
+            assert!(matches!(result, Err(Throw::Stop)));
+            assert_eq!(count_started(&started), 0);
+        });
+    }
+
+    #[test]
+    fn a_stop_ends_the_wait_for_a_helper_place() {
+        let vm = machine();
+        let stopper = vm.clone();
+        with_network_on(&vm, |ctx| {
+            let (open, gate) = gate();
+            let (ran, started) = mpsc::channel();
+            for _ in 0..MAX_HELPERS {
+                give_up(ctx, &gate, &ran);
+            }
+            // The user closes the game while it waits for a place. A stop
+            // that comes before the call starts nothing either.
+            let stop = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(300));
+                stopper.stop();
+            });
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let late = ran.clone();
+            let result = off_thread(ctx, deadline, "test", move || {
+                let _ = late.send(());
+            });
+            assert!(matches!(result, Err(Throw::Stop)));
+            stop.join().unwrap();
+            drop(open);
+            drop(ran);
+            assert_eq!(count_started(&started), MAX_HELPERS);
         });
     }
 }
