@@ -403,12 +403,19 @@ mod tests {
     }
 
     /// The real sampler, on this test's own process and on a child that
-    /// has already exited. No time is asserted.
+    /// has already exited. No time is asserted, only that both counts of
+    /// this process's CPU are there.
     #[cfg(windows)]
     #[test]
     fn sampler_reads_this_process() {
         let dir = std::env::temp_dir().join(format!("fastemu-sampler-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        // Keep a thread busy a moment, so that Windows' tick based time
+        // has counted some of this process too.
+        let busy = std::time::Instant::now();
+        while busy.elapsed() < Duration::from_millis(500) {
+            std::hint::black_box(busy);
+        }
         let mut ended = Command::new("cmd").args(["/C", "exit 0"]).spawn().unwrap();
         let ended_pid = ended.id();
         ended.wait().unwrap();
@@ -424,11 +431,12 @@ mod tests {
             Proc::Alive {
                 pid,
                 cycles,
+                time,
                 memory,
-                ..
             } => {
                 assert_eq!(*pid, std::process::id());
                 assert!(*cycles > 0);
+                assert!(*time > 0, "no tick based time");
                 let memory = memory.expect("this process's memory");
                 assert!(memory.peak_ws > 0 && memory.private > 0);
             }
