@@ -65,11 +65,35 @@ public class Customs extends MIDlet {
         return true;
     }
 
-    private static void sleep(int ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
+    /**
+     * Waits until the event thread has run a runnable of ours. It runs it
+     * after the pass it is in, so a pass that is still painting items is
+     * over by then.
+     */
+    private static boolean waitSerially(Display display) {
+        final boolean[] ran = new boolean[1];
+        display.callSerially(new Runnable() {
+            public void run() {
+                synchronized (LOCK) {
+                    ran[0] = true;
+                    LOCK.notifyAll();
+                }
+            }
+        });
+        long end = System.currentTimeMillis() + 10000;
+        synchronized (LOCK) {
+            while (!ran[0]) {
+                long left = end - System.currentTimeMillis();
+                if (left <= 0) {
+                    return false;
+                }
+                try {
+                    LOCK.wait(left);
+                } catch (InterruptedException e) {
+                }
+            }
         }
+        return true;
     }
 
     protected void startApp() {
@@ -89,7 +113,10 @@ public class Customs extends MIDlet {
             System.out.println("custom small item was not painted");
             return;
         }
-        sleep(500);
+        if (!waitSerially(display)) {
+            System.out.println("custom form was not painted to its end");
+            return;
+        }
         System.gc();
         System.out.println("custom big painted " + big.painted);
         System.out.println("custom form counts " + (base - Runtime.getRuntime().freeMemory()));
