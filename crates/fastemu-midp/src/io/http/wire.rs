@@ -15,6 +15,15 @@ const MAX_HEAD: usize = 64 * 1024;
 /// The longest chunk size line accepted, extensions included.
 const MAX_CHUNK_LINE: usize = 1024;
 
+/// The most the trailer lines after a chunked body may take, all of them
+/// together. No game reads a trailer, so this only keeps a server from
+/// sending them for ever.
+const MAX_TRAILER: usize = 16 * 1024;
+
+/// What the game reads when the trailer of a chunked body runs past
+/// [`MAX_TRAILER`].
+const TRAILER_TOO_LONG: &str = "the trailer of the response is too long";
+
 /// Request headers FastEmu writes itself, whatever the game set.
 const OWN_HEADERS: [&str; 3] = ["content-length", "connection", "transfer-encoding"];
 
@@ -232,8 +241,9 @@ enum State {
     ChunkData(u64),
     /// The line end after a chunk's data comes next.
     ChunkEnd,
-    /// Trailer lines after the last chunk, up to a blank line.
-    Trailer,
+    /// Trailer lines after the last chunk, up to a blank line; this many
+    /// bytes of them have come.
+    Trailer(usize),
     /// The body is complete.
     Done,
 }
@@ -319,7 +329,7 @@ impl Decoder {
                         .map_err(|_| format!("bad chunk size {digits:?}"))?;
                     used += line.len;
                     self.state = if size == 0 {
-                        State::Trailer
+                        State::Trailer(0)
                     } else {
                         State::ChunkData(size)
                     };
@@ -336,14 +346,22 @@ impl Decoder {
                     }
                     self.state = State::ChunkSize;
                 }
-                State::Trailer => {
-                    let Some(line) = line(rest, MAX_HEAD)? else {
+                State::Trailer(seen) => {
+                    let Some(line) =
+                        line(rest, MAX_TRAILER - seen).map_err(|_| TRAILER_TOO_LONG)?
+                    else {
                         break;
                     };
-                    used += line.len;
-                    if line.text.is_empty() {
-                        self.state = State::Done;
+                    let seen = seen + line.len;
+                    if seen > MAX_TRAILER {
+                        return Err(TRAILER_TOO_LONG.into());
                     }
+                    used += line.len;
+                    self.state = if line.text.is_empty() {
+                        State::Done
+                    } else {
+                        State::Trailer(seen)
+                    };
                 }
             }
             if made == out.len() {

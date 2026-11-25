@@ -47,6 +47,10 @@ const MAX_REQUEST_HEADERS: usize = 64;
 /// take together.
 const MAX_REQUEST_HEADER_BYTES: usize = 16 << 10;
 
+/// How many interim `1xx` responses a server may send before the final
+/// one. Real servers send one.
+const MAX_INTERIM: u32 = 16;
+
 /// Whether the request has gone out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
@@ -127,6 +131,8 @@ struct Exchange {
     eof: bool,
     head_request: bool,
     decoder: Decoder,
+    /// How many interim `1xx` heads came before the final one.
+    interim: u32,
 }
 
 impl Exchange {
@@ -137,6 +143,7 @@ impl Exchange {
             eof: false,
             head_request,
             decoder: Decoder::new(Framing::Empty),
+            interim: 0,
         }
     }
 
@@ -159,37 +166,48 @@ impl Exchange {
 
     /// Reads the response head, skipping interim `1xx` responses, and sets
     /// up the body decoder. `Ok(None)` when it needs more time.
+    ///
+    /// One call parses what has arrived and takes in at most one read,
+    /// and every interim head ends it. The caller then checks for a stop,
+    /// an interrupt and its deadline, which a server that keeps sending
+    /// (interim heads, a head one byte at a time) cannot keep from it.
     fn read_head(&mut self) -> std::io::Result<Option<Head>> {
-        loop {
-            match wire::parse_head(&self.buf, self.eof).map_err(std::io::Error::other)? {
-                Parsed::Head(head, used) => {
-                    self.buf.drain(..used);
-                    if (100..200).contains(&head.code) && head.code != 101 {
-                        continue;
+        match wire::parse_head(&self.buf, self.eof).map_err(std::io::Error::other)? {
+            Parsed::Head(head, used) => {
+                self.buf.drain(..used);
+                if (100..200).contains(&head.code) && head.code != 101 {
+                    self.interim += 1;
+                    if self.interim > MAX_INTERIM {
+                        return Err(std::io::Error::other(
+                            "the server sent too many interim responses",
+                        ));
                     }
-                    self.decoder = Decoder::new(wire::framing(self.head_request, &head));
-                    return Ok(Some(head));
+                    return Ok(None);
                 }
-                Parsed::NotHttp => {
-                    self.decoder = Decoder::new(Framing::UntilClose);
-                    return Ok(Some(Head::not_http()));
-                }
-                Parsed::Incomplete if self.eof => {
-                    return Err(std::io::Error::other(
-                        "the server closed the connection without a response",
-                    ));
-                }
-                Parsed::Incomplete => {}
+                self.decoder = Decoder::new(wire::framing(self.head_request, &head));
+                return Ok(Some(head));
             }
-            if !self.fill()? {
-                return Ok(None);
+            Parsed::NotHttp => {
+                self.decoder = Decoder::new(Framing::UntilClose);
+                return Ok(Some(Head::not_http()));
             }
+            Parsed::Incomplete if self.eof => {
+                return Err(std::io::Error::other(
+                    "the server closed the connection without a response",
+                ));
+            }
+            Parsed::Incomplete => {}
         }
+        self.fill()?;
+        Ok(None)
     }
 
     /// Decodes body bytes into `out`: `Ok(Some(0))` at the end of the
-    /// body, `Ok(None)` when nothing arrived within a slice.
+    /// body, `Ok(None)` when nothing arrived within a slice or what
+    /// arrived held no body bytes (a chunk header, a trailer line), so
+    /// the caller can check for a stop and its deadline.
     fn read_body(&mut self, out: &mut [u8]) -> std::io::Result<Option<usize>> {
+        let mut filled = false;
         loop {
             let (used, made) = self
                 .decoder
@@ -203,9 +221,10 @@ impl Exchange {
                 self.decoder.end_of_input().map_err(std::io::Error::other)?;
                 return Ok(Some(0));
             }
-            if !self.fill()? {
+            if filled || !self.fill()? {
                 return Ok(None);
             }
+            filled = true;
         }
     }
 }
