@@ -431,7 +431,13 @@ fn find_midlet_classes_within(
         let Ok(class) = ClassFile::parse(&bytes) else {
             continue;
         };
-        if let Some(parent) = &class.super_name {
+        // A class file may call itself anything. One whose name no MIDlet
+        // entry could give, or whose superclass has such a name, is no
+        // MIDlet and no link of a chain to one: the loader would not take it.
+        if let Some(parent) = &class.super_name
+            && attributes::is_class_name(&class.name)
+            && attributes::is_class_name(parent)
+        {
             let is_abstract = class.access & fastemu_jvm::classfile::access::ABSTRACT != 0;
             supers.insert(class.name.to_string(), (parent.to_string(), is_abstract));
         }
@@ -710,6 +716,33 @@ mod tests {
         assert!(find_midlet_classes_within(&archive, "S", &limits).is_empty());
         assert_eq!(take_inflated(), 0);
         assert_eq!(take_consumed(), 5 * stream.len() as u64);
+    }
+
+    #[test]
+    fn a_class_that_has_a_name_no_midlet_has_is_not_listed() {
+        let long = format!("a/{}", "b".repeat(300));
+        let jar_bytes = write(
+            &[
+                TestEntry::stored("a/Game.class", &class_file("a/Game", MIDLET_CLASS)),
+                TestEntry::stored("a/Brackets.class", &class_file("a/[B", MIDLET_CLASS)),
+                TestEntry::stored("a/Control.class", &class_file("a/C\u{7}", MIDLET_CLASS)),
+                TestEntry::stored("a/Long.class", &class_file(&long, MIDLET_CLASS)),
+                // Its parent is no class a loader takes, so it is no MIDlet.
+                TestEntry::stored("a/Child.class", &class_file("a/Child", "a/[B")),
+                // A chain through a good name still gives its MIDlet.
+                TestEntry::stored("a/Base.class", &class_file("a/Base", MIDLET_CLASS)),
+                TestEntry::stored("a/Sub.class", &class_file("a/Sub", "a/Base")),
+            ],
+            true,
+        );
+        let suite = open_jar("badnames", &jar_bytes);
+        let classes: Vec<_> = suite
+            .info
+            .midlets
+            .iter()
+            .map(|m| &m.class_name[..])
+            .collect();
+        assert_eq!(classes, ["a.Base", "a.Game", "a.Sub"]);
     }
 
     #[test]

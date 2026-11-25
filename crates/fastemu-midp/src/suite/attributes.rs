@@ -220,15 +220,19 @@ pub fn class_name(raw: &str) -> Option<String> {
     let raw = raw.trim();
     let raw = raw.strip_suffix(".class").unwrap_or(raw);
     let raw = raw.trim_start_matches('/');
-    if raw.is_empty()
-        || raw.len() > MAX_CLASS_NAME_BYTES
-        || raw
+    is_class_name(raw).then(|| raw.replace('/', "."))
+}
+
+/// Whether `name` can be the name of the class of a MIDlet: not empty, at
+/// most [`MAX_CLASS_NAME_BYTES`] bytes, and no bracket or control
+/// character. The class files a suite is searched for MIDlets are held to
+/// it too, as a class file may call itself anything.
+pub fn is_class_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_CLASS_NAME_BYTES
+        && !name
             .chars()
             .any(|c| c.is_control() || matches!(c, '[' | ']'))
-    {
-        return None;
-    }
-    Some(raw.replace('/', "."))
 }
 
 #[cfg(test)]
