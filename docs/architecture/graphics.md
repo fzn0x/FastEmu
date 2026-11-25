@@ -197,8 +197,9 @@ reads do. A turn runs from before the file is read or copied until the
 image is counted on the heap. The decode runs with the VM lock released,
 and the heap check before it reserves nothing, so threads that decoded at
 once could each hold a file and an image the heap had not counted. A
-thread whose turn has not come waits without the VM lock and holds
-nothing of its file. A thread that waited while its game was closed
+thread whose turn has not come waits without the VM lock. It holds none
+of its file yet, except the bytes of a stream it read, which the heap
+counts. A thread that waited while its game was closed
 decodes nothing. So a game's image calls hold one file and one decode
 beside its heap at most. `createImage(byte[], offset, length)` and
 `DirectUtils.createImage` copy only the part of the array they decode.
@@ -209,7 +210,9 @@ before the vector grows. A stream the heap cannot hold ends in
 `OutOfMemoryError`: on a heap of 1 MiB after 1 MiB at most. Threads that
 read streams at once share the heap's room. The stream is read before the
 decode turn, as reading runs the game's code, and its bytes stay counted
-while the thread waits for its turn and while they decode.
+while the thread waits for its turn. In the turn they are its file: the
+next collection, which another thread can start while the decode runs,
+no longer counts them.
 
 `Image.createImage(InputStream)` reads at most 16 MiB. A stream that gives
 more ends with `IOException`, and so does one whose `read` returns no
