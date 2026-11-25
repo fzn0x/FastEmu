@@ -568,7 +568,7 @@ mod tests {
         let instance = MockLauncher.launch(request.clone()).expect("mock");
         let mut session = Session::new(EntryId(1), 0, request, instance);
         let asked = Instant::now();
-        let almost = asked + LINK_ARMING - Duration::from_millis(1);
+        let almost = asked + Duration::from_millis(499);
         assert!(!session.link_armed(asked), "no link, no prompt");
         session.press(Key::Pound);
         session.poll(asked);

@@ -52,7 +52,7 @@ fn inspect(launcher: &dyn Launcher, path: PathBuf) -> Inspected {
         Err(err) => (Err(err.to_string()), None),
     }));
     let (info, icon) = read.unwrap_or_else(|_| {
-        log::error!("reading {path:?} panicked; it is shown as broken");
+        log::error!("reading {} panicked; it is shown as broken", path.display());
         (Err(UNREADABLE.to_owned()), None)
     });
     Inspected { path, info, icon }
