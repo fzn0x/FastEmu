@@ -290,19 +290,24 @@ fn date_time(ctx: &mut Ctx<'_>, date: Value) -> JResult<i64> {
     Ok(run_millis(ctx).saturating_add(from_now))
 }
 
-/// `new Timer()`: the queue, and the thread that runs it.
+/// `new Timer()`: the queue, and the thread that runs it. The thread counts
+/// against the game's threads, so past `max_threads` the constructor throws
+/// `OutOfMemoryError` and leaves the timer as no constructor ran on it,
+/// with no queue.
 fn init(ctx: &mut Ctx<'_>, timer: ObjRef) -> JResult<Value> {
     let class = ctx.find_class(QUEUE)?;
     let q_obj = ctx.new_object(class)?;
-    ctx.payload_mut::<TimerData>(timer)?.queue = Some(q_obj);
     let serial = ctx.static_field_id(TIMER, "serialNumber", "I")?;
     let n = ctx.get_static(serial)?.int();
-    ctx.set_static(serial, Value::Int(n + 1))?;
     let queue_ref = ctx.new_global(q_obj);
     ctx.spawn_thread(&format!("Timer-{n}"), move |ctx| {
         while ctx.local_frame(|ctx| turn(ctx, &queue_ref))? {}
         Ok(())
     })?;
+    // The thread cannot run before this native returns, and a timer that
+    // got no thread has changed nothing.
+    ctx.set_static(serial, Value::Int(n.wrapping_add(1)))?;
+    ctx.payload_mut::<TimerData>(timer)?.queue = Some(q_obj);
     Ok(Value::Void)
 }
 
