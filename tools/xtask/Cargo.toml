@@ -15,6 +15,9 @@ publish = false
 fastemu-core.workspace = true
 fastemu-jvm.workspace = true
 fastemu-midp.workspace = true
+# `cargo xtask bench` runs games with the app's sound engine, on a silent
+# output.
+fastemu-audio.workspace = true
 # The screenshots of `cargo xtask compat`, with the version the app uses.
 png = "0.18"
 # `cargo xtask icons` renders the app's SVG icon. Only the renderer: the

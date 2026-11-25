@@ -12,7 +12,7 @@
 
 pub mod child;
 mod report;
-mod script;
+pub(crate) mod script;
 mod wire;
 
 use std::io::{BufRead, BufReader};

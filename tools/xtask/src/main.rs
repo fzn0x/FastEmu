@@ -14,8 +14,11 @@
 //!   `docs/compat/coverage.md`. See [`coverage`].
 //! * `compat`: run every JAR of a folder without a window and report what
 //!   each game did. See [`compat`].
+//! * `bench`: measure FastEmu against MicroEmulator 2.0.4 on Windows and
+//!   write `bench.md` and `bench.json`. See [`bench`].
 
 mod api;
+mod bench;
 mod changelog;
 mod compat;
 mod coverage;
@@ -36,6 +39,10 @@ Usage: cargo xtask changelog [--root DIR] <--check | --print | --release VERSION
        cargo xtask coverage [--root DIR] [--out FILE]
        cargo xtask compat DIR [--seconds S] [--keys SCRIPT] [--profile ID] [--jobs N]
                           [--out DIR]
+       cargo run --release -p xtask -- bench [--microemu DIR] [--games DIR] [--runs N]
+                          [--out DIR] [--fastemu-only] [--build-only]
+                          [--windows --app PATH] [--me-java PATH] [--me-jvm-arg ARG]...
+                          [--me-no-headless-awt] [--me-max-fps N]
 
 changelog:
   --check              fail when a fragment of changelog.d is invalid
@@ -80,7 +87,28 @@ compat:
   --jobs N             how many games run at once (default: 1)
   --out DIR            the folder (default: compat in the target folder)
 
-  --root DIR           the repository's root (default: the workspace root)";
+bench:
+  measures FastEmu against MicroEmulator 2.0.4 on Windows, with no window,
+  and writes bench.md and bench.json to the output folder; only a release
+  build measures (docs/benchmark.md has the method)
+  --microemu DIR       the unpacked microemulator-2.0.4 folder; needed
+                       unless --fastemu-only or --build-only
+  --games DIR          the JARs of DIR (not its subfolders) run as real games
+  --runs N             how many times each measurement runs (default: 4)
+  --out DIR            the folder (default: bench in the target folder)
+  --fastemu-only       measure FastEmu alone; MicroEmulator shows as not run
+  --build-only         build the benchmark MIDlet and MeBench, run nothing;
+                       works in any build and on any system
+  --windows            measure the desktop app and MicroEmulator's windows
+                       instead; opens windows, needs --app and --games
+  --app PATH           the desktop app's fastemu.exe, for --windows
+  --me-java PATH       the java that runs MicroEmulator (default: JAVA_HOME's)
+  --me-jvm-arg ARG     a JVM option for every MicroEmulator process; repeat
+                       it for more
+  --me-no-headless-awt start MicroEmulator without java.awt.headless
+  --me-max-fps N       also measure MicroEmulator capped at N frames a second
+
+  --root DIR          the repository's root (default: the workspace root)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -105,6 +133,13 @@ fn run(args: &[String]) -> Result<(), String> {
         Some("compat-run") => {
             let options = compat::child::Options::parse(&args[1..])?;
             compat::child::run(&options, &mut std::io::stdout().lock())
+        }
+        Some("bench") => run_bench(&args[1..]),
+        // FastEmu's side of one bench measurement, in the process `bench`
+        // starts for it.
+        Some("bench-run") => {
+            let options = bench::child::Options::parse(&args[1..])?;
+            bench::child::run(&options, &mut std::io::stdout().lock())
         }
         _ => Err(USAGE.to_string()),
     }
@@ -305,6 +340,13 @@ fn run_compat(args: &[String]) -> Result<(), String> {
         jobs,
     };
     compat::run(&options)
+}
+
+fn run_bench(args: &[String]) -> Result<(), String> {
+    let root = default_root();
+    let out = target_dir(&root).join("bench");
+    let options = bench::Options::parse(args, out).map_err(|e| format!("{e}\n{USAGE}"))?;
+    bench::run(&options, &root)
 }
 
 /// Cargo's target folder: `CARGO_TARGET_DIR`, else the folder this
