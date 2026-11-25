@@ -13,7 +13,7 @@ use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Value, classfile::access};
 use super::layer::{GRAPHICS, IMAGE};
 use crate::env::env;
 use crate::lcdui::graphics::{GraphicsData, new_graphics};
-use crate::lcdui::image::{new_image, surface_of};
+use crate::lcdui::image::{new_image, reserve_pixels, surface_of};
 use crate::lcdui::keys::{self, take_key_states};
 use crate::lcdui::{Rect, canvas, display, displayable, throw_gfx};
 
@@ -35,6 +35,7 @@ fn init(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         let profile = &env(ctx).profile;
         (profile.screen_width as i32, profile.screen_height as i32)
     };
+    reserve_pixels(ctx, w.into(), h.into())?;
     let surface = Surface::new_mutable(w, h).map_err(|e| throw_gfx(ctx, &e))?;
     let image = new_image(ctx, surface)?;
     let field = ctx.field_id(GAME_CANVAS, BUFFER, IMAGE)?;

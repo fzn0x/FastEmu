@@ -20,7 +20,7 @@ use crate::lcdui::canvas::flush_shared;
 use crate::lcdui::display::is_shown;
 use crate::lcdui::displayable::data_mut;
 use crate::lcdui::graphics::{GraphicsData, new_graphics};
-use crate::lcdui::image::{SharedSurface, new_image, surface_of};
+use crate::lcdui::image::{SharedSurface, new_image, reserve_pixels, surface_of};
 use crate::lcdui::keys::{self, take_key_states};
 use crate::lcdui::state::state;
 use crate::lcdui::{Rect, throw_gfx};
@@ -50,6 +50,7 @@ fn construct(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         let st = state(ctx);
         (st.screen_width, st.screen_height)
     };
+    reserve_pixels(ctx, width.into(), height.into())?;
     let surface = Surface::new_mutable(width, height).map_err(|e| throw_gfx(ctx, &e))?;
     let image = new_image(ctx, surface)?;
     let field = ctx.field_id(CLASS, BUFFER, IMAGE)?;
