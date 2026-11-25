@@ -410,7 +410,7 @@ fn a_file_that_declares_more_pixels_than_the_heap_holds_is_refused_before_it_is_
     run.wait_log("done");
     let log = run.dump();
     for file in ["/bomb.png", "/bomb.bmp"] {
-        for how in ["by name", "by bytes", "by stream"] {
+        for how in ["by name", "by bytes", "by nokia bytes", "by stream"] {
             let line = format!("{file} {how} OutOfMemoryError");
             assert!(run.has(&line), "no {line:?}; the log:\n{log}");
         }
@@ -421,18 +421,19 @@ fn a_file_that_declares_more_pixels_than_the_heap_holds_is_refused_before_it_is_
     for (how, error) in [
         ("by name", "IOException"),
         ("by bytes", "IllegalArgumentException"),
+        ("by nokia bytes", "IllegalArgumentException"),
         ("by stream", "IOException"),
     ] {
         let line = format!("/bomb.gif {how} {error}");
         assert!(run.has(&line), "no {line:?}; the log:\n{log}");
     }
-    // A real image still loads, the three ways.
-    for how in ["by name", "by bytes", "by stream"] {
+    // A real image still loads, the four ways.
+    for how in ["by name", "by bytes", "by nokia bytes", "by stream"] {
         let line = format!("/dot.png {how} ok 2x2");
         assert!(run.has(&line), "no {line:?}; the log:\n{log}");
     }
-    // Six files that declare 128 MiB each were read, and none was decoded,
-    // and no GIF frame was decoded at its own size.
+    // Two files that declare 128 MiB were read eight times and never
+    // decoded, and no GIF frame was decoded at its own size.
     assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
 }
 
