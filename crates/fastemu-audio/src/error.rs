@@ -11,8 +11,9 @@ use crate::format::Format;
 /// [`InvalidArgument`](Self::InvalidArgument) become
 /// `IllegalArgumentException`, [`InvalidState`](Self::InvalidState) and
 /// [`Closed`](Self::Closed) become `IllegalStateException`,
-/// [`TooLarge`](Self::TooLarge) becomes `MediaException` too, and
-/// [`OutOfMemory`](Self::OutOfMemory) becomes `OutOfMemoryError`.
+/// [`TooLarge`](Self::TooLarge) and [`Busy`](Self::Busy) become
+/// `MediaException` too, and [`OutOfMemory`](Self::OutOfMemory) becomes
+/// `OutOfMemoryError`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AudioError {
     /// The data is in a format the engine cannot play, or the content
@@ -38,6 +39,11 @@ pub enum AudioError {
     /// The game's group holds as much sound, or as many players, as it
     /// may. Closing players frees room, so a later try can work.
     OutOfMemory(String),
+    /// The engine plays as many players as it will, for this game or for
+    /// every game together, so this one cannot start now. Stopping one,
+    /// or letting one end, makes room. MMAPI's `start` calls that
+    /// `MediaException`: the player cannot be started.
+    Busy(String),
 }
 
 impl AudioError {
@@ -64,6 +70,7 @@ impl fmt::Display for AudioError {
             Self::Closed => f.write_str("the player is closed"),
             Self::TooLarge(what) => write!(f, "sound too large: {what}"),
             Self::OutOfMemory(what) => write!(f, "out of sound memory: {what}"),
+            Self::Busy(what) => write!(f, "too many players are started: {what}"),
         }
     }
 }
@@ -101,6 +108,10 @@ mod tests {
             AudioError::OutOfMemory("128 players".into()).to_string(),
             "out of sound memory: 128 players"
         );
+        assert_eq!(
+            AudioError::Busy("a game may start 32".into()).to_string(),
+            "too many players are started: a game may start 32"
+        );
     }
 
     #[test]
@@ -108,6 +119,7 @@ mod tests {
         assert!(AudioError::TooLarge(String::new()).is_size_limit());
         assert!(AudioError::OutOfMemory(String::new()).is_size_limit());
         assert!(!AudioError::Closed.is_size_limit());
+        assert!(!AudioError::Busy(String::new()).is_size_limit());
         assert!(!AudioError::Unsupported(String::new()).is_size_limit());
     }
 }

@@ -8,9 +8,41 @@ use crate::error::AudioError;
 use crate::event::{PlayerEventKind, PlayerId};
 use crate::format::Format;
 use crate::media;
-use crate::mixer::Mixer;
+use crate::mixer::{GroupId, Mixer};
 use crate::tone::sequence;
 use crate::voice::{PlayerState, Voice};
+
+/// How many players one game may have started at once. A phone played a
+/// few sounds at a time; each started player takes a share of every
+/// buffer the audio thread mixes, which all games wait for.
+pub const MAX_STARTED_PER_GROUP: usize = 32;
+
+/// How many players all games together may have started at once.
+pub const MAX_STARTED_TOTAL: usize = 128;
+
+/// Fails if `group` or the engine already plays as many players as it
+/// may. Players that ended, stopped or never started do not count, and
+/// neither do the tones of `playTone`, which a group caps on its own.
+fn check_started_room(mixer: &Mixer, group: GroupId) -> Result<(), AudioError> {
+    let (mut here, mut all) = (0, 0);
+    for slot in mixer.slots.values() {
+        if slot.voice.state == PlayerState::Started && !slot.voice.one_shot {
+            all += 1;
+            here += usize::from(slot.group == group);
+        }
+    }
+    if here >= MAX_STARTED_PER_GROUP {
+        return Err(AudioError::Busy(format!(
+            "a game may have {MAX_STARTED_PER_GROUP} players started at once"
+        )));
+    }
+    if all >= MAX_STARTED_TOTAL {
+        return Err(AudioError::Busy(format!(
+            "all games together may have {MAX_STARTED_TOTAL} players started at once"
+        )));
+    }
+    Ok(())
+}
 
 /// One sound a game can start, stop, loop and seek. Created by a
 /// [`Group`](crate::Group); dropping it closes it, which frees its data.
@@ -88,13 +120,18 @@ impl Player {
     }
 
     /// Starts playing from the media time, or from the start if the last
-    /// run reached the end. Does nothing if already started.
+    /// run reached the end. Does nothing if already started. Fails with
+    /// [`AudioError::Busy`] while the game has [`MAX_STARTED_PER_GROUP`]
+    /// players started, or all games together [`MAX_STARTED_TOTAL`].
     pub fn start(&self) -> Result<(), AudioError> {
         self.with(|mixer, events| {
             let voice = self.voice(mixer);
             if voice.state == PlayerState::Started {
                 return Ok(());
             }
+            let group = mixer.slots.get(&self.id).expect("checked by with").group;
+            check_started_room(mixer, group)?;
+            let voice = self.voice(mixer);
             voice.start();
             let media_time_us = voice.media_time_us();
             mixer.emit(events, self.id, PlayerEventKind::Started { media_time_us });

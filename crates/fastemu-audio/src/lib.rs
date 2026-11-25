@@ -66,5 +66,5 @@ pub use output::NullOutput;
 #[cfg(feature = "output")]
 pub use output::{AudioOutput, OutputError, OutputInfo};
 pub use pcm::MAX_DECODED_BYTES;
-pub use player::Player;
+pub use player::{MAX_STARTED_PER_GROUP, MAX_STARTED_TOTAL, Player};
 pub use voice::PlayerState;

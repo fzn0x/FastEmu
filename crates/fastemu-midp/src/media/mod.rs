@@ -56,14 +56,16 @@ pub(crate) fn make_sound<R>(
 
 /// Throws the Java exception JSR-135 names for an engine error:
 /// `MediaException` for media the engine cannot handle or that is too
-/// large, `IllegalArgumentException` for bad arguments and tone
+/// large, or a player that cannot start because too many are started,
+/// `IllegalArgumentException` for bad arguments and tone
 /// sequences, `IllegalStateException` for calls in the wrong state, and
 /// `OutOfMemoryError` when the game's sound memory is full.
 pub(crate) fn throw_audio<T>(ctx: &mut Ctx<'_>, error: AudioError) -> JResult<T> {
     let class = match error {
-        AudioError::Unsupported(_) | AudioError::Malformed { .. } | AudioError::TooLarge(_) => {
-            api::MEDIA_EXCEPTION
-        }
+        AudioError::Unsupported(_)
+        | AudioError::Malformed { .. }
+        | AudioError::TooLarge(_)
+        | AudioError::Busy(_) => api::MEDIA_EXCEPTION,
         AudioError::OutOfMemory(_) => "java/lang/OutOfMemoryError",
         AudioError::InvalidToneSequence { .. } | AudioError::InvalidArgument(_) => {
             "java/lang/IllegalArgumentException"

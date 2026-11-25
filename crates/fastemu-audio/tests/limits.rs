@@ -12,7 +12,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use common::{constant_wav, controller_midi, engine, kinds, midi, wav};
-use fastemu_audio::{AudioError, MAX_QUEUED, PlayerEventKind, PlayerState};
+use fastemu_audio::{
+    AudioError, MAX_QUEUED, MAX_STARTED_PER_GROUP, MAX_STARTED_TOTAL, PlayerEventKind,
+    PlayerState,
+};
 
 /// A listener that blocks on its first event until released, and counts
 /// every event it gets. The thread that started the player is stuck
@@ -278,4 +281,53 @@ fn a_midi_with_a_pile_of_notes_at_the_start_still_plays_through() {
         kinds(&events).last(),
         Some(PlayerEventKind::EndOfMedia { last: true, .. })
     ));
+}
+
+/// A game may have 32 players started and all games together 128. Players
+/// that ended or were stopped give their place back.
+#[test]
+fn only_32_players_of_a_game_and_128_of_all_games_play_at_once() {
+    assert_eq!((MAX_STARTED_PER_GROUP, MAX_STARTED_TOTAL), (32, 128));
+    let engine = engine(8000);
+    // 50 ms of sound.
+    let data = constant_wav(8000, 400, 1000);
+    let game = engine.create_group();
+    let players: Vec<_> = (0..34)
+        .map(|_| game.create_player(&data, None).unwrap())
+        .collect();
+    for player in &players[..32] {
+        player.start().unwrap();
+    }
+    // The 33rd is refused and stays where it was.
+    let refused = players[32].start().unwrap_err();
+    assert!(matches!(refused, AudioError::Busy(_)), "{refused:?}");
+    assert!(!refused.is_size_limit());
+    assert_eq!(players[32].state(), PlayerState::Realized);
+    // Starting a player that plays already takes no new place.
+    players[0].start().unwrap();
+    // A stopped player gives its place back.
+    players[0].stop().unwrap();
+    players[32].start().unwrap();
+    assert!(players[33].start().is_err());
+    // So do the players that reach their end.
+    engine.advance(800);
+    assert_eq!(engine.playing_count(), 0);
+    players[33].start().unwrap();
+    engine.advance(800);
+
+    // Every game has its own 32, and together they have 128.
+    let games: Vec<_> = (0..5).map(|_| engine.create_group()).collect();
+    let mut kept = Vec::new();
+    let mut first_refusal = None;
+    for (g, group) in games.iter().enumerate() {
+        for i in 0..32 {
+            let player = group.create_player(&data, None).unwrap();
+            if player.start().is_err() {
+                first_refusal.get_or_insert((g, i));
+            }
+            kept.push(player);
+        }
+    }
+    assert_eq!(engine.playing_count(), MAX_STARTED_TOTAL);
+    assert_eq!(first_refusal, Some((4, 0)));
 }
