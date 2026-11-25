@@ -74,16 +74,16 @@ links to the page that describes the limit.
 | --- | --- | --- | --- |
 | Java heap | 2, 4, 8 or 16 MiB, set by the phone profile | `OutOfMemoryError` | [jvm.md][jvm-heap] |
 | Memory the runtime makes for the game: strings, buffers, images, screens, sound bytes | counted on the heap | `OutOfMemoryError` | [jvm.md][jvm-heap] |
-| One request of the runtime | the whole heap, or twice the heap with what is counted already | `OutOfMemoryError` before anything is built | [jvm.md][jvm-heap] |
+| One request of the runtime | at most the heap, and at most twice the heap with what the heap counts already | `OutOfMemoryError` before anything is built | [jvm.md][jvm-heap] |
 | Java threads alive at once | 64, the event and lifecycle threads among them; the host may start 16 more, 80 in all | `OutOfMemoryError` from `Thread.start` or `new Timer()` | [jvm.md][jvm-threads] |
 | Stack of one thread | 131072 slots, 2 MiB | `StackOverflowError` | [jvm.md][jvm-limits] |
 | Frames of one thread | 4096 | `StackOverflowError` | [jvm.md][jvm-config] |
-| Calls from the runtime into the game, nested on one thread | 256 | `StackOverflowError` | [jvm.md][jvm-config] |
+| Calls from the runtime back into Java, nested on one thread, the runtime's own calls included | 256 | `StackOverflowError` | [jvm.md][jvm-config] |
 | Work of a thread before a safepoint | 4096 backward branches or calls; a caught exception counts as 16 | a stop or a pause takes effect, and the other threads get a turn | [jvm.md][jvm-threads] |
 | Stack trace of an exception | 256 frames | the rest is left out | [jvm.md][jvm-heap] |
 | Name of a thread | 255 characters | cut | [jvm.md][jvm-heap] |
-| Lifecycle threads | 8 | later pause and resume requests are dropped, with one warning | [midp.md][midp-threads] |
-| `callSerially` calls and posted tasks waiting | 10000 | `OutOfMemoryError` from `callSerially`; a posted task is dropped | [midp.md][midp-events] |
+| Pause and resume calls waiting or running, besides the first `startApp` | 8 | later `pauseApp` and `startApp` calls are dropped, with one warning; the game still pauses and resumes | [midp.md][midp-threads] |
+| `callSerially` calls waiting, and posted tasks waiting | 10000 of each | `OutOfMemoryError` from `callSerially`; a posted task is dropped, with one warning | [midp.md][midp-events] |
 
 [jvm-heap]: docs/architecture/jvm.md#the-heap-and-the-collector
 [jvm-limits]: docs/architecture/jvm.md#limits
