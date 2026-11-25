@@ -261,7 +261,11 @@ and asks for a collection when the heap fills up; the collection runs at
 the next safepoint, where every reference the thread holds is in a root.
 The interpreter's allocation instructions are safepoints: they collect
 first when the heap is full and throw `OutOfMemoryError` if it still has
-no room. `System.gc()` and `Ctx::gc()` collect at once.
+no room. `multianewarray` asks for the arrays of every level at once:
+the outer array and each array below it, at the length and element size
+of its level, so `new byte[1000000][0]` is refused on a small heap before
+it builds the first of a million arrays. `System.gc()` and `Ctx::gc()`
+collect at once.
 
 **Natives follow a deferred rule**, because a native may hold references
 the collector cannot see, so it cannot collect in the middle:
