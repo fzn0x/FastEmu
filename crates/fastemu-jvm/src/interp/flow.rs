@@ -387,6 +387,32 @@ mod tests {
     }
 
     #[test]
+    fn a_handler_is_reached_whatever_its_range_holds() {
+        // goto 4; astore_0; iconst_0; ireturn; return: no path leads to
+        // the handler at 1, but it is walked, so its ireturn has to match
+        // the void method.
+        let insns = [
+            Insn::Goto(4),
+            Insn::Store(0),
+            Insn::Iconst(0),
+            Insn::Return1,
+            Insn::Return,
+        ];
+        let handler = Handler {
+            start: 0,
+            end: 1,
+            target: 1,
+            catch_type: 0,
+        };
+        let pcs: Vec<u32> = (0..insns.len() as u32).collect();
+        let cp = ConstantPool::default();
+        let e = stack_heights(&insns, &pcs, &[], &[handler], &cp, 1, 0).unwrap_err();
+        assert!(e.contains("different kind"), "{e}");
+        // Without the handler the ireturn is dead code.
+        assert!(stack_heights(&insns, &pcs, &[], &[], &cp, 1, 0).is_ok());
+    }
+
+    #[test]
     fn a_return_nothing_reaches_is_not_checked() {
         // goto 3; iconst_0; ireturn; return: the ireturn is dead code of a
         // void method, which phones accept and so does this.
