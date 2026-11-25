@@ -10,6 +10,11 @@
 //! time, which rescues games that wrote names relative to the root. Misses
 //! are logged once per name, for at most `max_reported` names, and a name
 //! longer than [`MAX_MISSED_NAME`] characters is cut first.
+//!
+//! A name over [`MAX_RESOURCE_NAME_BYTES`] bytes or [`MAX_RESOURCE_SEGMENTS`]
+//! segments is not looked up: it is a miss at once, so a game cannot make
+//! the walk toward the root long. A class file is read up to
+//! [`MAX_CLASS_BYTES`], and a resource up to what the caller asks for.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -33,6 +38,14 @@ const MAX_MISSED_NAME: usize = 255;
 /// the test folder, libraries included, has 200 KB; this is 20 times that,
 /// and it is what a refused class can cost while it is parsed.
 pub const MAX_CLASS_BYTES: usize = 4 * 1024 * 1024;
+
+/// The longest resource name the source looks up, in bytes, after the name
+/// is normalized. The longest path in the JARs of the test folder has 116.
+pub const MAX_RESOURCE_NAME_BYTES: usize = 1024;
+
+/// The most segments, parts between slashes, of a resource name the source
+/// looks up. The deepest path in the JARs of the test folder has 8.
+pub const MAX_RESOURCE_SEGMENTS: usize = 64;
 
 /// The names of the resources a game asked for and the JAR lacks.
 #[derive(Default)]
@@ -183,6 +196,12 @@ impl ClassSource for JarSource {
         if path.is_empty() {
             return ResourceRead::Missing;
         }
+        if path.len() > MAX_RESOURCE_NAME_BYTES
+            || path.bytes().filter(|&b| b == b'/').count() >= MAX_RESOURCE_SEGMENTS
+        {
+            self.report_miss(&path);
+            return ResourceRead::Missing;
+        }
         let found = {
             // One resource inflates at a time, so the buffers of the
             // threads of a game never add up. Nothing here waits on
@@ -216,20 +235,26 @@ impl ClassSource for JarSource {
 }
 
 /// A resource path as the JAR stores it: `/` separators, no leading
-/// slash, no empty or `.` segments, `..` applied.
+/// slash, no empty or `.` segments, `..` applied. It builds the answer in
+/// one buffer the size of the name, however many segments the name has.
 pub fn normalize(path: &str) -> String {
-    let path = path.replace('\\', "/");
-    let mut parts: Vec<&str> = Vec::new();
-    for part in path.split('/') {
+    let mut out = String::with_capacity(path.len());
+    for part in path.split(['/', '\\']) {
         match part {
             "" | "." => {}
-            ".." => {
-                parts.pop();
+            ".." => match out.rfind('/') {
+                Some(at) => out.truncate(at),
+                None => out.clear(),
+            },
+            other => {
+                if !out.is_empty() {
+                    out.push('/');
+                }
+                out.push_str(other);
             }
-            other => parts.push(other),
         }
     }
-    parts.join("/")
+    out
 }
 
 #[cfg(test)]
@@ -280,6 +305,52 @@ mod tests {
         assert_eq!(
             *lines.lock().unwrap(),
             ["resource not found: /com/game/missing.png"]
+        );
+    }
+
+    #[test]
+    fn a_name_over_1024_bytes_or_64_segments_is_a_miss_at_once() {
+        let (src, lines) = source(&[
+            TestEntry::stored("x.bin", b"X"),
+            TestEntry::stored(&"a".repeat(1024), b"L"),
+        ]);
+        // 64 segments are looked up, and the walk toward the root finds the
+        // file; one more is a miss without a walk.
+        let deep = |dirs: usize| format!("{}x.bin", "d/".repeat(dirs));
+        assert_eq!(src.resource(&deep(63)).as_deref(), Some(&b"X"[..]));
+        assert_eq!(src.resource(&deep(64)), None);
+        assert_eq!(src.resource(&deep(100_000)), None);
+        // 1024 bytes are looked up and 1025 are not.
+        assert_eq!(src.resource(&"a".repeat(1024)).as_deref(), Some(&b"L"[..]));
+        assert_eq!(src.resource(&"a".repeat(1025)), None);
+        assert_eq!(src.resource(&format!("{}/x.bin", "a".repeat(1100))), None);
+        // Each is a miss like any other, logged once and cut.
+        assert_eq!(src.resource(&deep(64)), None);
+        let lines = lines.lock().unwrap();
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(
+            lines[0].starts_with("resource not found: /d/d/"),
+            "{lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .all(|l| l.len() <= "resource not found: /".len() + 255)
+        );
+    }
+
+    #[test]
+    fn normalizing_applies_dot_dot_and_backslashes_in_one_pass() {
+        assert_eq!(normalize(r"a\b\..\c"), "a/c");
+        assert_eq!(normalize("a/b/../../../c"), "c");
+        assert_eq!(normalize("../.."), "");
+        assert_eq!(normalize("a/./b//c/"), "a/b/c");
+        assert_eq!(normalize("a/.."), "");
+        let long = "a/".repeat(100_000);
+        assert_eq!(normalize(&long).len(), 199_999);
+        assert_eq!(
+            normalize(&format!("{long}../../x")),
+            format!("{}x", "a/".repeat(99_998))
         );
     }
 
