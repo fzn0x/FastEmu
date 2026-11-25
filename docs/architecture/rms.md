@@ -186,7 +186,9 @@ token bucket in `budget.rs`:
   slices of 50 ms with the VM lock released, so the game's other threads
   keep running. After each slice it looks at the stop flag, and a stopping
   machine ends the wait with `Throw::Stop` and writes nothing. The first
-  wait of an instance is logged once, as a warning.
+  wait of an instance is logged once, as a warning. The save holds the
+  file lock while it waits, so another thread of the game that opens,
+  deletes or lists a store waits with it. Reading an open store does not.
 - Saves stay synchronous and durable. A save is never skipped, merged
   with another or left for later: the call returns after the file is
   flushed and renamed, as it always did. Only the time it starts changes.
