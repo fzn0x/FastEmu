@@ -254,7 +254,10 @@ cover Latin, Greek and Cyrillic. fontdue rasterizes them.
   `charsWidth` `ArrayIndexOutOfBoundsException`.
 - **Cache.** Glyphs are cached per font file and pixel height for the
   whole process, shared by every running game; Latin-1 glyphs sit in a
-  lock-free table.
+  lock-free table. The glyphs above U+00FF of one face and size are
+  limited to 4096. When that map is full the next new glyph clears it
+  first, so a game that asks for every code unit cannot fill the
+  process. Glyphs being drawn keep their own reference.
 
 ## Decoding
 
@@ -345,7 +348,11 @@ Constants match Nokia's UI API 1.1 documentation and J2ME Loader's
   the pixels, zero transparent; no mask means opaque. Negative sizes, a
   `scanlength` below `width`, a bad manipulation or format are
   `IllegalArgumentException`; a negative offset or a pixel outside the
-  array is `ArrayIndexOutOfBoundsException`.
+  array is `ArrayIndexOutOfBoundsException`. A block of more than 4M
+  pixels (1 << 22; a 360 by 640 screen is 0.23M) is refused with
+  `IllegalArgumentException`, after those checks, because a byte array
+  packs up to eight pixels to an element and the block is converted to
+  `0xAARRGGBB` words before it is drawn.
 - **getPixels** reads at translated coordinates, ignoring the clip, and
   writes only the bits of the pixels read; pixels off the surface leave
   their entries alone. 888 clears alpha. Pixels less than half opaque
@@ -370,6 +377,11 @@ exception to throw:
 | `NullPointer` | `java/lang/NullPointerException` |
 | `IllegalState` | `java/lang/IllegalStateException` |
 | `OutOfMemory` | `java/lang/OutOfMemoryError` |
+
+Hostile input reaches these errors, not a crash: a decoder panic is a
+`Decode`, a repair over its cap and an image over the pixel limit are
+`OutOfMemory`, and a `drawPixels` block over 4M pixels is
+`IllegalArgument`.
 
 Java references reach the library already dereferenced, so the wrapper
 throws `NullPointerException` for a null argument before calling, as MIDP
