@@ -186,13 +186,13 @@ order they happened in:
 
 The `media-events` thread waits for the channel with the VM lock
 released (`Ctx::wait_without_lock`, so `Vm::activity` counts it as
-waiting, not running), then calls each listener in order. It never runs on the audio
-thread and never calls Java with the mixer locked. While the VM is
-paused it parks before delivering. Each note runs in its own local
-frame; an exception a listener throws is logged with its stack trace
-and delivery goes on (as rule 8 of the emulator notes asks for UI
-callbacks), and so is any other Java exception on the thread. Only a
-stopping VM ends it.
+waiting, not running), then calls each listener in order. It never
+runs on the audio thread and never calls Java with the mixer locked.
+While the VM is paused it parks before delivering. Each note runs in
+its own local frame; an exception a listener throws is logged with its
+stack trace and delivery goes on (as rule 8 of the emulator notes asks
+for UI callbacks), and so is any other Java exception on the thread.
+Only a stopping VM ends it.
 
 Event data follows JSR-135 and J2ME Loader: `STARTED`, `STOPPED`,
 `STOPPED_AT_TIME` and `END_OF_MEDIA` carry the media time as a `Long`,
