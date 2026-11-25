@@ -123,7 +123,10 @@ end.
 - **Sprites and tiled backgrounds** keep their frames and tiles as
   pictures; a background keeps the game's map array, so changing it
   changes what is drawn, and the map repeats over the drawing area as the
-  javadoc says. `GraphicObjectManager.paint` draws visible objects first to
+  javadoc says. `GraphicObjectManager` holds an object once, so
+  `addObject` of one it has changes nothing, and counts its list against
+  the heap; so do the frames and tiles a sprite or background is made of.
+  `GraphicObjectManager.paint` draws visible objects first to
   last, offset by its `x` and `y`, and refuses targets with transparent
   pixels. Collisions compare collision rectangles, as J2ME Loader does.
 - **`com.siemens.mp.color_game`** is Siemens' copy of MIDP 2.0's game

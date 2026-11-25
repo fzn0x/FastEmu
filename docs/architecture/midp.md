@@ -490,7 +490,16 @@ changes one of these calls `highlevel::wake_timer`.
   ellipsis otherwise. A `List` wraps its focus round at the ends, and
   left and right move it a screen of rows at a time; select
   fires `SELECT_COMMAND` (a static `Command("", SCREEN, 0)` that is
-  never on the soft keys) or the command `setSelectCommand` chose.
+  never on the soft keys) or the command `setSelectCommand` chose. The
+  elements are a native vector, so they count against the game's heap:
+  `ChoiceModel::heap_bytes` is the room of the vector (16 bytes an
+  element, and up to twice that after it grew by doubling; the strings
+  and images are Java objects and count as themselves), and `append`, `insert`, `delete`, `deleteAll` and the
+  constructors recount the object. A list that takes elements without end
+  gets `OutOfMemoryError` at the heap limit; deleting gives the room
+  back. A row keeps at most 4096 units of its element's text, fewer in a
+  choice of many elements (a budget of 1 Mi units between them), since
+  elements may share one long string that each row would copy.
 - **Text.** `text::editor::TextEditor` is the text, caret, maximum size
   and constraints of a `TextBox` or `TextField`, and `text` the Java
   methods both declare. Host text goes in at the caret, filtered by the
@@ -502,7 +511,15 @@ changes one of these calls `highlevel::wake_timer`.
   `PHONENUMBER` `*` for `*+pw`. Clear deletes, the left and right arrows
   move the caret (`4` and `6` type), up and down move it a line in a
   text box, and a tap on a text box's text puts it there. `PASSWORD`
-  shows stars but for the letter being chosen.
+  shows stars but for the letter being chosen. The text is a native
+  vector too, and counts against the heap at 2 bytes a unit of its room
+  (`TextEditor::heap_bytes`), not of its `maxSize`: a box with a maximum
+  size of `Integer.MAX_VALUE` counts what it holds. The constructors and
+  every edit that makes the text longer first ask the heap whether a text
+  that long fits and throw `OutOfMemoryError` if it does not; typed text
+  that does not fit is dropped. An insert or a delete changes the text
+  in place after checking the constraints on the text it would give, so
+  it costs what it moves and not a copy of the whole text.
 - **Forms.** An item is an `item::ItemData` payload: the label, layout,
   commands, preferred size and owner every item has, and its kind's
   state (`item::Kind`). `form::layout::arrange` places them in MIDP 2.0

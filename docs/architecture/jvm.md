@@ -394,14 +394,15 @@ neither. A change that adds a payload adds a row.
 | `ReaderState`, `WriterState`, `PrintState` | decoder state, a pending character | fixed |
 | `Mirror`, `Instant`, `Seed`, `Zone`, calendar `State` | numbers and short ids | fixed |
 | `ImageData`, the buffer of `DisplayableData`, the surface of a `CustomItem`, `LayerData` (tiled layers, sprites) | pixels, tile grids, animated tiles, frame sequences | `check_alloc` before building and `recount` on change (#32); a displayable buffer and an item surface are made on the event thread, so they are counted and not refused |
-| screen state of `DisplayableData`, `ItemData` | list items and text | #33 |
+| screen state of `DisplayableData` (`ListState`, `TextBoxState`), `ItemData` (`ChoiceGroup`, `TextField`) | the elements of a choice and the text of an editor | `heap_bytes` at the room of the vector (16 bytes an element, 2 a unit of text); recounted when elements or text change, and a vector that lost items gives room back; a constructor or edit that makes a text longer calls `check_alloc` first |
 | `PlayerData`, `SoundData`, `Clip` | sound source bytes and decoded audio | #34 |
 | `HttpPayload`, `SocketPayload`, `ServerPayload`, `UdpPayload`, `InputPayload`, `OutputPayload` | socket and body buffers | #38, with its own caps |
 | `StoreHandle`, `EnumState` | listeners and the ids of an enumeration | `heap_bytes`; the size of a record store by #40 |
-| `GraphicData`, `UiImage`, `ExtendedData`, `LayerData` (Siemens) | pictures and tile grids | bitmaps, copies, tile layers and sprite sequences: `check_alloc` before building, `recount` on change (#32); `GraphicData`: #33 |
+| `GraphicData` (Siemens sprites and backgrounds) | frames and tiles | `heap_bytes`; the constructors call `check_alloc` before cutting the pictures and recount |
+| `UiImage`, `ExtendedData`, `LayerData` (Siemens) | pictures, tile grids and sprite sequences | bitmaps, copies, tile layers and sprite sequences: `check_alloc` before building, `recount` on change (#32) |
 | `Composer`, `MelodyData` (Siemens) | notes and MIDI bytes | `heap_bytes`; a note added to a `Composer` is not recounted yet |
 | `ManagerData` (`LayerManager`), `Manager` (Siemens layers) | a list of layer references | bounded: a layer is in the list once |
-| `Manager` (Siemens graphic objects) | a list of object references | #33: `addObject` adds the same object again and again |
+| `Manager` (Siemens graphic objects) | a list of object references | `heap_bytes` at the room of the list, recounted on each change; `addObject` keeps an object once, `insertObject` may repeat one and counts it |
 | `CommandData`, `FontData`, `GraphicsData`, `AlertTypeData`, `TickerData`, `ControlData`, `Message`, `InfoPayload`, `ConnectionPayload` | references, flags, numbers; `GraphicsData` shares the surface of its target | fixed |
 
 ## Rules for native code
