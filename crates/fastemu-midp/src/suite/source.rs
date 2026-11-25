@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use fastemu_core::{LogLevel, LogLine};
 use fastemu_jvm::{ClassSource, VmLimits};
 
-use super::zip::ZipArchive;
+use super::zip::{ZipArchive, ZipError};
 
 /// Receives the source's warnings: resources a game asked for that the
 /// JAR does not have.
@@ -26,6 +26,11 @@ pub type SourceLog = Arc<dyn Fn(LogLine) + Send + Sync>;
 
 /// The most characters of a missing name the source keeps and logs.
 const MAX_MISSED_NAME: usize = 255;
+
+/// The longest class file the source reads, inflated. The largest class in
+/// the test folder, libraries included, has 200 KB; this is 20 times that,
+/// and it is what a refused class can cost while it is parsed.
+pub const MAX_CLASS_BYTES: usize = 4 * 1024 * 1024;
 
 /// The names of the resources a game asked for and the JAR lacks.
 #[derive(Default)]
@@ -85,6 +90,12 @@ impl JarSource {
     /// `max_reported` different names the source keeps none and says so
     /// once, so a game cannot make it hold names without end.
     fn report_miss(&self, path: &str) {
+        self.report_once(path, |name| format!("resource not found: /{name}"));
+    }
+
+    /// Logs `text(name)` once for each `path`, under the limits of
+    /// [`JarSource::report_miss`], which is the same set of names.
+    fn report_once(&self, path: &str, text: impl FnOnce(&str) -> String) {
         let Some(log) = &self.log else { return };
         let name = match path.char_indices().nth(MAX_MISSED_NAME) {
             Some((at, _)) => &path[..at],
@@ -102,7 +113,7 @@ impl JarSource {
                 "further missing resources are not reported: too many different ones".to_owned()
             } else {
                 missed.names.insert(name.to_owned());
-                format!("resource not found: /{name}")
+                text(name)
             }
         };
         log(LogLine {
@@ -118,7 +129,18 @@ impl ClassSource for JarSource {
         if name.starts_with("java/") || name.starts_with("javax/") {
             return None;
         }
-        self.read(&format!("{name}.class"))
+        let file = format!("{name}.class");
+        let entry = self.archive.find_str(&file)?;
+        match self.archive.read_limited(entry, MAX_CLASS_BYTES) {
+            Ok(bytes) => Some(bytes),
+            Err(ZipError::TooLarge(max)) => {
+                self.report_once(&file, |file| {
+                    format!("{file} is more than {} MiB, so it is not loaded", max >> 20)
+                });
+                None
+            }
+            Err(_) => None,
+        }
     }
 
     fn resource(&self, path: &str) -> Option<Vec<u8>> {
@@ -206,6 +228,26 @@ mod tests {
         assert_eq!(
             *lines.lock().unwrap(),
             ["resource not found: /com/game/missing.png"]
+        );
+    }
+
+    #[test]
+    fn a_class_file_over_4_mib_is_not_loaded_and_says_so_once() {
+        let fits = vec![0u8; MAX_CLASS_BYTES];
+        let over = vec![0u8; MAX_CLASS_BYTES + 1];
+        let (src, lines) = source(&[
+            TestEntry::deflated("a/Over.class", &over),
+            TestEntry::deflated("a/Fits.class", &fits),
+        ]);
+        assert_eq!(src.class_bytes("a/Over"), None);
+        assert_eq!(src.class_bytes("a/Over"), None);
+        assert_eq!(
+            src.class_bytes("a/Fits").map(|bytes| bytes.len()),
+            Some(MAX_CLASS_BYTES)
+        );
+        assert_eq!(
+            *lines.lock().unwrap(),
+            ["a/Over.class is more than 4 MiB, so it is not loaded"]
         );
     }
 
