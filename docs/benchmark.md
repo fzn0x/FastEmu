@@ -173,7 +173,10 @@ load. Each number is the median of the runs, with the smallest and the
 largest. A measurement is flagged as noisy when the other load during
 it passed that threshold, and a number when its runs spread more than
 15 percent from the median. `bench.md` gives the other load during the
-measurements and just before them.
+measurements and just before them. An idle baseline over 1000 ms a
+second, one processor's time, is flagged too: the computer was busy
+before the bench began, and the flag cannot see load on top of what was
+already there.
 
 For the run, the computer is on mains power, in its best performance
 mode, with browsers, editors, chat, OneDrive and Windows Update paused,
