@@ -194,6 +194,11 @@ token bucket in `budget.rs`:
   flushed and renamed, as it always did. Only the time it starts changes.
 - The copy of a damaged file (`<stem>.bad`) and a write that fails are
   paid for like a save, since both wrote the file.
+- Deleting a store and reading one are not charged. A game that makes and
+  deletes a store in a loop is held by the 4 KiB it costs to make it and
+  by the speed of the file system. A game that opens and closes a big
+  store in a loop reads its file each time, mostly from the cache of the
+  system, and costs processor time and no disk wear.
 
 A game that writes less than 4 MiB a second on average is never slowed,
 and the burst covers a first run that saves a lot at once. A game that
