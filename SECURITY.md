@@ -213,6 +213,7 @@ instead, as they throw no `MediaException`.
 | Chunk size line of a chunked body | 1 KiB, extensions included | `IOException` | [connections.md][net-hold] |
 | Wait for a response head | 60 s | `InterruptedIOException` | [connections.md][net-blocking] |
 | Name lookup and connect, TLS handshake, sending an HTTP request | 30 s each | `InterruptedIOException` | [connections.md][net-blocking] |
+| Name lookups and connects under way, the ones the game stopped waiting for included | 16 | the next one waits for one to end, within its own 30 s; if none ends in time, `InterruptedIOException` | [connections.md][net-hold] |
 | Datagram size | 65507 bytes | `IllegalArgumentException` from `newDatagram` | [connections.md][net-datagrams] |
 | Web link a game asks to open | `http` or `https` with a host, printable ASCII with no space, no backslash, no user name, a port from 1 to 65535, at most 4096 bytes, not a `.jad` or `.jar` | `ConnectionNotFoundException` | [midp.md][midp-links] |
 
@@ -388,11 +389,13 @@ section says is in scope.
   network interface of your computer, and can learn the address of your
   computer on the local network.
 - A name lookup or a connect runs on a helper thread. When the game
-  stops waiting for it, at its 30 s deadline, on an interrupt or because
-  the game was closed, the helper runs on until the system ends it: 30 s
-  for each address of the name, or as long as the lookup takes. Nothing
-  counts these helpers, so a game you allow network access can keep many
-  of them and their sockets alive by interrupting its own connects.
+  stops waiting for it, on an interrupt, at its deadline or because the
+  game was closed, the helper runs on: a connect until its 30 s are up,
+  unless its own name lookup lasts longer, and a lookup until the
+  system's resolver gives up. A game has at most 16 helpers alive, and
+  they are not among the 80 threads of its machine, so a closed game can
+  leave 16 threads and their sockets behind for up to 30 s, or longer
+  while a lookup lasts.
 - Every game can read your time zone, with or without network access.
 
 **Links and the apps**
