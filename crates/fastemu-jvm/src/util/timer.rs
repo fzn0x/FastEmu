@@ -413,8 +413,8 @@ fn spare(state: &VmState) -> (usize, usize) {
 /// It may collect and let other threads run, so `Thread.start` and
 /// `new Timer()` call it before anything else. The wait counts only
 /// threads that end without running the game's code, so it cannot wait
-/// on a monitor the caller holds. A stop ends it; a pause lasts it until
-/// the resume, as the ending threads park.
+/// on a monitor the caller holds. A stop ends the wait. During a pause it
+/// waits until the resume, since the ending threads park.
 pub(crate) fn make_room(ctx: &mut Ctx<'_>) -> JResult<()> {
     let max = ctx.limits().max_threads;
     if ctx.state.live_threads < max {
