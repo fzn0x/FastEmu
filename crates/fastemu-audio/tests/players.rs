@@ -4,7 +4,7 @@
 mod common;
 
 use common::{constant_wav, engine, kinds, peak, render, wav};
-use fastemu_audio::{AudioError, Format, GroupLimits, PlayerEventKind, PlayerState};
+use fastemu_audio::{AudioError, Format, PlayerEventKind, PlayerState};
 
 #[test]
 fn a_player_goes_through_the_mmapi_states() {
@@ -302,21 +302,22 @@ fn many_players_open_and_close_without_leaks() {
         assert_eq!(engine.player_count(), 0);
         assert_eq!(engine.playing_count(), 0);
     }
-    // Playing hundreds at once stays inside full scale. A game holds 128
-    // players by default, so this one is allowed more.
-    group.set_limits(GroupLimits {
-        max_players: 256,
-        ..GroupLimits::default()
-    });
-    let players: Vec<_> = (0..200)
-        .map(|_| {
-            let player = group
-                .create_player(&constant_wav(8000, 4000, 30_000), None)
-                .unwrap();
-            player.start().unwrap();
-            player
+    // Playing as many as the engine allows at once stays inside full
+    // scale: 32 players in each of four games.
+    let games: Vec<_> = (0..4).map(|_| engine.create_group()).collect();
+    let players: Vec<_> = games
+        .iter()
+        .flat_map(|game| {
+            (0..32).map(move |_| {
+                game.create_player(&constant_wav(8000, 4000, 30_000), None)
+                    .unwrap()
+            })
         })
         .collect();
+    for player in &players {
+        player.start().unwrap();
+    }
+    assert_eq!(engine.playing_count(), 128);
     let heard = render(&engine, 2000);
     assert!(heard.iter().all(|v| v.abs() <= 1.0));
     assert!(peak(&heard) > 0.8);
