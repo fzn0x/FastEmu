@@ -780,4 +780,159 @@ mod tests {
             assert_eq!(refused, "java.io.IOException: too many open connections");
         });
     }
+
+    /// The gate of the helpers' works: each waits on it until the test
+    /// drops the sender.
+    fn gate() -> (mpsc::Sender<()>, Arc<std::sync::Mutex<mpsc::Receiver<()>>>) {
+        let (open, wait) = mpsc::channel();
+        (open, Arc::new(std::sync::Mutex::new(wait)))
+    }
+
+    /// What a call ended with, as `class: message`.
+    fn outcome<T>(ctx: &mut Ctx<'_>, result: JResult<T>) -> String {
+        match result {
+            Ok(_) => "returned".to_owned(),
+            Err(Throw::Exception(e)) => ctx.describe_exception(e),
+            Err(Throw::Stop) => "stopped".to_owned(),
+        }
+    }
+
+    /// Calls `off_thread` with a deadline that has passed, as an interrupt
+    /// or a slow network leaves the game, so it stops waiting after one
+    /// slice. The work tells `ran` it started, then waits for the gate.
+    fn give_up(
+        ctx: &mut Ctx<'_>,
+        gate: &Arc<std::sync::Mutex<mpsc::Receiver<()>>>,
+        ran: &mpsc::Sender<()>,
+    ) -> String {
+        let (gate, ran) = (Arc::clone(gate), ran.clone());
+        let result = off_thread(ctx, Instant::now(), "test", move || {
+            let _ = ran.send(());
+            let _ = gate.lock().unwrap().recv();
+        });
+        outcome(ctx, result)
+    }
+
+    /// How many works told `started` they ran, counted once the channel
+    /// closes: when every work that ran has ended and every one that never
+    /// ran was dropped. A helper that never ends fails the test rather
+    /// than hang it.
+    fn count_started(started: &mpsc::Receiver<()>) -> usize {
+        let mut count = 0;
+        loop {
+            match started.recv_timeout(Duration::from_secs(30)) {
+                Ok(()) => count += 1,
+                Err(RecvTimeoutError::Disconnected) => return count,
+                Err(RecvTimeoutError::Timeout) => panic!("a helper still runs after {count}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_game_keeps_at_most_16_helpers_it_stopped_waiting_for() {
+        with_network(|ctx| {
+            let (open, gate) = gate();
+            let (ran, started) = mpsc::channel();
+            for _ in 0..MAX_HELPERS + 4 {
+                assert_eq!(
+                    give_up(ctx, &gate, &ran),
+                    "java.io.InterruptedIOException: timed out"
+                );
+            }
+            drop(ran);
+            drop(open);
+            assert_eq!(count_started(&started), MAX_HELPERS);
+        });
+    }
+
+    #[test]
+    fn a_helper_that_ends_gives_its_place_back() {
+        with_network(|ctx| {
+            let (open, gate) = gate();
+            let (ran, started) = mpsc::channel();
+            for _ in 0..MAX_HELPERS {
+                give_up(ctx, &gate, &ran);
+            }
+            // The game holds every place. Whether the helpers end before
+            // the next call or while it waits, it gets one.
+            let release = std::thread::spawn(move || drop(open));
+            let deadline = Instant::now() + Duration::from_secs(30);
+            for i in 0..MAX_HELPERS + 4 {
+                assert_eq!(off_thread(ctx, deadline, "test", move || i).ok(), Some(i));
+            }
+            release.join().unwrap();
+            drop(ran);
+            assert_eq!(count_started(&started), MAX_HELPERS);
+        });
+    }
+
+    #[test]
+    fn a_helper_whose_work_panics_gives_its_place_back() {
+        with_network(|ctx| {
+            let (open, gate) = gate();
+            let (ran, started) = mpsc::channel();
+            for _ in 0..MAX_HELPERS - 1 {
+                give_up(ctx, &gate, &ran);
+            }
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let result = off_thread(ctx, deadline, "test", || -> u32 {
+                panic!("the work of a test helper panics")
+            });
+            assert_eq!(outcome(ctx, result), "java.io.IOException: test failed");
+            // Only the place of the helper that panicked is free.
+            assert_eq!(off_thread(ctx, deadline, "test", || 7).ok(), Some(7));
+            drop(open);
+            drop(ran);
+            assert_eq!(count_started(&started), MAX_HELPERS - 1);
+        });
+    }
+
+    #[test]
+    fn an_interrupt_ends_the_wait_for_a_helper_place() {
+        with_network(|ctx| {
+            let (open, gate) = gate();
+            let (ran, started) = mpsc::channel();
+            for _ in 0..MAX_HELPERS {
+                give_up(ctx, &gate, &ran);
+            }
+            // Thread.currentThread().interrupt(), as a game does.
+            let me = ctx.current_thread();
+            assert!(ctx.call_virtual(me, "interrupt", "()V", &[]).is_ok());
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let late = ran.clone();
+            let result = off_thread(ctx, deadline, "test", move || {
+                let _ = late.send(());
+            });
+            assert_eq!(
+                outcome(ctx, result),
+                "java.io.InterruptedIOException: interrupted"
+            );
+            drop(open);
+            drop(ran);
+            assert_eq!(count_started(&started), MAX_HELPERS);
+        });
+    }
+
+    #[test]
+    fn a_pending_interrupt_does_not_keep_a_helper_from_starting() {
+        with_network(|ctx| {
+            let (ran, started) = mpsc::channel();
+            let me = ctx.current_thread();
+            assert!(ctx.call_virtual(me, "interrupt", "()V", &[]).is_ok());
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let result = off_thread(ctx, deadline, "test", move || {
+                let _ = ran.send(());
+            });
+            // A connect that answers within its first slice returns, and
+            // one that takes longer sees the interrupt, but with a place
+            // free it is always tried.
+            let text = outcome(ctx, result);
+            assert!(
+                text == "returned" || text == "java.io.InterruptedIOException: interrupted",
+                "{text}"
+            );
+            assert_eq!(count_started(&started), 1);
+            ctx.take_interrupt();
+        });
+    }
 }
