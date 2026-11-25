@@ -219,3 +219,112 @@ links to the page that describes the limit.
 | A game opened on Android | `content:` links only, 64 MiB a file | a larger file is refused and its partial copy deleted; other links are ignored | [playing.md][playing-adding] |
 
 [playing-adding]: docs/playing.md#adding-games
+
+## Known limits
+
+These facts hold even with the limits above. A report that shows only
+one of them is not new. A way to make one of them worse than this
+section says is in scope.
+
+**Memory**
+
+- The heap counts memory the way a phone does. A game made of very many
+  tiny objects can use up to about ten times its heap limit in real
+  memory.
+- A call into the runtime is judged after it returns. It can take the
+  heap past its limit for a moment, and its change stays: a
+  `List.append` past the heap adds the element, then throws
+  `OutOfMemoryError`.
+- The back buffer of a shown screen is made on the event thread, so it
+  is counted but never refused. A canvas keeps its buffer for as long as
+  it lives, while a hidden screen gives its buffer back.
+- Each game has its own 32 MiB of sound, so eight games can hold
+  256 MiB of sound in all.
+- A class file of up to 4 MiB is parsed before its size is judged. A
+  class that is then refused holds a few times its file size meanwhile.
+- A game that has exited keeps its memory until you close its tile.
+
+**Threads and time**
+
+- A thread's stack holds at most 2 MiB. A game's machine has at most 80
+  threads, the 16 that only the host may add included, so their stacks
+  can hold 160 MiB at worst.
+- Each thread also reserves 16 MiB of address space for its system
+  stack. The system commits only what the thread uses.
+- A `Timer` keeps its thread until `cancel()`, as in Java. A game that
+  never cancels its timers gets `OutOfMemoryError` after about 62 of
+  them.
+- Pause and resume requests past 8 waiting lifecycle threads are
+  dropped. Only a `startApp` that does not return, or a very slow one,
+  lets 8 of them wait.
+- FastEmu does not limit the CPU a game uses on its own threads. A game
+  can keep the processor busy with drawing, decoding or computing for as
+  long as it runs. Close its tile to stop it.
+- A call into the runtime that does not call back into the game, such
+  as a very large fill or the decoding of a sound, cannot be stopped. It
+  runs on after you close the tile, and FastEmu reports the game as
+  ended before it finishes. The limits above keep such calls short: a
+  sound decodes to 16 MiB at most.
+- A write on a secure connection checks for a stop only when it ends. A
+  server that takes the data a little at a time keeps the game's thread
+  in that write after the game is closed.
+
+**Sound**
+
+- Nothing limits the time the sound engine takes to render, and a seek
+  in a MIDI file replays up to 65536 events with the mixer held. One
+  game that starts 32 MIDI players, or that seeks in a long MIDI file in
+  a loop, can make the sound of every game stutter. It cannot stop their
+  sound.
+
+**Class files and suites**
+
+- There is no type verifier. A crafted class can hand a runtime call an
+  object of the wrong type. That stops only its own game, which shows as
+  crashed with an internal error.
+- A symlink or junction inside a JAD's own folder is still followed.
+  Planting one there needs write access to that folder.
+- One `getResourceAsStream` call may look up as many as 64 forms of its
+  name, dropping one folder at a time. A hostile JAR can make each a
+  long read, so one call can take seconds.
+
+**Record stores**
+
+- A game that never stops saving still writes 4 MiB a second to the
+  disk.
+- Reads and deletes are not charged. A loop that makes and deletes a
+  store is held only by the 4 KiB each store costs, about 1000 stores a
+  second.
+- A save that waits holds the game's file lock. The game's other
+  threads then wait to open, list or delete a store.
+- `destroyApp` gets one second. A game past its burst can lose its last
+  saves when it is closed, since a save still waiting then is not
+  written.
+- Each save rewrites the whole store file, so filling a store one record
+  at a time costs time by the square of its size.
+- Stores past the 64th that an older FastEmu made still open and change.
+
+**Network**
+
+- Allow means the whole network. A game with Allow can reach programs
+  on your own computer, devices on your local network and link local
+  addresses, not only the internet. Leave the network off for games that
+  do not need it.
+- A game you allow network access can also accept connections on every
+  network interface of your computer, and can learn the address of your
+  computer on the local network.
+- Every game can read your time zone, with or without network access.
+
+**Links and the apps**
+
+- Links to `localhost`, private addresses and downloads are still
+  offered. You read the whole link before you choose **Open**.
+- The half second in which a link prompt ignores clicks starts when the
+  app takes the request, not when a tile in the focus layout comes
+  forward.
+- The Android app checks no free space before it copies a game, and its
+  limit of 64 MiB is for each file.
+- Debug builds of the Android app still open a file path given in the
+  `fastemu.open` extra, for testing with adb. Release builds ignore it.
+- A log record printed to the terminal stays on one line. Its line
+  breaks show as `\n`.
