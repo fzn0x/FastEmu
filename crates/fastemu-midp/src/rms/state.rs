@@ -414,6 +414,50 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_file_operation_gives_the_game_a_fixed_text_and_the_log_the_system_text() {
+        let lines: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+        let sink = Arc::clone(&lines);
+        let config = VmConfig {
+            log: Arc::new(move |line| sink.lock().unwrap().push(line.text)),
+            ..VmConfig::default()
+        };
+        let vm = Vm::new(
+            config,
+            Arc::new(MemorySource::new()),
+            crate::classes(&fastemu_core::default_profile()),
+        );
+        vm.attach("test", |ctx| {
+            let path = Path::new("secret-folder/store.rms");
+            let fixed = [
+                (io::ErrorKind::StorageFull, "RecordStoreFullException: the record store file could not be used: the disk is full"),
+                (io::ErrorKind::PermissionDenied, "RecordStoreException: the record store file could not be used: permission denied"),
+                (io::ErrorKind::InvalidInput, "RecordStoreException: the record store file could not be used: I/O error"),
+            ];
+            for (kind, expected) in fixed {
+                let e = io::Error::from(kind);
+                let Throw::Exception(exception) = io_failure(ctx, "read", path, &e) else {
+                    panic!("an exception");
+                };
+                let text = ctx.describe_exception(exception);
+                assert!(text.ends_with(expected), "{text}");
+            }
+            // A system error: its text and the path are for the log only.
+            let e = io::Error::from_raw_os_error(5);
+            let Throw::Exception(exception) = io_failure(ctx, "save", path, &e) else {
+                panic!("an exception");
+            };
+            let text = ctx.describe_exception(exception);
+            assert!(!text.contains("os error") && !text.contains("secret-folder"), "{text}");
+        });
+        let lines = lines.lock().unwrap();
+        let last = lines.last().expect("a log line");
+        assert!(
+            last.contains("secret-folder") && last.contains("os error"),
+            "{last}"
+        );
+    }
+
+    #[test]
     fn asking_for_suites_that_are_not_there_keeps_nothing() {
         let dir = tempfile::tempdir().unwrap();
         with_ctx(dir.path(), |ctx| {

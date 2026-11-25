@@ -567,20 +567,63 @@ mod tests {
         });
     }
 
+    /// The exception `io_exception` makes for `e`, as `class: message`.
+    fn described(ctx: &mut Ctx<'_>, e: &io::Error) -> String {
+        match io_exception(ctx, e) {
+            Throw::Exception(exception) => ctx.describe_exception(exception),
+            Throw::Stop => panic!("an I/O error does not stop the machine"),
+        }
+    }
+
     #[test]
-    fn pending_request_bytes_are_counted_for_the_whole_game() {
+    fn a_kind_without_a_fixed_text_reads_as_io_error() {
         with_network(|ctx| {
-            let mut first = pending(ctx);
-            let mut second = pending(ctx);
-            assert!(first.add(MAX_PENDING_BYTES - 10));
-            assert!(!second.add(11));
-            assert!(second.add(10));
-            assert!(!second.add(1));
-            drop(first);
-            assert!(second.add(MAX_PENDING_BYTES - 10));
-            assert!(!second.add(1));
-            drop(second);
-            assert_eq!(counts(ctx).pending.load(Ordering::Acquire), 0);
+            for kind in [
+                io::ErrorKind::InvalidInput,
+                io::ErrorKind::OutOfMemory,
+                io::ErrorKind::Unsupported,
+                io::ErrorKind::Other,
+            ] {
+                assert_eq!(
+                    described(ctx, &io::Error::from(kind)),
+                    "java.io.IOException: I/O error",
+                    "{kind:?}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn the_text_of_a_system_error_does_not_reach_the_game() {
+        with_network(|ctx| {
+            // Whatever kind the system gives a code, its own text, which
+            // ends in "(os error N)" and is in the host's language, stays
+            // out of the exception.
+            for code in [1, 2, 5, 13, 22, 32, 10013, 10022, 10048, 10051] {
+                let e = io::Error::from_raw_os_error(code);
+                let text = described(ctx, &e);
+                assert!(text.starts_with("java.io.IOException: "), "{text}");
+                assert!(!text.contains("os error"), "{code}: {text}");
+                assert!(!text.contains(&e.to_string()), "{code}: {text}");
+            }
+        });
+    }
+
+    #[test]
+    fn a_text_fastemu_wrote_reaches_the_game() {
+        with_network(|ctx| {
+            assert_eq!(
+                described(ctx, &failure("the response ended 5 bytes early")),
+                "java.io.IOException: the response ended 5 bytes early"
+            );
+            assert_eq!(
+                described(ctx, &io::Error::from(io::ErrorKind::ConnectionRefused)),
+                "java.io.IOException: connection refused"
+            );
+            assert_eq!(
+                described(ctx, &io::Error::from(io::ErrorKind::TimedOut)),
+                "java.io.InterruptedIOException: timed out"
+            );
         });
     }
 
@@ -600,6 +643,23 @@ mod tests {
             for kind in [Kind::Connection, Kind::Server, Kind::Datagram] {
                 assert_eq!(counts.open[kind.index()].load(Ordering::Acquire), 0);
             }
+        });
+    }
+
+    #[test]
+    fn pending_request_bytes_are_counted_for_the_whole_game() {
+        with_network(|ctx| {
+            let mut first = pending(ctx);
+            let mut second = pending(ctx);
+            assert!(first.add(MAX_PENDING_BYTES - 10));
+            assert!(!second.add(11));
+            assert!(second.add(10));
+            assert!(!second.add(1));
+            drop(first);
+            assert!(second.add(MAX_PENDING_BYTES - 10));
+            assert!(!second.add(1));
+            drop(second);
+            assert_eq!(counts(ctx).pending.load(Ordering::Acquire), 0);
         });
     }
 
