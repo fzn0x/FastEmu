@@ -1,2 +1,3 @@
-- A server that sends interim responses, a response one byte at a time
-  or endless trailers can no longer keep a closed game running (#38).
+- A server that sends interim responses, endless trailers, or a response
+  or a secure handshake one byte at a time can no longer keep a closed
+  game running (#38).

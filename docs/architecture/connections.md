@@ -88,7 +88,11 @@ reading a body gives it up after a read that brought no body bytes (a
 chunk header, a trailer line). A job that takes one attempt for each
 piece, such as filling a read buffer or writing a large array, calls
 `net::check` between the pieces, because a peer that sends or takes a
-little at a time makes every attempt succeed.
+little at a time makes every attempt succeed. rustls reads again and
+again inside one call while a handshake message or a record is
+incomplete, so `io::tls` gives it a socket that allows one read per call
+and says `WouldBlock` to the next, which ends the attempt as a slice
+with nothing more does.
 
 I/O errors become `IOException` with short fixed messages ("connection
 refused", "connection reset by the peer"), not the host's own text,
@@ -333,7 +337,9 @@ no alarm having been set before.
   that never answers (interrupt and stop), servers that send interim
   responses or trailers for ever or a head one byte at a time (the
   game ends with an error, or when the VM stops), TCP and UDP echo peers,
-  TLS servers with a test authority, and the `Deny` policy. The limit
+  TLS servers with a test authority (and ones that send a handshake or a
+  record one byte at a time, which end when the VM stops), and the `Deny`
+  policy. The limit
   tests open a few more than the limits allow (65 sockets, 9 listeners,
   17 UDP sockets) and write 5 MiB of body, all on loopback. Connects
   that must fail go to port 0, which fails at once on every system. The programs
