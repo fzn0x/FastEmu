@@ -331,16 +331,18 @@ the fields are only read while the VM runs.
 | `max_reported` | 256 | different diagnostics reported | #30 |
 | `max_posted` | 10000 | posted tasks not yet run | #30 |
 
-`max_stack_slots` counts what a thread's frames reserve: the
-`max_locals` and `max_stack` that the class file declares, and 2 more,
-whether the method uses them or not. Each slot is 16 bytes and a thread
-keeps what it grew to until it ends, so the default of 131072 slots is at
-most 2 MiB a thread: 4096 frames of 32 slots, where the largest method in
-the test corpus declares about a hundred in all. A call that would pass
-the limit throws `StackOverflowError`, which a game can catch, whether
-the caller is bytecode or a native that calls into Java. A class that
-declares frames of 65535 locals and 65535 stack slots cannot run a
-single call.
+`max_stack_slots` limits how far a thread's stack reaches. A frame starts
+at its arguments, which sit on top of its caller's operand stack, and
+reserves the `max_locals` and `max_stack` that the class file declares,
+and 2 more, whether the method uses them or not. Each slot is 16 bytes
+and a thread keeps what it grew to until it ends, so the default of
+131072 slots is at most 2 MiB a thread. That is 4096 frames that add 32
+slots each, where the largest method in the test corpus declares about a
+hundred in all. A call that would pass the limit throws
+`StackOverflowError`, which a game can catch, whether the caller is
+bytecode or a native that calls into Java. A frame that declares 65535
+locals and 65535 stack slots needs 131072 slots, the whole limit, so it
+fits only when nothing is below it on the thread's stack.
 
 ### Payloads and the heap
 
