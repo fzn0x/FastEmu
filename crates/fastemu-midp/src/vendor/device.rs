@@ -14,10 +14,16 @@ use fastemu_jvm::Ctx;
 /// The light number of the display's backlight.
 pub(crate) const BACKLIGHT: i32 = 0;
 
+/// How many lights the state keeps a level for. A phone has one to three;
+/// Nokia's `DeviceControl.setLights` takes any number a game likes.
+const MAX_LIGHTS: usize = 16;
+
 /// What the lights and the motor were last told.
 #[derive(Default)]
 struct DeviceState {
-    /// The last level of each light, in percent.
+    /// The last level of each light, in percent, for at most
+    /// [`MAX_LIGHTS`] lights. A change of any other light is logged each
+    /// time.
     lights: HashMap<i32, i32>,
     /// Whether the motor runs until told to stop.
     vibrating: bool,
@@ -35,8 +41,12 @@ fn state<'a>(ctx: &'a mut Ctx<'_>) -> &'a mut DeviceState {
 /// clamped to 0 to 100, and logs the change.
 pub(crate) fn set_light(ctx: &mut Ctx<'_>, number: i32, percent: i32) {
     let percent = percent.clamp(0, 100);
-    if state(ctx).lights.insert(number, percent) == Some(percent) {
+    let lights = &mut state(ctx).lights;
+    if lights.get(&number) == Some(&percent) {
         return;
+    }
+    if lights.len() < MAX_LIGHTS || lights.contains_key(&number) {
+        lights.insert(number, percent);
     }
     let text = if number == BACKLIGHT {
         format!("backlight at {percent}%")
@@ -107,6 +117,28 @@ mod tests {
             lines,
             ["backlight at 100%", "light 1 at 0%", "backlight at 0%"]
         );
+    }
+
+    #[test]
+    fn a_game_that_names_many_lights_makes_the_state_keep_16() {
+        let (lines, kept) = {
+            let kept = Arc::new(Mutex::new(0));
+            let seen = Arc::clone(&kept);
+            let lines = logged(move |ctx| {
+                for number in 0..1000 {
+                    set_light(ctx, number, 50);
+                }
+                // One that is kept still logs only its changes.
+                set_light(ctx, 3, 50);
+                set_light(ctx, 3, 60);
+                *seen.lock().unwrap() = state(ctx).lights.len();
+            });
+            let kept = *kept.lock().unwrap();
+            (lines, kept)
+        };
+        assert_eq!(kept, MAX_LIGHTS);
+        assert_eq!(lines.len(), 1000 + 1);
+        assert_eq!(lines.last().map(String::as_str), Some("light 3 at 60%"));
     }
 
     #[test]
