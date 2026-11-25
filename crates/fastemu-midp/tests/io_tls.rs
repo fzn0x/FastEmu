@@ -223,7 +223,7 @@ fn stop_during_drip(classes: &Path, server: &Dripper, first: usize) {
     let port = server.port.to_string();
     let program =
         io_support::Program::start(classes, "TlsDrip", &[&port], NetworkPolicy::Allow, |ctx| {
-            ctx.set_extension(TrustedCertificates(vec![data("ca.der")]))
+            ctx.set_extension(TrustedCertificates(vec![data("ca.der")]));
         });
     server.wait_for(first);
     program.vm.stop();
