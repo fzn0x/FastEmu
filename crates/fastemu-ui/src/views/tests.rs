@@ -1224,6 +1224,13 @@ fn each_game_has_its_own_link_prompt(cx: &mut TestAppContext) {
     first.ask_to_open("file:///etc/passwd");
     h.redraw();
     assert_eq!(h.link(0).as_deref(), Some("https://example.com/first"));
+    // A browser reads a backslash as a slash, and no server has port
+    // 99999: the app does not count on the runtime to have refused them.
+    for odd in ["http://good.com\\.evil.com/", "http://example.com:99999/"] {
+        first.ask_to_open(odd);
+        h.redraw();
+        assert_eq!(h.link(0).as_deref(), Some("https://example.com/first"));
+    }
 
     // A restart drops the old game's prompt; so does closing the tile.
     h.view.update_in(h.cx, |v, window, cx| {

@@ -15,6 +15,7 @@ pub mod device;
 pub mod frame;
 pub mod input;
 pub mod instance;
+pub mod link;
 #[cfg(feature = "mock")]
 pub mod mock;
 pub mod suite;
@@ -27,5 +28,6 @@ pub use instance::{
     Instance, InstanceId, InstanceSettings, InstanceStatus, LaunchError, LaunchRequest, Launcher,
     LogLevel, LogLine, NetworkPolicy, Notify,
 };
+pub use link::is_web_link;
 pub use suite::{MidletInfo, SuiteInfo};
 pub use text::escape_control;

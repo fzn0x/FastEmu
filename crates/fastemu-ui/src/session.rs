@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use fastemu_core::{
     Frame, InputEvent, Instance, InstanceId, InstanceStatus, Key, KeyAction, LaunchError,
-    LaunchRequest, LogLine, PointerAction,
+    LaunchRequest, LogLine, PointerAction, is_web_link,
 };
 
 use crate::bindings::KeyTracker;
@@ -347,21 +347,6 @@ impl Session {
     }
 }
 
-/// Whether `url` is an `http` or `https` link, the only kind the app
-/// opens, in printable ASCII, so the link the user reads is the page
-/// that opens. The runtime hands over nothing else; this guards against
-/// an instance that would.
-fn is_web_link(url: &str) -> bool {
-    if !url.bytes().all(|b| b.is_ascii_graphic()) {
-        return false;
-    }
-    ["http://", "https://"].iter().any(|scheme| {
-        url.get(..scheme.len())
-            .is_some_and(|start| start.eq_ignore_ascii_case(scheme))
-            && url.len() > scheme.len()
-    })
-}
-
 /// A word or two for a title bar.
 pub fn status_label(status: &InstanceStatus) -> String {
     match status {
@@ -452,8 +437,15 @@ mod tests {
             "https://example.com/\nhttps://other.example/",
             "https://example.com/a b",
             "https://ex\u{0430}mple.com/",
+            "http://good.com\\.evil.com/",
         ] {
             assert!(!is_web_link(hidden), "{hidden:?}");
+        }
+        // A port that no server listens on is no page either.
+        assert!(is_web_link("http://example.com:8080/"));
+        for port in ["99999", "0", "abc", ""] {
+            let link = format!("http://example.com:{port}/");
+            assert!(!is_web_link(&link), "{link}");
         }
     }
 

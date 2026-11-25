@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 
-use fastemu_core::{InstanceStatus, LogLevel, NetworkPolicy};
+use fastemu_core::{InstanceStatus, LogLevel, NetworkPolicy, is_web_link};
 use fastemu_jvm::{
     Ctx, GlobalRef, JResult, NativeClass, ObjRef, Throw, Value, Wake, classfile::access,
 };
@@ -262,24 +262,18 @@ fn permission(ctx: &mut Ctx<'_>, name: &str) -> i32 {
 /// `url` as a web link the app may offer to open, with its scheme in
 /// lower case (Android matches schemes exactly), or `None` when it is not
 /// one. A web link has the scheme `http` or `https`, in any case, and a
-/// host after `//`. It holds only printable ASCII, no user name before
-/// the host and at most [`MAX_LINK`] bytes, so the link the user reads is
-/// the page that opens. A link to a `.jad` or `.jar` asks the phone to
-/// install a suite, which FastEmu does not do.
+/// host after `//`. It holds only printable ASCII and no backslash, no
+/// user name before the host, a port (when it has one) from 1 to 65535
+/// and at most [`MAX_LINK`] bytes, so the link the user reads is the page
+/// that opens (see [`is_web_link`]). A link to a `.jad` or `.jar` asks
+/// the phone to install a suite, which FastEmu does not do.
 fn web_link(url: &str) -> Option<String> {
-    if url.len() > MAX_LINK || !url.bytes().all(|b| b.is_ascii_graphic()) {
+    if url.len() > MAX_LINK || !is_web_link(url) {
         return None;
     }
     let (scheme, rest) = split_scheme(url).ok()?;
-    if scheme != "http" && scheme != "https" {
-        return None;
-    }
     let after = rest.strip_prefix("//")?;
     let host_end = after.find(['/', '?', '#']).unwrap_or(after.len());
-    let authority = &after[..host_end];
-    if authority.is_empty() || authority.starts_with(':') || authority.contains('@') {
-        return None;
-    }
     let path = &after[host_end..];
     let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
     let suite = path.rsplit_once('.').is_some_and(|(_, extension)| {
@@ -440,6 +434,14 @@ mod tests {
             Some("http://[::1]:8080/x")
         );
         assert_eq!(
+            web_link("http://example.com:8080/x?y=z").as_deref(),
+            Some("http://example.com:8080/x?y=z")
+        );
+        assert_eq!(
+            web_link("https://example.com:65535/").as_deref(),
+            Some("https://example.com:65535/")
+        );
+        assert_eq!(
             web_link("https://example.com/game.jad.html").as_deref(),
             Some("https://example.com/game.jad.html")
         );
@@ -459,6 +461,13 @@ mod tests {
             "http://example.com/a b",
             "http://example.com/\n",
             "http://example.com/\u{202e}",
+            "http://good.com\\.evil.com/",
+            "http://example.com/a\\b",
+            "http://example.com:99999/",
+            "http://example.com:abc/",
+            "http://example.com:0/",
+            "http://example.com:/",
+            "http://[::1]:70000/",
             "https://example.com/game.jad",
             "https://example.com/dir/Game.JAR?v=2",
             "noscheme",
