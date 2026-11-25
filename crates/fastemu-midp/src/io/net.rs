@@ -381,15 +381,24 @@ pub(crate) fn io_exception(ctx: &mut Ctx<'_>, e: &io::Error) -> Throw {
 /// The helper takes one of the game's [`MAX_HELPERS`] places before it
 /// starts and keeps it until `work` returns. A game that holds them all
 /// waits for one within `deadline`, in slices with the same checks, as it
-/// waits for a slow network, and starts no thread meanwhile.
+/// waits for a slow network, and starts no thread meanwhile. A stopping
+/// VM starts none at all.
 pub(crate) fn off_thread<T: Send + 'static>(
     ctx: &mut Ctx<'_>,
     deadline: Instant,
     what: &str,
     work: impl FnOnce() -> T + Send + 'static,
 ) -> JResult<T> {
+    if ctx.is_stopping() {
+        return Err(Throw::Stop);
+    }
     let counts = counts(ctx);
     let place = block_on(ctx, Some(deadline), || Ok(counts.take_helper(SLICE)))?;
+    // A place taken at once returns without the checks, and the VM may
+    // have begun to stop meanwhile.
+    if ctx.is_stopping() {
+        return Err(Throw::Stop);
+    }
     let (tx, rx) = mpsc::sync_channel(1);
     // A thread that cannot start drops the closure, and the place with
     // it.
