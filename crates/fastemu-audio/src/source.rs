@@ -21,6 +21,19 @@ pub(crate) trait Source: Send {
     /// Moves to `frame`, clamped to the length.
     fn seek(&mut self, frame: u64);
 
+    /// The shortest length, in frames, at which the mixer starts the
+    /// source over for a loop. A source shorter than this plays once
+    /// whatever its loop count. Zero, the default, loops any source that
+    /// has a frame.
+    ///
+    /// A source whose wrap does work for each event the media holds (MIDI
+    /// sends every event again) asks for a floor, so a file a few frames
+    /// long cannot make the audio thread repeat all of them every few
+    /// frames.
+    fn min_loop_frames(&self) -> u64 {
+        0
+    }
+
     /// The reason the source stopped before its length, if it did: a
     /// decoder that gave up on damaged data. Taking it clears it.
     fn take_error(&mut self) -> Option<String> {

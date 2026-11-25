@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use common::{constant_wav, controller_midi, engine, wav};
-use fastemu_audio::{MAX_QUEUED, PlayerEventKind};
+use common::{constant_wav, controller_midi, engine, kinds, midi, wav};
+use fastemu_audio::{MAX_QUEUED, PlayerEventKind, PlayerState};
 
 /// A listener that blocks on its first event until released, and counts
 /// every event it gets. The thread that started the player is stuck
@@ -184,4 +184,48 @@ fn a_one_frame_loop_is_reported_a_few_times_a_second() {
         (90..=110).contains(&events),
         "{events} events in a second of a loop of one frame"
     );
+}
+
+/// A MIDI file of one note that lasts `ticks` ticks of about a millisecond.
+fn short_midi(ticks: u8) -> Vec<u8> {
+    midi(480, &[0x00, 0x90, 60, 100, ticks, 0x80, 60, 0])
+}
+
+/// A file of a few milliseconds sends all its events again each time it
+/// wraps, so it plays once, as a phone's sequencer would.
+#[test]
+fn a_midi_shorter_than_20_ms_plays_once_however_it_is_looped() {
+    let engine = engine(48_000);
+    let group = engine.create_group();
+    let events = group.subscribe();
+    let player = group.create_player(&short_midi(10), None).unwrap();
+    assert_eq!(player.duration().unwrap(), 10_416);
+    player.set_loop_count(-1).unwrap();
+    player.start().unwrap();
+    engine.advance(48_000);
+    assert_eq!(player.state(), PlayerState::Prefetched);
+    let kinds = kinds(&events);
+    assert_eq!(kinds.len(), 2, "{kinds:?}");
+    assert!(matches!(
+        kinds[1],
+        PlayerEventKind::EndOfMedia { last: true, .. }
+    ));
+}
+
+#[test]
+fn a_midi_of_30_ms_is_looped() {
+    let engine = engine(48_000);
+    let group = engine.create_group();
+    let events = group.subscribe();
+    let player = group.create_player(&short_midi(29), None).unwrap();
+    assert_eq!(player.duration().unwrap(), 30_208);
+    player.set_loop_count(-1).unwrap();
+    player.start().unwrap();
+    engine.advance(24_000);
+    assert_eq!(player.state(), PlayerState::Started);
+    let loops = kinds(&events)
+        .iter()
+        .filter(|kind| matches!(kind, PlayerEventKind::EndOfMedia { last: false, .. }))
+        .count();
+    assert!((14..=17).contains(&loops), "{loops} passes in half a second");
 }

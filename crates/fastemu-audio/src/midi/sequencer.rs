@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::midi::Synth;
 use crate::midi::smf::{Event, Sequence, TimeSignature};
 use crate::source::Source;
+use crate::voice::MIN_LOOP_US;
 
 /// Frames rendered per synthesizer call.
 const CHUNK: usize = 256;
@@ -66,6 +67,12 @@ impl Source for MidiSource {
 
     fn frames(&self) -> u64 {
         self.total
+    }
+
+    /// Every pass sends the file's events again, so a file of a few
+    /// frames plays once, however many loops it is asked for.
+    fn min_loop_frames(&self) -> u64 {
+        us_to_frames(MIN_LOOP_US, self.rate)
     }
 
     fn render(&mut self, out: &mut [f32]) -> usize {
@@ -258,6 +265,71 @@ pub(crate) mod tests {
         assert_eq!(log.lock().unwrap().last(), Some(&(300, 0x80, 62)));
         source.seek(5000);
         assert_eq!(source.render(&mut out), 0);
+    }
+
+    /// A variable-length quantity, as MIDI files write delta times.
+    fn vlq(mut value: u32) -> Vec<u8> {
+        let mut out = vec![(value & 0x7F) as u8];
+        value >>= 7;
+        while value > 0 {
+            out.push((value & 0x7F) as u8 | 0x80);
+            value >>= 7;
+        }
+        out.reverse();
+        out
+    }
+
+    /// A file of `notes` note ons at tick 0 that lasts about 21
+    /// microseconds, one frame at 48 kHz: 32767 ticks to the quarter note
+    /// at a tempo of one microsecond to the quarter.
+    fn blink(notes: usize) -> Arc<Sequence> {
+        let mut track = vec![0x00, 0xFF, 0x51, 0x03, 0, 0, 1];
+        for i in 0..notes {
+            track.extend_from_slice(&[0x00, 0x90 | (i % 16) as u8, (i % 128) as u8, 100]);
+        }
+        track.extend_from_slice(&vlq(688_128));
+        track.extend_from_slice(&[0xFF, 0x2F, 0x00]);
+        Arc::new(smf::parse(&smf(0, 0x7FFF, &[&track])).unwrap())
+    }
+
+    #[test]
+    fn a_file_of_a_few_frames_plays_once_however_it_is_looped() {
+        use crate::voice::{PlayerState, Reached, Voice};
+
+        let recorder = Recorder::default();
+        let log = recorder.log.clone();
+        let source = MidiSource::new(blink(2000), Box::new(recorder), 48_000);
+        assert_eq!(source.frames(), 1);
+        let mut voice = Voice::new(Box::new(source), false);
+        voice.set_loop_count(-1);
+        voice.start();
+        voice.gain = 1.0;
+        let mut out = vec![0.0; 2 * 1024];
+        let mut seen = Vec::new();
+        voice.render(&mut out, 1.0, 1.0, 1.0, false, |r, _| seen.push(r));
+        // Every note was sent once, not once for each of 1024 passes.
+        assert_eq!(log.lock().unwrap().len(), 2000);
+        assert_eq!(seen, vec![Reached::End { error: None }]);
+        assert_eq!(voice.state, PlayerState::Prefetched);
+    }
+
+    #[test]
+    fn a_file_of_20_ms_or_more_is_looped() {
+        use crate::voice::Reached;
+        use crate::voice::Voice;
+
+        // 20 ms is the floor: 960 frames at 48 kHz.
+        let source = MidiSource::new(file(), Box::new(Recorder::default()), 48_000);
+        assert_eq!(source.min_loop_frames(), 960);
+        assert!(source.frames() >= source.min_loop_frames());
+        let mut voice = Voice::new(Box::new(source), false);
+        voice.set_loop_count(2);
+        voice.start();
+        voice.gain = 1.0;
+        let mut out = vec![0.0; 2 * 150_000];
+        let mut seen = Vec::new();
+        voice.render(&mut out, 1.0, 1.0, 1.0, false, |r, _| seen.push(r));
+        assert_eq!(seen, vec![Reached::Loop, Reached::End { error: None }]);
     }
 
     #[test]

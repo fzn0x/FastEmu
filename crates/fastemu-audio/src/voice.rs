@@ -156,7 +156,11 @@ impl Playhead {
             self.read += count as u64;
             self.since_wrap += count as u64;
             if filled < BLOCK {
-                if self.wraps != 0 && self.since_wrap > 0 && source.frames() > 0 {
+                if self.wraps != 0
+                    && self.since_wrap > 0
+                    && source.frames() > 0
+                    && source.frames() >= source.min_loop_frames()
+                {
                     if self.wraps > 0 {
                         self.wraps -= 1;
                     }
