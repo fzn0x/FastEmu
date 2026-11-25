@@ -20,6 +20,11 @@ use parking_lot::Mutex;
 /// oldest go first, so a game that prints in a loop cannot exhaust memory.
 const MAX_LOG_LINES: usize = 10_000;
 
+/// The most bytes of log text kept between two [`HostLink::drain_log`]
+/// calls. A line is cut to `VmLimits::max_log_line_bytes` first, so this
+/// holds at least 256 of them.
+const MAX_LOG_BYTES: usize = 1 << 20;
+
 /// The longest message a crash carries to the app, in bytes. The text is
 /// the game's own (an exception's message), and the app shows it whole.
 const MAX_CRASH_MESSAGE_BYTES: usize = 1024;
@@ -50,6 +55,8 @@ struct HostState {
     status: InstanceStatus,
     frame: Option<Frame>,
     log: VecDeque<LogLine>,
+    /// The bytes of text the queued lines hold.
+    log_bytes: usize,
     /// The web page the game asked to open, until the app takes it.
     link: Option<String>,
 }
@@ -103,6 +110,7 @@ impl HostLink {
                 status: InstanceStatus::Starting,
                 frame: None,
                 log: VecDeque::new(),
+                log_bytes: 0,
                 link: None,
             }),
             errors: AtomicU64::new(0),
@@ -136,7 +144,9 @@ impl HostLink {
     /// Takes the log lines written since the last call.
     pub fn drain_log(&self) -> Vec<LogLine> {
         self.0.pending.store(false, Ordering::Release);
-        self.0.state.lock().log.drain(..).collect()
+        let mut state = self.0.state.lock();
+        state.log_bytes = 0;
+        state.log.drain(..).collect()
     }
 
     /// How many exceptions the game let escape (uncaught in a thread or
@@ -216,8 +226,8 @@ impl HostLink {
     /// classes and resources): it is cut to `max_log_line_bytes`, and the
     /// control characters in it are escaped (see [`escape_control`]), so a
     /// game's text cannot make a terminal do anything or pass for a line
-    /// of its own. The queue holds [`MAX_LOG_LINES`] lines at most, oldest
-    /// first out.
+    /// of its own. The queue holds [`MAX_LOG_LINES`] lines and
+    /// [`MAX_LOG_BYTES`] bytes at most, oldest first out.
     pub(crate) fn log(&self, line: LogLine) {
         let text = clean_text(line.text, self.0.limits.max_log_line_bytes);
         if line.level == LogLevel::Err {
@@ -230,13 +240,17 @@ impl HostLink {
         }
         {
             let mut state = self.0.state.lock();
-            if state.log.len() >= MAX_LOG_LINES {
-                state.log.pop_front();
-            }
+            state.log_bytes += text.len();
             state.log.push_back(LogLine {
                 level: line.level,
                 text,
             });
+            while state.log.len() > MAX_LOG_LINES || state.log_bytes > MAX_LOG_BYTES {
+                let Some(oldest) = state.log.pop_front() else {
+                    break;
+                };
+                state.log_bytes -= oldest.text.len();
+            }
         }
         self.changed();
     }
@@ -432,6 +446,35 @@ mod tests {
         let link = HostLink::with_limits(InstanceId::next(), None, limits);
         link.log(out("y".repeat(5000)));
         assert!(link.drain_log()[0].text.len() <= 100);
+    }
+
+    #[test]
+    fn three_hundred_lines_of_a_megabyte_keep_at_most_a_megabyte() {
+        let (link, _) = counting();
+        for i in 0..300 {
+            link.log(out(format!("{i} {}", "x".repeat(1 << 20))));
+        }
+        let lines = link.drain_log();
+        let bytes: usize = lines.iter().map(|l| l.text.len()).sum();
+        assert!(bytes <= MAX_LOG_BYTES, "{bytes} bytes");
+        assert!(lines.len() >= 250, "{} lines", lines.len());
+        // The newest are the ones kept.
+        assert!(lines.last().unwrap().text.starts_with("299 "));
+        assert!(!lines[0].text.starts_with("0 "));
+    }
+
+    #[test]
+    fn a_drain_empties_the_byte_budget() {
+        let (link, _) = counting();
+        let line = "z".repeat(4000);
+        for _ in 0..400 {
+            link.log(out(line.clone()));
+        }
+        assert!(link.drain_log().len() < 400);
+        for _ in 0..100 {
+            link.log(out(line.clone()));
+        }
+        assert_eq!(link.drain_log().len(), 100);
     }
 
     #[test]
