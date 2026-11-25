@@ -94,9 +94,9 @@ public class Customs extends MIDlet {
         System.out.println("custom big painted " + big.painted);
         System.out.println("custom form counts " + (base - Runtime.getRuntime().freeMemory()));
 
-        // Ten forms shown in turn and kept. Each holds a surface of 240 by
-        // 20 pixels for its item; only the form on the screen holds the
-        // pixels of its own.
+        // Ten forms shown in turn and kept. Each holds a surface of the
+        // form's width by 10 pixels for its item; only the form on the
+        // screen holds the pixels of its own.
         Vector kept = new Vector();
         kept.addElement(form);
         int shown = 0;
@@ -104,7 +104,7 @@ public class Customs extends MIDlet {
         boolean full = false;
         try {
             for (int i = 0; i < 10; i++) {
-                pane = new Pane(20);
+                pane = new Pane(10);
                 Form next = new Form("Form " + i);
                 next.append(pane);
                 kept.addElement(next);
