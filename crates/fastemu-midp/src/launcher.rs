@@ -65,9 +65,10 @@ impl MidpLauncher {
                 text: note.clone(),
             });
         }
-        let source = Arc::new(JarSource::new(
+        let source = Arc::new(JarSource::with_limits(
             Arc::clone(&suite.jar),
             Some(host.log_sink()),
+            limits,
         ));
         let group = self.audio.as_ref().map(|engine| {
             let group = engine.create_group();
