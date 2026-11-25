@@ -299,8 +299,11 @@ fn clean_text(text: String, max_bytes: usize) -> String {
 /// U+007F, and U+0080 to U+009F, which hold the one character forms of
 /// escape sequences) becomes U+FFFD. ESC is one of them, so no sequence
 /// that clears a screen, sets a title or writes to the clipboard survives.
+/// So do the bidirectional embeddings, overrides and isolates (U+202A to
+/// U+202E, U+2066 to U+2069), which could show a line's text in another
+/// order than it has.
 fn escape_control(text: String) -> String {
-    if !text.chars().any(|c| c.is_control() && c != '\t') {
+    if !text.chars().any(is_escaped) {
         return text;
     }
     let mut out = String::with_capacity(text.len() + 8);
@@ -308,11 +311,16 @@ fn escape_control(text: String) -> String {
         match c {
             '\r' => out.push_str("\\r"),
             '\n' => out.push_str("\\n"),
-            c if c.is_control() && c != '\t' => out.push('\u{fffd}'),
+            c if is_escaped(c) => out.push('\u{fffd}'),
             c => out.push(c),
         }
     }
     out
+}
+
+/// Whether [`escape_control`] replaces `c`.
+fn is_escaped(c: char) -> bool {
+    (c.is_control() && c != '\t') || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
 #[cfg(test)]
@@ -498,6 +506,27 @@ mod tests {
         for line in &lines {
             assert!(!line.text.chars().any(|c| c.is_control() && c != '\t'));
         }
+    }
+
+    #[test]
+    fn bidirectional_overrides_in_a_line_are_escaped() {
+        let (link, _) = counting();
+        // A right to left override shows "score 100 txt.exe" as
+        // "score 100 exe.txt"; an isolate does the same for a part.
+        link.log(out(
+            "score 100 \u{202e}txt.exe\u{202c} and \u{2067}abc\u{2069}",
+        ));
+        // Letters of right to left scripts and the marks stay as they are.
+        link.log(out("\u{5e9}\u{5dc}\u{5d5}\u{5dd} \u{200f}ok\u{200e}"));
+        let lines = link.drain_log();
+        assert_eq!(
+            lines[0].text,
+            "score 100 \u{fffd}txt.exe\u{fffd} and \u{fffd}abc\u{fffd}"
+        );
+        assert_eq!(
+            lines[1].text,
+            "\u{5e9}\u{5dc}\u{5d5}\u{5dd} \u{200f}ok\u{200e}"
+        );
     }
 
     #[test]
