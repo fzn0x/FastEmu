@@ -184,7 +184,10 @@ VM lock) and one wait queue, which works as a condition variable
   of a VM runs at a time and natives never see another thread change the
   heap under them.
 - The interpreter gives other threads a turn every 4096 backward
-  branches or calls (a safepoint) with a fair handoff of the lock.
+  branches or calls (a safepoint) with a fair handoff of the lock. An
+  exception that a handler catches counts as 16 of them, so a loop of
+  nothing but throws and handlers, which has no branch and no call,
+  reaches a safepoint every 256 passes.
 - Blocking operations wait on the wait queue, which releases the lock:
   `Thread.sleep`, `Object.wait`, `Thread.join`, a contended
   `monitorenter`, class initialization another thread is running, and
@@ -210,8 +213,9 @@ throw `IllegalMonitorStateException`; `Thread.interrupt` wakes `sleep`,
 
 **Safepoints** are where a thread checks the stop and pause flags, lets
 other threads in, and runs a requested collection: backward branches and
-calls (every 4096), allocation, the return of every native call, waits,
-and `Ctx::yield_now`. A stopping VM makes each thread return
+calls (every 4096), exceptions caught by a handler (every 256),
+allocation, the return of every native call, waits, and
+`Ctx::yield_now`. A stopping VM makes each thread return
 `Err(Throw::Stop)` from its next safepoint or wait; that unwinds every
 frame without running handlers. A paused VM parks threads at safepoints;
 waits and sleeps that end while it is paused park too.
