@@ -99,14 +99,16 @@ another and restart the game.
 
 ## Network
 
-Network access is off by default. A game that opens an HTTP or socket
-connection then fails the way it would on a phone with no signal. Turn
+Network access is off by default. Every connection a game opens, HTTP,
+HTTPS, socket, secure socket or datagram, then fails at once with an
+`IOException`, as on a phone with no signal, and the game cannot listen
+for connections either. Nothing reaches the network. Turn
 **Allow network access** on for a game that needs it. Only allow games
 you trust, since a game with network access can send data out.
 
 Network access means the whole network, not only the internet. A game
-allowed it can reach programs on your own computer (loopback) and
-devices on your local network. It can also listen for connections on
+with network access can reach programs on your own computer, devices on
+your local network and link-local addresses. It can also listen for connections on
 every network interface of your computer, and learn your computer's
 address on the local network. Leave it off for games that do not need
 it.
