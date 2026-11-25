@@ -99,6 +99,9 @@ pub(crate) struct Voice {
     /// picoseconds; 0 until a render budget first measures it. It stays
     /// across stops and starts.
     pub frame_cost_ps: u64,
+    /// Whether its last render added any sound to the mix: a voice the
+    /// render budget holds back fades out only if it did.
+    pub heard: bool,
     /// Output frames rendered since listeners last heard of a loop.
     since_loop_event: u64,
     playhead: Playhead,
@@ -266,6 +269,7 @@ impl Voice {
             start_order: 0,
             waiting: false,
             frame_cost_ps: 0,
+            heard: false,
             since_loop_event: LONG_AGO,
             playhead: Playhead::new(0, 0),
         }
@@ -374,6 +378,9 @@ impl Voice {
     ) {
         // Output frames in the gap listeners are told of loops at.
         let gap = (MIN_LOOP_US as f64 * f64::from(self.source.rate()) / 1_000_000.0 / step) as u64;
+        // A render cut short by the end of the sound counts as heard.
+        self.heard = true;
+        let mut heard = false;
         if !self.playhead.primed {
             self.playhead.prime(self.source.as_mut());
             if let Some(reached) = self.playhead.check()
@@ -398,11 +405,14 @@ impl Voice {
             } else {
                 (self.gain - slew).max(target)
             };
-            frame[0] += left * self.gain;
-            frame[1] += right * self.gain;
+            let (left, right) = (left * self.gain, right * self.gain);
+            heard |= left != 0.0 || right != 0.0;
+            frame[0] += left;
+            frame[1] += right;
             self.playhead.fraction += step;
             self.since_loop_event += 1;
         }
+        self.heard = heard;
     }
 
     /// Handles a loop or the end; returns whether rendering stops. A loop

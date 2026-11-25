@@ -244,7 +244,8 @@ impl Mixer {
     /// sound.
     ///
     /// With a render budget, each group's voices are offered to its
-    /// [`Turn`]. A voice the turn holds back fades out over the ramp, then
+    /// [`Turn`]. A voice the turn holds back fades out over the ramp, or
+    /// stops at once if nothing of it was heard in its last slice, then
     /// waits silent and in place: it is not rendered, so its media time
     /// stands still and it sends no events. It fades in when it plays
     /// again. The clock is read before the first voice and after each
@@ -309,6 +310,12 @@ impl Mixer {
             });
             voice.waiting = !plays;
             if !plays {
+                if !voice.heard {
+                    // Nothing of it was heard in its last slice, so it
+                    // stops at once: a fade would cost a render and change
+                    // nothing that is heard. It fades in when it comes back.
+                    voice.gain = 0.0;
+                }
                 if voice.gain <= 0.0 {
                     // Silent and in place; it fades in when it comes back.
                     self.waits += 1;
@@ -1364,6 +1371,41 @@ mod tests {
             // The sound after it plays on as if nothing had happened.
             assert_eq!(waits, 0);
             assert_eq!(paused, calm);
+        }
+
+        #[test]
+        fn a_silent_sound_held_back_stops_without_a_fade() {
+            let (engine, clock) = engine_with(Some(RenderBudget::DEFAULT));
+            // A game of 16 silent players, as MIDI players before their
+            // notes start; then each costs 10% of real time.
+            let cost = Arc::new(AtomicU64::new(ns_per_frame(1) / 2));
+            let games = dearer_games(&engine, &clock, &cost, 1, 16, 0.0);
+            let voices = &games[0].1;
+            slices(&engine, 100);
+            cost.store(ns_per_frame(10), Ordering::Relaxed);
+            // The new cost shows in one of the next two slices.
+            let mut playing = Vec::new();
+            let mut spent = 0;
+            for _ in 0..2 {
+                let before = clock.now_ns();
+                playing = moved(&engine, voices);
+                spent = clock.now_ns() - before;
+                if playing.contains(&false) {
+                    break;
+                }
+            }
+            let held = playing.iter().filter(|&&p| !p).count();
+            assert!(held > 0, "{playing:?}");
+            // The sounds held back did not render even a fade: the slice
+            // cost the ones that played and nothing more. Each is silent,
+            // in place, and fades in when it comes back.
+            let sound = BLOCK * ns_per_frame(10);
+            assert_eq!(spent, (voices.len() - held) as u64 * sound);
+            let mixer = engine.lock();
+            for (v, _) in voices.iter().zip(&playing).filter(|(_, p)| !**p) {
+                assert!(mixer.slots[v].voice.waiting);
+                assert_eq!(mixer.slots[v].voice.gain, 0.0);
+            }
         }
     }
 }
