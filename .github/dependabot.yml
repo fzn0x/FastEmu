@@ -10,6 +10,23 @@ updates:
     groups:
       cargo:
         patterns: ["*"]
+    # GPUI comes from the Zed Android port at one pinned commit, and the
+    # Android glue in crates/gpui_android and crates/fastemu-android is
+    # written against the crate versions that commit uses. A new minor or
+    # major of these needs a new GPUI commit and code changes, so it is
+    # taken by hand. In a 0.x crate a new minor is a breaking release.
+    ignore:
+      - dependency-name: "gpui*"
+      - dependency-name: "jni"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "android-activity"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "ndk"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "raw-window-handle"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "calloop"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: github-actions
     directories: ["/", "/.github/actions/*"]
@@ -22,7 +39,7 @@ updates:
       actions:
         patterns: ["*"]
 
-  # The documentation site, once /site has its package.json.
+  # The documentation site.
   - package-ecosystem: npm
     directory: /site
     schedule:
@@ -34,7 +51,7 @@ updates:
       npm:
         patterns: ["*"]
 
-  # The Android app, once /android has its Gradle project.
+  # The Android app.
   - package-ecosystem: gradle
     directory: /android
     schedule:
@@ -45,3 +62,16 @@ updates:
     groups:
       gradle:
         patterns: ["*"]
+    # The Android Gradle plugin and the Kotlin plugin (named "android" here)
+    # stay on the versions the Zed Android port builds with, and
+    # games-activity must be a release that the android-activity crate
+    # supports. They move by hand, with GPUI. A new major Gradle changes the
+    # build, so it is taken by hand too.
+    ignore:
+      - dependency-name: "com.android.application"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "android"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "androidx.games:games-activity"
+      - dependency-name: "gradle-wrapper"
+        update-types: ["version-update:semver-major"]
