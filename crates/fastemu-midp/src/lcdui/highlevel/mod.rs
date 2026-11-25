@@ -46,13 +46,9 @@ pub(crate) fn snapshot(ctx: &mut Ctx<'_>, image: Option<ObjRef>) -> JResult<Opti
     let Some(image) = image else {
         return Ok(None);
     };
-    let copy = {
-        let surface = image::surface_of(ctx, image)?;
-        let pixels = surface.lock();
-        if !pixels.is_mutable() {
-            return Ok(Some(image));
-        }
-        pixels.to_immutable()
+    let surface = image::surface_of(ctx, image)?;
+    let Some(copy) = image::snapshot_of(ctx, &surface)? else {
+        return Ok(Some(image));
     };
     Ok(Some(image::new_image(ctx, copy)?))
 }

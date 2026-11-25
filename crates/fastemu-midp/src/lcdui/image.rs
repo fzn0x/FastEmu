@@ -67,6 +67,22 @@ pub(crate) fn reserve_pixels(ctx: &mut Ctx<'_>, width: i64, height: i64) -> JRes
     ctx.check_alloc(usize::try_from(bytes).unwrap_or(usize::MAX))
 }
 
+/// An immutable copy of `pixels`, made after the heap is asked for it, or
+/// `None` when they are immutable already and an image can share them. The
+/// copy is the size of an image the game holds, but a game that copies one
+/// image again and again would hold gigabytes of copies otherwise.
+pub(crate) fn snapshot_of(ctx: &mut Ctx<'_>, pixels: &SharedSurface) -> JResult<Option<Surface>> {
+    let (width, height, mutable) = {
+        let surface = pixels.lock();
+        (surface.width(), surface.height(), surface.is_mutable())
+    };
+    if !mutable {
+        return Ok(None);
+    }
+    reserve_pixels(ctx, width.into(), height.into())?;
+    Ok(Some(pixels.lock().to_immutable()))
+}
+
 /// [`reserve_pixels`] for the image `data` declares in its header, read
 /// without decoding it. A file whose size cannot be read goes to the
 /// decoder, which refuses it for the same reason. A small file can declare
@@ -208,16 +224,10 @@ fn create_from_bytes(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
 fn create_copy(ctx: &mut Ctx<'_>, source: Value) -> JResult<Value> {
     let source = ctx.non_null(source)?;
     let pixels = surface_of(ctx, source)?;
-    let (width, height, mutable) = {
-        let surface = pixels.lock();
-        (surface.width(), surface.height(), surface.is_mutable())
-    };
-    if !mutable {
-        // MIDP allows handing back an immutable source itself.
+    // MIDP allows handing back an immutable source itself.
+    let Some(copy) = snapshot_of(ctx, &pixels)? else {
         return Ok(source.into());
-    }
-    reserve_pixels(ctx, width.into(), height.into())?;
-    let copy = pixels.lock().to_immutable();
+    };
     Ok(new_image(ctx, copy)?.into())
 }
 
