@@ -118,11 +118,11 @@ name in the strip means it is waiting for an answer. A question that
 waited while its game was in the strip takes clicks as soon as the game
 comes forward.
 
-FastEmu opens only web pages, `http` and `https` addresses without a
-backslash or a port outside 1 to 65535, and only after you agree. A game
-that asks to make a call, send a message, open a file, install another
-game or open another app is told the phone cannot do it, and its log
-names what it asked for.
+FastEmu opens only web pages, `http` and `https` addresses with no space,
+no backslash, no user name, no port outside 1 to 65535 and at most 4096
+characters, and only after you agree. A game that asks to make a call,
+send a message, open a file, install another game or open another app is
+told the phone cannot do it, and its log names what it asked for.
 
 ## Keys
 
