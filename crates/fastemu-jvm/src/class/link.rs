@@ -10,7 +10,7 @@ use super::{
     RtPool, package_of,
 };
 use crate::classfile::{ClassFile, CodeAttr, Constant, ConstantPool, access};
-use crate::descriptor::{Kind, MethodDescriptor, is_field_descriptor, kind_of};
+use crate::descriptor::{Kind, is_field_descriptor, kind_of, method_shape};
 use crate::native::{NativeClass, NativeFn};
 use crate::value::Value;
 
@@ -271,19 +271,30 @@ impl ClassTable {
         // Only the two numbers a method needs are kept of its descriptor.
         // A descriptor can name tens of thousands of parameters and every
         // method of a class can share one, so a parse kept for each method
-        // would hold gigabytes before the class memory is judged.
+        // would hold gigabytes before the class memory is judged. Methods
+        // that share a text share its `Arc`, so the descriptor is walked
+        // once for each text, not once for each method: 65535 methods of
+        // one descriptor of 65532 parameters took six minutes.
         let mut shapes = Vec::with_capacity(def.methods.len());
+        let mut walked: HashMap<usize, (usize, Kind)> = HashMap::new();
         for m in &def.methods {
-            let Some(parsed) = MethodDescriptor::parse(&m.desc) else {
-                return Err(format_error(
-                    &def.name,
-                    format!("bad descriptor of method {}{}", m.name, m.desc),
-                ));
+            let shape = match walked.get(&Arc::as_ptr(&m.desc).addr()) {
+                Some(&shape) => shape,
+                None => {
+                    let Some(shape) = method_shape(&m.desc) else {
+                        return Err(format_error(
+                            &def.name,
+                            format!("bad descriptor of method {}{}", m.name, m.desc),
+                        ));
+                    };
+                    walked.insert(Arc::as_ptr(&m.desc).addr(), shape);
+                    shape
+                }
             };
             if matches!(m.src, MethodSrc::Code(_)) && def.pool.is_none() {
                 return Err(format_error(&def.name, "bytecode without a constant pool"));
             }
-            shapes.push((parsed.param_slots(), parsed.ret_kind()));
+            shapes.push(shape);
         }
         // The classes a game can make count against its class memory; the
         // library's, which are fixed, do not.
@@ -450,7 +461,9 @@ impl ClassTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::classfile::{FieldInfo, Utf8};
+    use crate::classfile::{FieldInfo, Utf8, class_of_methods};
+    use crate::descriptor::take_shapes;
+    use crate::source::MemorySource;
 
     fn utf8(text: &str) -> Constant {
         Constant::Utf8(Utf8 {
@@ -492,6 +505,20 @@ mod tests {
             methods: Vec::new(),
             source_file: None,
         }
+    }
+
+    #[test]
+    fn methods_that_share_a_descriptor_are_walked_once_when_the_class_links() {
+        let wide = format!("({})V", "I".repeat(9000));
+        let mut source = MemorySource::new();
+        source.add_class("T", class_of_methods(&[&wide], 3000));
+        let natives = vec![crate::native::NativeClass::new("java/lang/Object")];
+        let mut table = ClassTable::new(Arc::new(source), natives, usize::MAX);
+        take_shapes();
+        let id = table.load("T").unwrap();
+        assert_eq!(table.get(id).methods.len(), 3000);
+        // One walk checks the class file and one links the class.
+        assert_eq!(take_shapes(), 2);
     }
 
     #[test]

@@ -8,6 +8,7 @@
 mod constant;
 mod reader;
 
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
@@ -167,8 +168,12 @@ impl ClassFile {
         }
         let method_count = r.u16()?;
         let mut methods = Vec::with_capacity(method_count as usize);
+        // The pool entries whose descriptors were found sound. Methods
+        // share descriptors, and one can name 65532 parameters, so a
+        // descriptor is walked once however many methods name it.
+        let mut checked = HashSet::new();
         for _ in 0..method_count {
-            methods.push(parse_method(&mut r, &cp)?);
+            methods.push(parse_method(&mut r, &cp, &mut checked)?);
         }
         let mut source_file = None;
         let attr_count = r.u16()?;
@@ -233,14 +238,22 @@ fn parse_field(r: &mut Reader<'_>, cp: &ConstantPool) -> Result<FieldInfo, Forma
     })
 }
 
-fn parse_method(r: &mut Reader<'_>, cp: &ConstantPool) -> Result<MethodInfo, FormatError> {
+fn parse_method(
+    r: &mut Reader<'_>,
+    cp: &ConstantPool,
+    checked: &mut HashSet<u16>,
+) -> Result<MethodInfo, FormatError> {
     let access = r.u16()?;
     let name = cp.utf8_arc(r.u16()?)?;
-    let descriptor = cp.utf8_arc(r.u16()?)?;
-    if crate::descriptor::MethodDescriptor::parse(&descriptor).is_none() {
-        return Err(FormatError::new(format!(
-            "method {name} has a bad descriptor {descriptor}"
-        )));
+    let descriptor_index = r.u16()?;
+    let descriptor = cp.utf8_arc(descriptor_index)?;
+    if !checked.contains(&descriptor_index) {
+        if crate::descriptor::method_shape(&descriptor).is_none() {
+            return Err(FormatError::new(format!(
+                "method {name} has a bad descriptor {descriptor}"
+            )));
+        }
+        checked.insert(descriptor_index);
     }
     let mut code = None;
     for _ in 0..r.u16()? {
@@ -297,9 +310,48 @@ fn parse_code(body: &[u8], cp: &ConstantPool) -> Result<CodeAttr, FormatError> {
     })
 }
 
+/// A class file `T` of abstract methods named `m`: `per_descriptor` of them
+/// for each of `descriptors`, which are one pool entry each. For the tests
+/// of what a class file with many methods costs to read and to link.
+#[cfg(test)]
+pub(crate) fn class_of_methods(descriptors: &[&str], per_descriptor: usize) -> Vec<u8> {
+    let mut b = vec![0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 49];
+    let utf8 = |b: &mut Vec<u8>, s: &str| {
+        b.push(1);
+        b.extend((s.len() as u16).to_be_bytes());
+        b.extend(s.as_bytes());
+    };
+    b.extend((6 + descriptors.len() as u16).to_be_bytes());
+    utf8(&mut b, "T"); // 1
+    b.extend([7, 0, 1]); // 2: class T
+    utf8(&mut b, "java/lang/Object"); // 3
+    b.extend([7, 0, 3]); // 4: class Object
+    utf8(&mut b, "m"); // 5
+    for descriptor in descriptors {
+        utf8(&mut b, descriptor); // 6 and on
+    }
+    b.extend(0x0421u16.to_be_bytes()); // public, super, abstract
+    b.extend(2u16.to_be_bytes());
+    b.extend(4u16.to_be_bytes());
+    b.extend(0u16.to_be_bytes()); // interfaces
+    b.extend(0u16.to_be_bytes()); // fields
+    b.extend(((descriptors.len() * per_descriptor) as u16).to_be_bytes());
+    for i in 0..descriptors.len() {
+        for _ in 0..per_descriptor {
+            b.extend(0x0401u16.to_be_bytes()); // public abstract
+            b.extend(5u16.to_be_bytes());
+            b.extend((6 + i as u16).to_be_bytes());
+            b.extend(0u16.to_be_bytes()); // attributes
+        }
+    }
+    b.extend(0u16.to_be_bytes()); // attributes
+    b
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::descriptor::take_shapes;
 
     /// A hand-assembled `public class T { static int f() { return 7; } }`
     /// with a `SourceFile` and a `LineNumberTable`.
@@ -367,6 +419,28 @@ mod tests {
         let code = method.code.as_ref().unwrap();
         assert_eq!(code.code, [0x10, 7, 0xAC]);
         assert_eq!(code.line_at(2), Some(3));
+    }
+
+    #[test]
+    fn methods_that_share_a_descriptor_walk_it_once() {
+        // 3000 methods of 9000 parameters each: walked for every method,
+        // that is 27 million parameters. A class file of 65535 methods
+        // that name a descriptor of 65532 parameters took six minutes.
+        let wide = format!("({})V", "I".repeat(9000));
+        let other = format!("({})I", "J".repeat(9000));
+        let bytes = class_of_methods(&[&wide, &other], 1500);
+        take_shapes();
+        let class = ClassFile::parse(&bytes).unwrap();
+        assert_eq!(class.methods.len(), 3000);
+        assert_eq!(take_shapes(), 2, "one walk for each descriptor");
+    }
+
+    #[test]
+    fn a_bad_descriptor_is_refused_however_many_methods_share_it() {
+        let bytes = class_of_methods(&["(I", "()V"], 3);
+        let err = ClassFile::parse(&bytes).unwrap_err();
+        assert!(err.0.contains("bad descriptor"), "{}", err.0);
+        assert!(ClassFile::parse(&class_of_methods(&["()V"], 3)).is_ok());
     }
 
     #[test]

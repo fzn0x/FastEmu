@@ -78,6 +78,47 @@ pub fn is_field_descriptor(desc: &str) -> bool {
     field_len(desc.as_bytes()) == Some(desc.len())
 }
 
+#[cfg(test)]
+thread_local! {
+    static SHAPES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many descriptors [`method_shape`] has walked on this thread since
+/// the last call, which starts the count again.
+#[cfg(test)]
+pub(crate) fn take_shapes() -> usize {
+    SHAPES.with(|count| count.replace(0))
+}
+
+/// What the loader keeps of a method descriptor: the slots its parameters
+/// take (`this` not counted) and the kind of its result, or `None` when
+/// `desc` is not a method descriptor.
+///
+/// It walks the text once and keeps nothing, where
+/// [`MethodDescriptor::parse`] makes a `String` for each parameter. A
+/// descriptor can name 65532 parameters, and a class file can give all of
+/// its 65535 methods the same one, so a caller that sees the same text
+/// again keeps the answer and asks once.
+pub fn method_shape(desc: &str) -> Option<(usize, Kind)> {
+    #[cfg(test)]
+    SHAPES.with(|count| count.set(count.get() + 1));
+    let bytes = desc.as_bytes();
+    if bytes.first() != Some(&b'(') {
+        return None;
+    }
+    let mut at = 1;
+    let mut slots = 0;
+    while *bytes.get(at)? != b')' {
+        slots += kind_of(&desc[at..]).slots();
+        at += field_len(&bytes[at..])?;
+    }
+    let ret = &desc[at + 1..];
+    if ret != "V" && !is_field_descriptor(ret) {
+        return None;
+    }
+    Some((slots, kind_of(ret)))
+}
+
 /// A parsed method descriptor such as `(I[Ljava/lang/String;)V`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MethodDescriptor {
@@ -160,6 +201,39 @@ mod tests {
             MethodDescriptor::parse("()[[I").unwrap().ret_kind(),
             Kind::Ref
         );
+    }
+
+    #[test]
+    fn the_shape_of_a_descriptor_is_what_its_parse_says() {
+        for good in [
+            "()V",
+            "(I)I",
+            "(IJ[Ljava/lang/String;D)V",
+            "([J[[DLjava/lang/Object;F)[[I",
+            "(BCSZ)Z",
+        ] {
+            let parsed = MethodDescriptor::parse(good).unwrap();
+            assert_eq!(
+                method_shape(good),
+                Some((parsed.param_slots(), parsed.ret_kind())),
+                "{good}"
+            );
+        }
+        assert_eq!(method_shape("(JD)V"), Some((4, Kind::Void)));
+        assert_eq!(method_shape("([J)J"), Some((1, Kind::Long)));
+        let wide = format!("({})V", "J".repeat(65000));
+        assert_eq!(method_shape(&wide), Some((130_000, Kind::Void)));
+    }
+
+    #[test]
+    fn a_bad_descriptor_has_no_shape() {
+        for bad in [
+            "", "I", "(", "(L;)V", "(I", "(I)", "(I)X", "(Q)V", "()VV", "(V)V", "(Lx)V", "(I)L;",
+            "()", "(I)II",
+        ] {
+            assert_eq!(method_shape(bad), None, "{bad}");
+            assert!(MethodDescriptor::parse(bad).is_none(), "{bad}");
+        }
     }
 
     #[test]
