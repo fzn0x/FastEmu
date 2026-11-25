@@ -42,12 +42,37 @@ why, and how the MIDP layer should map each MMAPI call onto it.
 
 ## Threads and locking
 
-All mixer state sits behind one `Mutex`. API calls lock it briefly; the
-audio thread locks it once per buffer while it renders. Decoding and
+All mixer state sits behind one lock, a `parking_lot` mutex. It is fair:
+a caller that has waited a moment gets it next, so a thread that takes it
+again and again (a game that seeks a big MIDI file in a loop) cannot keep
+the audio thread or another game's calls out. API calls hold it briefly.
+The audio thread renders a buffer in slices of 128 frames and frees the
+lock between them, so a call waits for one slice at most. Decoding and
 parsing happen before the lock is taken (when a player is created), so
 the only work under the lock is rendering, which is the work the audio
-thread must do anyway. A poisoned lock (a panic while it was held) is
-recovered rather than silencing every game.
+thread must do anyway. The lock has no poison: a panic while it was held
+leaves the mixer as it was rather than silencing every game.
+
+What one game can make the lock cost is bounded:
+
+- a game has at most 32 players started, and all games together 128 (see
+  Players);
+- a MIDI file of a few frames plays once, a file sends at most 512
+  messages for each call to render, and a file holds at most 65,536
+  events (see Formats);
+- listeners hear of a loop at most every 20 ms of output per player.
+
+A seek in a MIDI file replays the controllers before the new position. It
+is up to 65,536 events under the lock, about a millisecond. That stays a
+known limit, and the fair lock keeps it from starving anyone.
+
+The audio thread never unwinds. Each voice renders inside `catch_unwind`:
+a source that panics (a decoder or synthesizer bug on damaged data) is
+replaced by an empty one, stopped, and its run ends with an `Error` event
+and the last `EndOfMedia`. The other voices play on. `Engine::render` also
+catches anything else that panics while mixing, and a listener that
+panics, and leaves silence for that slice. The output callback catches
+what is left and writes silence.
 
 Events are queued while the lock is held, so their order is the order
 things happened, and delivered after it is released, so a listener may
@@ -58,6 +83,17 @@ quickly. `Group::subscribe` gives a channel instead, which is what the
 MIDP layer should use: its own event thread reads the channel and calls
 `PlayerListener.playerUpdate`, which MMAPI requires to happen
 asynchronously anyway.
+
+The event queue is bounded, because a listener may block and a game can
+make events faster than a listener reads them. It holds 4096 events
+(`MAX_QUEUED`). Past that it drops the repeats: `Started`,
+`VolumeChanged` and the `EndOfMedia` of a pass that another follows
+(`EventClass::Repeat`). Past twice that it drops the events that end a run
+too (`Stopped`, the last `EndOfMedia`, `Error`; `EventClass::RunEnd`).
+`Closed` is never dropped, so a player's data can always be freed.
+`Engine::dropped_events` counts what was lost. A listener that keeps up
+loses nothing. `Group::subscribe` is for tests and examples: the channel
+it makes has no bound, so a receiver nobody reads grows.
 
 Listeners are dropped with the lock released, because a listener may own
 player or group handles whose drops take the lock.
@@ -83,6 +119,17 @@ the MIDP layer (see the mapping below):
   whether the player stopped there or another pass follows: by the time
   a listener reads the event, the player's state may already be past the
   whole loop.
+- A loop is heard with no gap, but listeners are told of it at most once
+  every 20 ms of output per player (`MIN_LOOP_US`): a sound of one frame
+  at 384 kHz loops 384,000 times a second, and each pass would be two
+  events. The first loop after a start, and the end of a run, are always
+  told.
+- At most 32 players of a game and 128 of all games together are started
+  at once (`MAX_STARTED_PER_GROUP`, `MAX_STARTED_TOTAL`). `start` on one
+  more fails with `AudioError::Busy`, which the MIDP layer throws as the
+  `MediaException` of a player that cannot start. A player that stopped,
+  ended or closed gives its place back. `playTone` tones are not players
+  and have their own cap.
 - Media time is in microseconds. `set_media_time` clamps to the media and
   returns the time set; it works while playing.
 - `set_level(0..=100)` clamps and returns the level. The scale follows
@@ -164,7 +211,16 @@ should report.
   their rhythm. A track length that does not land on another chunk is
   wrong: the track is read to its end-of-track event instead. Seeking
   resets the synthesizer and replays program changes, controllers and
-  pitch bends before the new position (not notes).
+  pitch bends before the new position (not notes). A file of more than
+  65,536 events, tempo and time signature changes counted, is `TooLarge`;
+  game music has some thousands. Starting a file over for a loop sends all
+  its events again, so a file shorter than 20 ms (`Source::min_loop_frames`)
+  plays once whatever its loop count, and ends with the last
+  `EndOfMedia`. Sound that is not MIDI loops however short it is. The
+  sequencer sends at most 512 messages for each call to `render`, which is
+  a block of at most 256 frames: a file with a few hundred events at its
+  start plays as before, and a pile of tens of thousands at one instant is
+  sent in order over the next blocks.
 - **MP3**: MPEG-1 and MPEG-2 layer III. The length comes from the Xing or
   LAME header without the encoder delay and padding (which the decoder
   trims), or else from the frame headers. ID3v2 tags are skipped.
