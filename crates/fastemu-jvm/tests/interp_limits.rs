@@ -1,6 +1,7 @@
 //! What a game's bytecode can make the interpreter do without bound: a
-//! handler that throws again forms a loop with no branch and no call, and
-//! a frame declares as many slots as it likes.
+//! handler that throws again forms a loop with no branch and no call, a
+//! frame declares as many slots as it likes, and `multianewarray` builds
+//! many arrays at once.
 //!
 //! The classes are assembled by hand, because each needs code that no
 //! compiler writes: a loop that is only exception transfers, a method of
@@ -108,7 +109,8 @@ fn probe_overflow(callee: [u8; 2]) -> [u8; 8] {
     ]
 }
 
-/// `class Deep`: recursions with frames of different sizes.
+/// `class Deep`: recursions with frames of different sizes, and the
+/// multi-dimensional arrays.
 ///
 /// - `big(n)` and `small(n)`: `n` calls of themselves that return `n`.
 ///   A frame of `big` declares 2,000 locals and 2,000 stack slots, one of
@@ -116,13 +118,21 @@ fn probe_overflow(callee: [u8; 2]) -> [u8; 8] {
 /// - `probeBig(n)` and `probeSmall(n)`: the same, `-1` when a
 ///   `StackOverflowError` came out.
 /// - `wide(JJ)V`: takes four argument slots and returns.
+/// - `huge()`: `new byte[30000][0]`, or `1` when an `OutOfMemoryError`
+///   came out and `0` when it was built.
+/// - `shape()`: `new int[3][4][]`, as `10 * a[2].length + a.length`.
 fn deep() -> Vec<u8> {
     let mut c = ClassBuilder::new("Deep", "java/lang/Object", 49, 0);
     let big = c.method_ref("Deep", "big", "(I)I");
     let small = c.method_ref("Deep", "small", "(I)I");
     let overflow = c.class("java/lang/StackOverflowError");
+    let memory = c.class("java/lang/OutOfMemoryError");
+    let bytes2 = c.class("[[B");
+    let ints3 = c.class("[[[I");
     let [bh, bl] = idx(big);
     let [sh, sl] = idx(small);
+    let [xh, xl] = idx(bytes2);
+    let [ih, il] = idx(ints3);
     c.method(STATIC, "big", "(I)I", 2000, 2000, &recursion([bh, bl]), &[]);
     c.method(STATIC, "small", "(I)I", 3, 1, &recursion([sh, sl]), &[]);
     c.method(
@@ -144,6 +154,26 @@ fn deep() -> Vec<u8> {
         &[(0, 5, 5, overflow)],
     );
     c.method(STATIC, "wide", "(JJ)V", 0, 4, &[0xb1], &[]);
+    #[rustfmt::skip]
+    let huge = [
+        0x11, 0x75, 0x30,           // 0: sipush 30000
+        0x03,                       // 3: iconst_0
+        0xc5, xh, xl, 0x02,         // 4: multianewarray [[B 2
+        0x57,                       // 8: pop
+        0x03, 0xac,                 // 9: iconst_0 ireturn
+        0x4b, 0x04, 0xac,           // 11: astore_0 iconst_1 ireturn
+    ];
+    c.method(STATIC, "huge", "()I", 2, 1, &huge, &[(0, 9, 11, memory)]);
+    #[rustfmt::skip]
+    let shape = [
+        0x06, 0x07,                 // 0: iconst_3 iconst_4
+        0xc5, ih, il, 0x02,         // 2: multianewarray [[[I 2
+        0x4b,                       // 6: astore_0
+        0x2a, 0x05, 0x32, 0xbe,     // 7: aload_0 iconst_2 aaload arraylength
+        0x10, 0x0a, 0x68,           // 11: bipush 10 imul
+        0x2a, 0xbe, 0x60, 0xac,     // 14: aload_0 arraylength iadd ireturn
+    ];
+    c.method(STATIC, "shape", "()I", 2, 1, &shape, &[]);
     c.build()
 }
 
@@ -351,4 +381,21 @@ fn a_native_that_calls_into_java_past_the_slot_limit_gets_stack_overflow_error()
         text.contains("StackOverflowError"),
         "the call threw {text:?}"
     );
+}
+
+#[test]
+fn multianewarray_counts_each_sub_array_against_the_heap() {
+    let vm = vm_with(HEAP, VmLimits::default(), Vec::new());
+    // What fits is built, with the sizes it was asked for: new int[3][4][].
+    assert_eq!(call_int(&vm, "Deep", "shape", None), 43);
+    // 30,000 arrays of 16 bytes, and the 120,000 bytes that hold them, do
+    // not fit in 256 KiB; the outer array alone does.
+    assert_eq!(call_int(&vm, "Deep", "huge", None), 1);
+    let stats = vm.heap_stats();
+    assert!(
+        stats.freed_objects < 1000,
+        "no sub-array was built: {} objects freed",
+        stats.freed_objects
+    );
+    assert!(stats.live_objects < 1000, "{} live", stats.live_objects);
 }
