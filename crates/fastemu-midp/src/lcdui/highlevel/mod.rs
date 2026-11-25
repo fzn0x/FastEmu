@@ -39,6 +39,17 @@ pub fn classes() -> Vec<NativeClass> {
     classes
 }
 
+/// Gives back the room of a vector that took in many items and lost them,
+/// so that what the heap counts for it, its room, falls with its length.
+/// A vector within twice its length (and a few items) keeps its room, so
+/// deleting one item at a time does not reallocate each time.
+pub(crate) fn trim<T>(items: &mut Vec<T>) {
+    const SLACK: usize = 16;
+    if items.capacity() > items.len().saturating_mul(2).saturating_add(SLACK) {
+        items.shrink_to(items.len());
+    }
+}
+
 /// The image a screen or item keeps for `image`: MIDP has it take a
 /// snapshot of a mutable image, so later drawing on the image does not
 /// show; an immutable image is kept itself.

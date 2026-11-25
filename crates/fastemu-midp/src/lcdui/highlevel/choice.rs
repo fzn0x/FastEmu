@@ -4,7 +4,7 @@
 
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Tracer, Value};
 
-use super::snapshot;
+use super::{snapshot, trim};
 use crate::lcdui::font::{default_font, font_object};
 
 /// The interface.
@@ -58,6 +58,15 @@ impl ChoiceModel {
             fit_policy: TEXT_WRAP_DEFAULT,
             focus: 0,
         }
+    }
+
+    /// The bytes the elements take on the host, which the heap counts
+    /// against the game: the room of the vector, not only its length, so
+    /// the slack of a vector that grew by doubling is counted too. The
+    /// strings and images the elements name are Java objects and count
+    /// as themselves.
+    pub fn heap_bytes(&self) -> usize {
+        self.elements.capacity() * size_of::<Element>()
     }
 
     /// Marks the references the elements hold.
@@ -126,6 +135,7 @@ impl ChoiceModel {
     /// selection passes to the one that takes its place.
     pub fn delete(&mut self, at: usize) {
         let removed = self.elements.remove(at);
+        trim(&mut self.elements);
         if at < self.focus {
             self.focus -= 1;
         }
@@ -138,7 +148,7 @@ impl ChoiceModel {
 
     /// Removes every element.
     pub fn clear(&mut self) {
-        self.elements.clear();
+        self.elements = Vec::new();
         self.focus = 0;
     }
 
@@ -281,11 +291,13 @@ pub(crate) fn fill(
     if texts.iter().any(Option::is_none) {
         return ctx.throw("java/lang/NullPointerException", "a null string element");
     }
+    ctx.check_alloc(texts.len().saturating_mul(size_of::<Element>()))?;
     for (text, image) in texts.into_iter().zip(pictures) {
         let image = snapshot(ctx, image)?;
         let model = (access.model)(ctx, this)?;
         let at = model.len();
         model.insert(at, text.expect("checked above"), image);
+        ctx.recount(this);
     }
     Ok(())
 }
@@ -321,6 +333,7 @@ pub(crate) fn methods(class: NativeClass, access: Access) -> NativeClass {
                 let model = (access.model)(ctx, this)?;
                 let at = model.len();
                 model.insert(at, text, image);
+                ctx.recount(this);
                 (access.changed)(ctx, this)?;
                 Ok(Value::Int(at as i32))
             },
@@ -334,6 +347,7 @@ pub(crate) fn methods(class: NativeClass, access: Access) -> NativeClass {
                 let text = ctx.non_null(a[2])?;
                 let image = snapshot(ctx, a[3].obj())?;
                 (access.model)(ctx, this)?.insert(at, text, image);
+                ctx.recount(this);
                 (access.changed)(ctx, this)?;
                 Ok(Value::Void)
             },
@@ -342,12 +356,14 @@ pub(crate) fn methods(class: NativeClass, access: Access) -> NativeClass {
             let this = ctx.non_null(a[0])?;
             let at = index(ctx, this, access, a[1].int(), false)?;
             (access.model)(ctx, this)?.delete(at);
+            ctx.recount(this);
             (access.changed)(ctx, this)?;
             Ok(Value::Void)
         })
         .method("deleteAll", "()V", move |ctx, a| {
             let this = ctx.non_null(a[0])?;
             (access.model)(ctx, this)?.clear();
+            ctx.recount(this);
             (access.changed)(ctx, this)?;
             Ok(Value::Void)
         })

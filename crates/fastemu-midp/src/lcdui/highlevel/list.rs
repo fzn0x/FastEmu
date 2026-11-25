@@ -60,6 +60,10 @@ impl ScreenState for ListState {
         self.model.trace(tracer);
         tracer.mark_opt(self.select);
     }
+
+    fn heap_bytes(&self) -> usize {
+        self.model.heap_bytes()
+    }
 }
 
 fn list<'a>(ctx: &'a Ctx<'_>, obj: ObjRef) -> JResult<&'a ListState> {
