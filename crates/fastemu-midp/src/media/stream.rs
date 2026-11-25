@@ -5,13 +5,20 @@
 //! classes included, is read through its `read(byte[], int, int)` method,
 //! so overrides run as on a phone.
 //!
-//! What is read lands in a host buffer the heap does not see yet, so the
-//! reading asks the heap before every chunk: a stream that never ends, or
-//! one longer than the heap could hold, ends in `OutOfMemoryError` at the
-//! size of the heap, and never at more than [`MAX_BYTES`].
+//! A stream read through its `read` grows in a holder the heap counts
+//! ([`CountedBytes`]), and the heap is asked before it grows. The game's
+//! code runs between the reads, and so do its other threads, whose streams
+//! then share the heap's room. A stream that never ends, or one longer
+//! than the heap could hold, ends in `OutOfMemoryError` at the size of the
+//! heap, and never reads more than [`MAX_BYTES`]. The bytes of a
+//! `ByteArrayInputStream` are copied at once, after the heap is asked for
+//! them. Either way the caller hands the bytes to a player, which the heap
+//! counts, before any other thread of the game runs.
 
 use fastemu_core::LogLevel;
 use fastemu_jvm::{ArrayType, Ctx, JResult, ObjRef, Value};
+
+use crate::stream_bytes::CountedBytes;
 
 const BYTE_ARRAY_STREAM: &str = "java/io/ByteArrayInputStream";
 
@@ -42,13 +49,17 @@ pub(crate) fn read_source_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<V
 /// otherwise 0 ends the reading.
 fn read_chunks(ctx: &mut Ctx<'_>, stream: ObjRef, byte_reads: bool) -> JResult<Vec<u8>> {
     let buffer = ctx.new_array(ArrayType::Byte, CHUNK as i32)?;
-    let mut out = Vec::new();
+    let out = CountedBytes::new(ctx)?;
+    let mut chunk = vec![0u8; CHUNK];
     loop {
         let args = [buffer.into(), Value::Int(0), Value::Int(CHUNK as i32)];
         let count = ctx.call_virtual(stream, "read", "([BII)I", &args)?.int();
         if count < 0 || (count == 0 && !byte_reads) {
             break;
         }
+        // The heap is asked as the bytes grow, after either kind of read,
+        // so a stream that never ends one byte at a time is cut off too.
+        // It refuses what it cannot hold: `OutOfMemoryError`.
         if count == 0 {
             // Some streams return 0 rather than block: one byte at a time
             // still gets to the end.
@@ -56,16 +67,15 @@ fn read_chunks(ctx: &mut Ctx<'_>, stream: ObjRef, byte_reads: bool) -> JResult<V
             if byte < 0 {
                 break;
             }
-            out.push(byte as u8);
+            out.push(ctx, &[byte as u8], MAX_BYTES)?;
         } else {
             let count = (count as usize).min(CHUNK);
-            out.extend(ctx.array::<i8>(buffer)?[..count].iter().map(|&b| b as u8));
+            for (to, &from) in chunk.iter_mut().zip(&ctx.array::<i8>(buffer)?[..count]) {
+                *to = from as u8;
+            }
+            out.push(ctx, &chunk[..count], MAX_BYTES)?;
         }
-        // Checked after either kind of read, so a stream that never ends
-        // one byte at a time is cut off too. The heap refuses what it
-        // could never hold with the next chunk: `OutOfMemoryError`.
-        ctx.check_alloc(out.len() + CHUNK)?;
-        if out.len() >= MAX_BYTES {
+        if out.len(ctx)? >= MAX_BYTES {
             ctx.log(
                 LogLevel::Warn,
                 format!(
@@ -75,7 +85,8 @@ fn read_chunks(ctx: &mut Ctx<'_>, stream: ObjRef, byte_reads: bool) -> JResult<V
             break;
         }
     }
-    Ok(out)
+    // Read: the caller hands them to a player before another thread runs.
+    out.take_uncounted(ctx)
 }
 
 /// The rest of a plain `ByteArrayInputStream`, read from its fields, or

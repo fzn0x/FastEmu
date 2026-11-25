@@ -1,15 +1,16 @@
 //! Bytes a native reads from a game's stream, counted on the heap while
 //! they grow.
 //!
-//! `Image.createImage(InputStream)` reads a stream to its end through the
-//! game's own `read`. The game's code runs between the reads, and so does
-//! every other thread of the game, so bytes kept in a host vector the heap
-//! does not see add up over the threads: eight threads that each read an
-//! image stream held 128 MiB beside a heap of 2 MiB. Here the bytes grow
-//! in the payload of a plain `java/lang/Object` that the native roots,
-//! which the heap counts at the room of its vector. The heap is asked
-//! before the vector grows, so threads that read at once share the heap's
-//! room, and a stream the heap cannot hold ends in `OutOfMemoryError`.
+//! `Image.createImage(InputStream)` and `Manager.createPlayer(InputStream,
+//! String)` read a stream to its end through the game's own `read`. The
+//! game's code runs between the reads, and so does every other thread of
+//! the game, so bytes kept in a host vector the heap does not see add up
+//! over the threads: eight threads that each read an image stream held
+//! 128 MiB beside a heap of 2 MiB. Here the bytes grow in the payload of
+//! a plain `java/lang/Object` that the native roots, which the heap counts
+//! at the room of its vector. The heap is asked before the vector grows,
+//! so threads that read at once share the heap's room, and a stream the
+//! heap cannot hold ends in `OutOfMemoryError`.
 
 use fastemu_jvm::{Ctx, JResult, ObjRef, Payload};
 
@@ -79,6 +80,16 @@ impl CountedBytes {
         Ok(std::mem::take(
             &mut ctx.payload_mut::<StreamBytes>(self.0)?.0,
         ))
+    }
+
+    /// Takes the bytes out and stops counting them, for a native that
+    /// hands them to an object the heap counts (asking the heap for it
+    /// first) before it calls Java or releases the VM lock. No other
+    /// thread of the game runs before then, so they never add up.
+    pub(crate) fn take_uncounted(self, ctx: &mut Ctx<'_>) -> JResult<Vec<u8>> {
+        let bytes = self.take(ctx)?;
+        ctx.recount(self.0);
+        Ok(bytes)
     }
 }
 
