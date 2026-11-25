@@ -24,7 +24,7 @@ use crate::lcdui::highlevel::draw::Painter;
 use crate::lcdui::image::SharedSurface;
 use crate::lcdui::keys;
 use crate::lcdui::screen::{KeyEvent, KeyPhase};
-use crate::lcdui::state::{report, state};
+use crate::lcdui::state::{report, state, warn_once};
 
 const CLASS: &str = "javax/microedition/lcdui/CustomItem";
 
@@ -44,6 +44,10 @@ pub struct CustomState {
     surface: Option<SharedSurface>,
     /// The `Graphics` it paints with, made with the surface.
     graphics: Option<ObjRef>,
+    /// The bytes of `surface`, 4 for each pixel, which the heap counts with
+    /// the item. A plain number, so a collection that measures the item
+    /// never waits for the surface's lock.
+    surface_bytes: usize,
     /// The content size `sizeChanged` last reported.
     size: Option<(i32, i32)>,
     /// Whether the last `traverse` kept the traversal inside the item.
@@ -53,6 +57,11 @@ pub struct CustomState {
 impl CustomState {
     pub(super) fn trace(&self, tracer: &mut Tracer<'_>) {
         tracer.mark_opt(self.graphics);
+    }
+
+    /// What the item counts against the heap beyond itself.
+    pub(super) fn heap_bytes(&self) -> usize {
+        self.surface_bytes
     }
 }
 
@@ -143,6 +152,23 @@ pub(crate) fn render(ctx: &mut Ctx<'_>, item: ObjRef, width: i32, height: i32) -
     let (surface, g) = match (reuse, custom(ctx, item)?.graphics) {
         (Some(surface), Some(g)) => (surface, ctx.root(g)),
         _ => {
+            // The item's size comes from the game, up to 8192 by 8192, and
+            // the surface is made here on the event thread, where an
+            // `OutOfMemoryError` has no game to go to. A surface the heap
+            // cannot hold leaves the item blank, with a warning once.
+            let bytes = width as usize * height as usize * 4;
+            match ctx.check_alloc(bytes) {
+                Ok(()) => {}
+                Err(Throw::Stop) => return Err(Throw::Stop),
+                Err(Throw::Exception(_)) => {
+                    warn_once(
+                        ctx,
+                        "custom item size",
+                        "a CustomItem is too large for the heap; it is left blank",
+                    );
+                    return Ok(());
+                }
+            }
             let fresh =
                 Surface::new_mutable_filled(width, height, background | 0xFF00_0000u32 as i32)
                     .map_err(|e| crate::lcdui::throw_gfx(ctx, &e))?;
@@ -151,6 +177,8 @@ pub(crate) fn render(ctx: &mut Ctx<'_>, item: ObjRef, width: i32, height: i32) -
             let s = custom_mut(ctx, item)?;
             s.surface = Some(Arc::clone(&surface));
             s.graphics = Some(g);
+            s.surface_bytes = bytes;
+            ctx.recount(item);
             (surface, g)
         }
     };

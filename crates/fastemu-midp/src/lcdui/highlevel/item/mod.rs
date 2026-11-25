@@ -175,6 +175,13 @@ impl Payload for ItemData {
             Kind::Custom(s) => s.trace(tracer),
         }
     }
+
+    fn heap_bytes(&self) -> usize {
+        match &self.kind {
+            Kind::Custom(s) => s.heap_bytes(),
+            _ => 0,
+        }
+    }
 }
 
 /// The payload of an item.
