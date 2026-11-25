@@ -82,6 +82,10 @@ fn init(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         return ctx.throw("java/lang/OutOfMemoryError", "too many cells");
     }
     let cells = cells as usize;
+    // The grid is 4 bytes a cell, up to 128 MiB, and the object holds
+    // almost nothing until it is there: ask the heap first, tell it after.
+    ctx.check_alloc(cells.saturating_mul(4))?;
+    let this = ctx.non_null(a[0])?;
     let l = layer(ctx, a[0])?;
     l.width = columns.saturating_mul(tw);
     l.height = rows.saturating_mul(th);
@@ -96,6 +100,7 @@ fn init(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         cells: vec![0; cells],
         animated: Vec::new(),
     });
+    ctx.recount(this);
     Ok(Value::Void)
 }
 
@@ -165,6 +170,9 @@ fn set_static_tile_set(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         (tw, th, tiles_across, tile_count);
     let (w, h) = (t.columns.saturating_mul(tw), t.rows.saturating_mul(th));
     (l.width, l.height) = (w, h);
+    // A smaller tile set deletes the animated tiles.
+    let this = ctx.non_null(a[0])?;
+    ctx.recount(this);
     Ok(Value::Void)
 }
 
@@ -228,7 +236,12 @@ pub(super) fn class() -> NativeClass {
                 return ctx.throw(ILLEGAL_ARGUMENT, "more than 32767 animated tiles");
             }
             t.animated.push(tile);
-            Ok(Value::Int(-(t.animated.len() as i32)))
+            let index = -(t.animated.len() as i32);
+            // The tile makes no Java object, so only the count tells the
+            // heap that a loop of these grows.
+            let this = ctx.non_null(a[0])?;
+            ctx.recount(this);
+            Ok(Value::Int(index))
         })
         .method("getAnimatedTile", "(I)I", |ctx, a| {
             let index = animated(ctx, a[0], a[1].int())?;
