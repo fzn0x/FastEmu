@@ -357,10 +357,12 @@ no alarm having been set before.
 - Unit tests sit beside the code: name parsing, the HTTP wire format and
   body decoding fed in every split, dates, datagram addresses and strict
   modified UTF-8, segment counts, the interfaces' constants. The helpers'
-  limit and the shared connect deadline are unit tests in `io::net` that
-  hold helpers on a gate instead of a slow network, since no loopback
-  address drops packets on every system: Windows refuses a full listener
-  after 2 s of retries, Linux and macOS drop the SYN.
+  limit and the shared connect deadline are unit tests in `io::net`, not
+  tests against a slow network, since no loopback address drops packets
+  on every system: Windows refuses a full listener after 2 s of retries,
+  Linux and macOS drop the SYN. The limit tests hold helpers on a gate
+  the test opens, and the deadline tests run `connect_each` with a fake
+  connect.
 - `tests/io_*.rs` and `tests/wma_messages.rs` run Java programs from
   `tests/io_java` on the VM against peers on 127.0.0.1: a scripted HTTP
   server (GET, POST, HEAD, fixed, chunked and open-ended bodies, a reply
