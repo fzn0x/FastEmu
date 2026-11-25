@@ -29,6 +29,15 @@ const HAS_DESCRIPTOR: u16 = 1 << 3;
 /// a smaller limit.
 pub const MAX_ENTRY_BYTES: usize = 64 * 1024 * 1024;
 
+/// The most entries an archive indexes: as many as a central directory can
+/// list. A file with no central directory is read to this many local
+/// headers and no further.
+pub const MAX_ENTRIES: usize = 65535;
+
+/// The most bytes of entry names an archive indexes. The index keeps each
+/// name three times, so this bounds it to about 12 MiB. The names of the
+/// JAR with most of them in the test folder take 60 KB.
+pub const MAX_NAME_BYTES: usize = 4 * 1024 * 1024;
 
 /// The most a deflate stream can expand: a 258-byte match can take as
 /// little as two bits, so one input byte gives at most 4 * 258 bytes.
@@ -296,7 +305,8 @@ fn find_end_of_central(data: &[u8]) -> Option<usize> {
 }
 
 /// Reads the entries the central directory lists, or `None` when it is
-/// missing or inconsistent, so the caller falls back to the local headers.
+/// missing or inconsistent, or its names take more than [`MAX_NAME_BYTES`],
+/// so the caller falls back to the local headers.
 fn read_central_directory(data: &[u8]) -> Option<Vec<Entry>> {
     let end = find_end_of_central(data)?;
     let count = usize::from(u16_at(data, end + 10)?);
@@ -306,8 +316,9 @@ fn read_central_directory(data: &[u8]) -> Option<Vec<Entry>> {
     // have offsets relative to the archive's own start.
     let shift = end.checked_sub(size)?.saturating_sub(offset);
     offset += shift;
-    let mut entries = Vec::with_capacity(count);
+    let mut entries = Vec::with_capacity(count.min(MAX_ENTRIES));
     let mut at = offset;
+    let mut names = 0usize;
     for _ in 0..count {
         if u32_at(data, at)? != CENTRAL_HEADER {
             return None;
@@ -324,6 +335,10 @@ fn read_central_directory(data: &[u8]) -> Option<Vec<Entry>> {
         at += 46 + name_len + extra_len + comment_len;
         if !is_file_name(&name) {
             continue;
+        }
+        names += name.len();
+        if names > MAX_NAME_BYTES {
+            return None;
         }
         if u32_at(data, local)? != LOCAL_HEADER {
             return None;
@@ -347,14 +362,22 @@ fn read_central_directory(data: &[u8]) -> Option<Vec<Entry>> {
 }
 
 /// Finds every local file header by walking the file, for archives whose
-/// central directory is missing or broken.
+/// central directory is missing or broken. It stops at [`MAX_ENTRIES`]
+/// entries or [`MAX_NAME_BYTES`] bytes of names, whichever comes first, as
+/// a file of nothing but headers would otherwise take eight times its size
+/// in memory.
 fn scan_local_headers(data: &[u8]) -> Vec<Entry> {
     let mut entries = Vec::new();
+    let mut names = 0usize;
     let mut at = 0;
     while let Some(found) = find_signature(data, at, LOCAL_HEADER) {
         match read_local_entry(data, found) {
             Some((entry, next)) => {
                 if is_file_name(&entry.name) {
+                    names += entry.name.len();
+                    if entries.len() >= MAX_ENTRIES || names > MAX_NAME_BYTES {
+                        break;
+                    }
                     entries.push(entry);
                 }
                 at = next.max(found + 4);
@@ -818,6 +841,35 @@ mod tests {
             archive.read(archive.find(b"a.txt").unwrap()).unwrap(),
             b"data"
         );
+    }
+
+    #[test]
+    fn a_file_of_local_headers_stops_at_65535_entries() {
+        let names: Vec<String> = (0..100_000).map(|i| i.to_string()).collect();
+        let entries: Vec<TestEntry<'_>> = names
+            .iter()
+            .map(|name| TestEntry::stored(name, b""))
+            .collect();
+        let archive = ZipArchive::new(write(&entries, false)).unwrap();
+        assert_eq!(archive.entries().len(), MAX_ENTRIES);
+        assert_eq!(archive.entries()[0].display_name(), "0");
+        assert!(archive.find(b"65534").is_some());
+        assert!(archive.find(b"65535").is_none());
+    }
+
+    #[test]
+    fn names_past_4_mib_are_not_indexed() {
+        // 6000 names of 1000 bytes. The central directory is refused for
+        // its names, and the walk of the local headers stops at the limit.
+        let names: Vec<String> = (0..6000).map(|i| format!("{i:0>1000}")).collect();
+        let entries: Vec<TestEntry<'_>> = names
+            .iter()
+            .map(|name| TestEntry::stored(name, b"x"))
+            .collect();
+        let archive = ZipArchive::new(write(&entries, true)).unwrap();
+        assert_eq!(archive.entries().len(), MAX_NAME_BYTES / 1000);
+        let kept: usize = archive.entries().iter().map(|e| e.name.len()).sum();
+        assert!(kept <= MAX_NAME_BYTES);
     }
 
     #[test]
