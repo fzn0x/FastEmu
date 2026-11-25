@@ -23,6 +23,9 @@ pub const MAX_ATTRIBUTE_BYTES: usize = 1024 * 1024;
 /// manifest in the test folder holds 52 at most.
 pub const MAX_ATTRIBUTES: usize = 4096;
 
+/// The longest class name a `MIDlet-<n>` entry may give, as the loader
+/// accepts at most this many bytes of a class name.
+pub const MAX_CLASS_NAME_BYTES: usize = 255;
 
 /// The attributes of one file, in file order, without repeated keys.
 ///
@@ -209,11 +212,23 @@ pub fn parse_midlet(value: &str, suite_name: &str) -> Option<MidletInfo> {
 
 /// A class name as manifests write it (`com.a.Game`, `com/a/Game`,
 /// `Game.class`) in binary form, `com.a.Game`.
+///
+/// A name of more than [`MAX_CLASS_NAME_BYTES`] bytes, or with a bracket or
+/// a control character, is no class a game has and gives `None`, so the
+/// MIDlet is dropped instead of reaching the class loader.
 pub fn class_name(raw: &str) -> Option<String> {
     let raw = raw.trim();
     let raw = raw.strip_suffix(".class").unwrap_or(raw);
-    let name = raw.trim_start_matches('/').replace('/', ".");
-    (!name.is_empty()).then_some(name)
+    let raw = raw.trim_start_matches('/');
+    if raw.is_empty()
+        || raw.len() > MAX_CLASS_NAME_BYTES
+        || raw
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '[' | ']'))
+    {
+        return None;
+    }
+    Some(raw.replace('/', "."))
 }
 
 #[cfg(test)]
@@ -339,6 +354,47 @@ mod tests {
         assert_eq!(parse(text), pairs(&[("A", "1")]));
         // A first line that starts with a space has nothing to continue.
         assert_eq!(parse(b" B: 2\nA: 1\n"), pairs(&[("B", "2"), ("A", "1")]));
+    }
+
+    #[test]
+    fn class_names_with_brackets_controls_or_over_255_bytes_are_refused() {
+        for bad in [
+            "[[I",
+            "[Ljava.lang.String;",
+            "com.a.Game[]",
+            "com.a.Ga\tme",
+            "com.a.Game\u{0}",
+            "com.a.G\u{85}ame",
+            "com/a/\nGame",
+        ] {
+            assert_eq!(class_name(bad), None, "{bad:?}");
+            assert!(
+                parse_midlet(&format!("Game, , {bad}"), "S").is_none(),
+                "{bad:?}"
+            );
+        }
+        let long = "a".repeat(300);
+        assert_eq!(class_name(&long), None);
+        assert_eq!(class_name(&format!("{long}.class")), None);
+        let longest = format!("{}.Game", "a".repeat(250));
+        assert_eq!(longest.len(), MAX_CLASS_NAME_BYTES);
+        assert_eq!(class_name(&longest).as_deref(), Some(longest.as_str()));
+        assert_eq!(class_name(&format!("x{longest}")), None);
+        // The names that games use still pass.
+        assert_eq!(
+            class_name("com/a/Game.class").as_deref(),
+            Some("com.a.Game")
+        );
+        assert_eq!(class_name("/Game").as_deref(), Some("Game"));
+        assert_eq!(class_name("a.B$C").as_deref(), Some("a.B$C"));
+    }
+
+    #[test]
+    fn a_midlet_with_a_refused_class_leaves_the_others() {
+        let attrs = pairs(&[("MIDlet-1", "One, , [[I"), ("MIDlet-2", "Two, , com.a.Two")]);
+        let (list, _) = midlets(&attrs, "S");
+        let classes: Vec<_> = list.iter().map(|m| m.class_name.as_str()).collect();
+        assert_eq!(classes, ["com.a.Two"]);
     }
 
     #[test]

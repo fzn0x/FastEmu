@@ -1,7 +1,8 @@
-//! A suite whose manifest names a deep array class, or whose classes form
-//! a long chain, ends as a crash with a short message. It does not close
-//! the app: a stack overflow on the virtual machine's thread would take
-//! the whole process down, and every other game with it.
+//! A suite whose classes form a long chain ends as a crash with a short
+//! message. It does not close the app: a stack overflow on the virtual
+//! machine's thread would take the whole process down, and every other game
+//! with it. A manifest that names a deep array class, or a class of 40000
+//! bytes, lists no MIDlet, so the name never reaches the loader.
 //!
 //! The JARs are made here, so the tests need no JDK.
 
@@ -10,6 +11,7 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use fastemu_core::InstanceStatus;
+use fastemu_midp::suite::Suite;
 use support::{Running, scratch, zip};
 
 /// A class file of class `name` that extends `super_name` and has no
@@ -72,21 +74,37 @@ fn chain(len: usize) -> Vec<(String, Vec<u8>)> {
         .collect()
 }
 
-#[test]
-fn a_manifest_naming_a_very_deep_array_ends_as_a_crash() {
-    let name = format!("{}I", "[".repeat(40_000));
-    let jar = suite("deep_array", &name, &[]);
-    let message = crash_message(&jar);
-    assert!(
-        message.contains("java.lang.ClassFormatError: array type has too many dimensions"),
-        "{message}"
-    );
-    assert!(message.len() < 400, "{} bytes of message", message.len());
+/// How many MIDlets the suite in `jar` lists.
+fn listed(jar: &Path) -> usize {
+    Suite::open(jar)
+        .expect("a suite that opens")
+        .info
+        .midlets
+        .len()
 }
 
 #[test]
-fn a_manifest_naming_a_very_long_class_ends_as_a_crash() {
+fn a_manifest_naming_a_very_deep_array_lists_no_midlet() {
+    let name = format!("{}I", "[".repeat(40_000));
+    let jar = suite("deep_array", &name, &[]);
+    assert_eq!(listed(&jar), 0);
+}
+
+#[test]
+fn a_manifest_naming_a_very_long_class_lists_no_midlet() {
     let jar = suite("long_name", &"a.".repeat(20_000), &[]);
+    assert_eq!(listed(&jar), 0);
+}
+
+#[test]
+fn a_manifest_naming_a_class_of_255_bytes_still_reaches_the_loader() {
+    // The longest name a MIDlet entry may have is the longest the loader
+    // takes, so a class that is not in the JAR ends the launch in the
+    // error for a missing class.
+    let name = format!("{}.G", "a".repeat(253));
+    assert_eq!(name.len(), 255);
+    let jar = suite("name_255", &name, &[]);
+    assert_eq!(listed(&jar), 1);
     let message = crash_message(&jar);
     assert!(
         message.contains("java.lang.NoClassDefFoundError"),
