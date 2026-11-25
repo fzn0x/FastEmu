@@ -127,6 +127,14 @@ apps pass one with output, the headless runner and tests pass none.
   single lifecycle thread: a later `startApp` or `pauseApp` waits until
   the call before it has returned. Only `destroyApp` runs at once, beside
   a `startApp` that never returns; the calls still waiting then give up.
+  Each waiting call is a Java thread, and a game that pauses and resumes
+  itself in a loop from a `startApp` that never returns would make one for
+  every request. An instance keeps at most 8 lifecycle threads alive:
+  later pause and resume calls are dropped, with one warning in the log,
+  but `destroyApp` never is. Lifecycle threads count against the machine's
+  limit on threads too (`max_threads`, 64, and 16 more for the host). The
+  bound of 8 keeps room in that limit for `destroyApp`, the event thread
+  and the media thread.
 - **The control thread** is a host thread that owns the `Vm` and applies
   the app's input, pause, resume and stop, and `notifyDestroyed`,
   `resumeRequest` and crashes, one at a time in the order they came.

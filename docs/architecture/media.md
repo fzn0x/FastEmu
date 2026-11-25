@@ -43,7 +43,9 @@ play, and what an instance without an audio engine gets.
   sound of the instance, kept as a VM extension. It holds no `ObjRef`s,
   only `GlobalRef`s.
 - **media-events**: the Java thread that delivers events. It is started
-  the first time the instance makes a player or a Nokia sound.
+  the first time the instance makes a player or a Nokia sound, from the
+  host's threads past `max_threads`, so a game with as many threads as it
+  may have still gets it.
 
 ## Modules
 
