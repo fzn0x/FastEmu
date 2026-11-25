@@ -256,7 +256,15 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
 /// Returns whether a callee frame was pushed; for natives, runs them and
 /// leaves the result on the stack.
 fn call(ctx: &mut Ctx<'_>, fi: usize, m: Arc<Method>, sp: &mut usize) -> Result<bool, Fault> {
-    let new_bp = *sp - m.arg_slots as usize;
+    // The stack walk counted these arguments, so this holds for code that
+    // passed it. A release build would wrap on a bug and run far off the
+    // frame.
+    let Some(new_bp) = sp.checked_sub(m.arg_slots as usize) else {
+        return Err(Fault::Error(
+            "java/lang/VerifyError",
+            format!("{} takes more arguments than the stack holds", m.describe()),
+        ));
+    };
     match &m.body {
         MethodBody::Bytecode(_) => {
             ctx.thread.frames[fi].sp = new_bp as u32;
