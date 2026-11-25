@@ -3,8 +3,8 @@
 //! Every method of [`Instance`] returns at once and never waits for the
 //! VM lock, which a game thread may hold for a long time: the apps call
 //! them on their UI thread for every game. Input, pause, resume and stop
-//! go to the instance's control thread, a host thread that owns the `Vm`
-//! and runs each in the order the app sent them:
+//! go to the instance's control thread, a host thread that holds the
+//! host's only `Vm` and runs each in the order the app sent them:
 //!
 //! - input: posted to the VM for the event thread once the control thread
 //!   is done with what came before it, such as a pause still under way
@@ -40,9 +40,17 @@
 //! throwing, an internal error of the VM) calls `destroyApp(true)` if
 //! there is a MIDlet, then ends it as [`InstanceStatus::Crashed`].
 //!
+//! The [`MidpInstance`] the app holds keeps only a [`WeakVm`], so the
+//! machine of a game that has ended is freed on the control thread, or on
+//! the last of its own threads to end, while the app still holds the
+//! instance. What a tile shows (the last frame, the status, the log, a
+//! link the game asked for) lives in the [`HostLink`], apart from the
+//! machine.
+//!
 //! [`MidpInstance::ping`] and [`MidpInstance::activity`] are not part of
-//! [`Instance`]: they wait for the VM lock, so they are for tools such as
-//! `cargo xtask compat`, not for an app's UI thread.
+//! [`Instance`]: they wait for the VM lock and hold the machine while they
+//! run, so they are for tools such as `cargo xtask compat`, not for an
+//! app's UI thread.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
@@ -50,7 +58,7 @@ use std::time::Duration;
 
 use fastemu_audio::Group;
 use fastemu_core::{Frame, InputEvent, Instance, InstanceId, InstanceStatus, LogLevel, LogLine};
-use fastemu_jvm::{Activity, Ctx, HeapStats, JResult, Vm};
+use fastemu_jvm::{Activity, Ctx, HeapStats, JResult, Vm, WeakVm};
 
 use crate::host::{Control, ControlQueue, HostLink};
 use crate::lcdui;
@@ -169,6 +177,8 @@ fn on_event_thread(
 /// The control thread: applies the app's and the MIDlet's lifecycle
 /// requests one at a time.
 struct Controller {
+    /// The host's only strong handle on the machine (see
+    /// [`Controller::finish`]).
     vm: Vm,
     host: HostLink,
     group: Option<Group>,
@@ -323,12 +333,20 @@ impl Controller {
         );
     }
 
-    /// Ends every thread of the VM and the instance's sound.
+    /// Ends every thread of the VM and the instance's sound, then lets go
+    /// of the VM.
     ///
     /// The VM is told to stop first, before anything waits for its lock:
     /// a thread wedged in a native that loops around calls into Java holds
     /// the lock for ever, but ends at its next call. Each wait for the
     /// lock after that gives up in time.
+    ///
+    /// The controller's `Vm` is the only one the host holds (the
+    /// [`MidpInstance`] keeps a [`WeakVm`]), so the machine is freed when
+    /// this returns, on this thread, or later on the last of its own
+    /// threads to end. The status is set first, so the app sees the game
+    /// ended before the machine goes. The app keeps what its tile shows in
+    /// the [`HostLink`], and never frees a machine on its own thread.
     fn finish(self, status: InstanceStatus) {
         self.vm.stop();
         self.vm.resume();
@@ -355,7 +373,11 @@ pub struct MidpInstance {
     id: InstanceId,
     title: String,
     host: HostLink,
-    vm: Vm,
+    /// The machine, without keeping it alive: the control thread and the
+    /// machine's own threads hold it, so a game that ends frees it once
+    /// its threads have ended, while its tile still shows the last frame
+    /// and the log.
+    vm: WeakVm,
     group: Option<Group>,
     /// The control thread's queue. Sending on it never blocks.
     control: ControlQueue,
@@ -371,9 +393,14 @@ impl std::fmt::Debug for MidpInstance {
 }
 
 impl MidpInstance {
-    /// Starts the control thread and the first lifecycle thread, which
-    /// constructs `class_name` and calls `startApp`. When either cannot
-    /// start, the VM stops, so its event thread does not live on.
+    /// Starts the first lifecycle thread, which constructs `class_name`
+    /// and calls `startApp`, and then the control thread, which takes
+    /// `vm`: the host's only strong handle, so the machine is freed when
+    /// the game ends (see [`Controller::finish`]). What the MIDlet sends
+    /// the control thread before it runs waits in its queue, which exists
+    /// before either thread. When either thread cannot start, the VM
+    /// stops, so its event thread does not live on; when it is the control
+    /// thread, the MIDlet's constructor may have run already.
     pub(crate) fn start(
         vm: Vm,
         host: HostLink,
@@ -383,8 +410,13 @@ impl MidpInstance {
     ) -> std::io::Result<Arc<Self>> {
         let queue = ControlQueue::default();
         host.set_control(queue.clone());
+        let weak = vm.downgrade();
+        if let Err(e) = vm.spawn("MIDlet", move |ctx| midlet::launch(ctx, &class_name)) {
+            vm.stop();
+            return Err(e);
+        }
         let controller = Controller {
-            vm: vm.clone(),
+            vm,
             host: host.clone(),
             group: group.clone(),
             queue: queue.clone(),
@@ -398,19 +430,18 @@ impl MidpInstance {
             .name(format!("instance {} control", host.id()))
             .spawn(move || controller.run());
         if let Err(e) = control {
-            vm.stop();
-            return Err(e);
-        }
-        if let Err(e) = vm.spawn("MIDlet", move |ctx| midlet::launch(ctx, &class_name)) {
-            // The control thread owns a clone of the VM: let it end both.
-            queue.send(Control::Stop);
+            // The controller went with the thread that did not start; the
+            // machine lives on in its own threads until they stop.
+            if let Some(vm) = weak.upgrade() {
+                vm.stop();
+            }
             return Err(e);
         }
         Ok(Arc::new(Self {
             id: host.id(),
             title,
             host,
-            vm,
+            vm: weak,
             group,
             control: queue,
         }))
@@ -431,9 +462,22 @@ impl MidpInstance {
         &self.host
     }
 
-    /// What the instance's heap holds now.
-    pub fn heap_stats(&self) -> HeapStats {
-        self.vm.heap_stats()
+    /// What the instance's heap holds now, or `None` once the game has
+    /// ended and its machine is freed. It waits for the VM lock, and it
+    /// holds the machine while it reads: if the game ends meanwhile, the
+    /// caller's thread frees it. The apps do not call it.
+    pub fn heap_stats(&self) -> Option<HeapStats> {
+        self.vm.upgrade().map(|vm| vm.heap_stats())
+    }
+
+    /// Whether the game's machine is freed: its heap, its classes, its JAR
+    /// and what its natives keep, such as its players. That happens when
+    /// the game ends and its threads have ended, without waiting for the
+    /// app to let go of the instance; a thread stuck in a call that cannot
+    /// be stopped holds it until the call returns. It takes no lock and
+    /// never holds the machine.
+    pub fn vm_freed(&self) -> bool {
+        self.vm.is_freed()
     }
 }
 
@@ -454,32 +498,37 @@ const PING_LOCK_WAIT: Duration = Duration::from_secs(1);
 
 /// For tools that tell a game waiting on a still screen from a stuck one,
 /// such as `cargo xtask compat`. Unlike the methods of [`Instance`], these
-/// wait for the VM lock.
+/// wait for the VM lock, and they hold the machine while they run, as
+/// [`MidpInstance::heap_stats`] does: if the game ends meanwhile, the
+/// caller's thread frees it.
 impl MidpInstance {
     /// Asks the event thread whether it would take a key now: posts a task
     /// that answers when the event thread runs it between callbacks and
     /// gets the callback lock within a second. An instance the app paused
     /// does not answer, nor does one whose event thread is stuck in a
-    /// callback.
+    /// callback, nor one whose machine is freed.
     /// Waits for the VM lock for a second at most, as [`Vm::post`] does;
     /// a task it cannot post in that time never answers.
     pub fn ping(&self) -> Ping {
         let answer = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let ping = Ping(Arc::clone(&answer));
-        self.vm.post(move |ctx| {
-            if lcdui::event::acquire(ctx, Some(PING_LOCK_WAIT))? {
-                lcdui::event::release(ctx);
-                answer.store(true, Ordering::Release);
-            }
-            Ok(())
-        });
+        if let Some(vm) = self.vm.upgrade() {
+            vm.post(move |ctx| {
+                if lcdui::event::acquire(ctx, Some(PING_LOCK_WAIT))? {
+                    lcdui::event::release(ctx);
+                    answer.store(true, Ordering::Release);
+                }
+                Ok(())
+            });
+        }
         ping
     }
 
     /// What the game's threads are doing now; see [`Vm::activity`]. Waits
-    /// for the VM lock for 100 ms at most, then returns `None`.
+    /// for the VM lock for 100 ms at most, then returns `None`. It returns
+    /// `None` too once the machine is freed ([`MidpInstance::vm_freed`]).
     pub fn activity(&self) -> Option<Activity> {
-        self.vm.activity()
+        self.vm.upgrade().and_then(|vm| vm.activity())
     }
 }
 
@@ -502,11 +551,11 @@ impl Instance for MidpInstance {
 
     /// Hands the event to the control thread, which posts it to the
     /// event thread in its turn among pause, resume and stop. Returns at
-    /// once, however long a game thread holds the VM lock.
+    /// once, however long a game thread holds the VM lock. Input sent
+    /// after a stop, or after the game ended itself, is dropped: the
+    /// control thread takes no message after the one that ends the game,
+    /// and closes its queue as it ends.
     fn send(&self, event: InputEvent) {
-        if self.vm.is_stopping() {
-            return;
-        }
         self.send_control(Control::Input(event));
     }
 
@@ -551,5 +600,111 @@ impl Drop for MidpInstance {
     /// the control queue would otherwise keep it running.
     fn drop(&mut self) {
         self.send_control(Control::Stop);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::Instant;
+
+    use fastemu_jvm::{MemorySource, VmConfig};
+
+    use super::*;
+    use crate::env::InstanceEnv;
+
+    /// How long a test waits for what takes milliseconds: generous, for a
+    /// loaded CI machine.
+    const DEADLINE: Duration = Duration::from_secs(30);
+
+    /// Sends the name of the thread that drops it: put in a machine as an
+    /// extension, it tells when and where the machine is freed.
+    struct Witness(mpsc::Sender<Option<String>>);
+
+    impl Drop for Witness {
+        fn drop(&mut self) {
+            let _ = self
+                .0
+                .send(std::thread::current().name().map(str::to_owned));
+        }
+    }
+
+    /// An instance whose MIDlet class does not exist, so it crashes at
+    /// once, on a machine that holds a [`Witness`], with `group` as its
+    /// sound; and the receiver of the witness.
+    fn crashing(group: Option<Group>) -> (Arc<MidpInstance>, mpsc::Receiver<Option<String>>) {
+        let mut env = InstanceEnv::for_tests("unused");
+        env.audio = group.clone();
+        let host = env.host.clone();
+        let config = VmConfig {
+            log: host.log_sink(),
+            ..VmConfig::default()
+        };
+        let classes = crate::classes(&fastemu_core::default_profile());
+        let vm = Vm::new(config, Arc::new(MemorySource::new()), classes);
+        let (tx, rx) = mpsc::channel();
+        vm.attach("test", move |ctx| {
+            ctx.set_extension(env);
+            ctx.set_extension(Witness(tx));
+        });
+        let instance = MidpInstance::start(vm, host, group, "Gone".into(), "no.such.Game".into())
+            .expect("starting the instance");
+        (instance, rx)
+    }
+
+    /// Waits until `done` holds, failing after [`DEADLINE`].
+    fn wait_until(what: &str, done: impl Fn() -> bool) {
+        let start = Instant::now();
+        while !done() {
+            assert!(
+                start.elapsed() < DEADLINE,
+                "{what}: not within {DEADLINE:?}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_finished_game_frees_its_machine_while_the_app_holds_it() {
+        let (instance, freed) = crashing(None);
+        wait_until("the instance ends", || instance.status().is_finished());
+        let on = freed
+            .recv_timeout(DEADLINE)
+            .expect("the machine is freed while the app still holds the instance");
+        let on = on.unwrap_or_default();
+        assert!(
+            on.starts_with("instance ") || on.starts_with("java "),
+            "freed on {on:?}, not on the instance's own threads"
+        );
+        // What the tile shows stays.
+        match instance.status() {
+            InstanceStatus::Crashed { message } => {
+                assert!(message.contains("no.such.Game"), "{message}");
+            }
+            other => panic!("expected a crash, got {other:?}"),
+        }
+        assert!(
+            instance
+                .drain_log()
+                .iter()
+                .any(|l| l.text.contains("no.such.Game")),
+            "the log stays"
+        );
+        assert_eq!(instance.error_count(), 1);
+        assert!(instance.vm_freed());
+        assert!(instance.heap_stats().is_none());
+        assert!(instance.activity().is_none());
+        assert!(!instance.ping().answered());
+        // The app's calls on a finished game still return, and change
+        // nothing.
+        instance.send(InputEvent::Text("x".into()));
+        instance.pause();
+        instance.resume();
+        instance.set_volume(0.5);
+        instance.stop();
+        assert!(!instance.wants_text());
+        assert_eq!(instance.take_link_request(), None);
+        assert!(instance.status().is_finished());
+        assert!(instance.vm_freed());
     }
 }

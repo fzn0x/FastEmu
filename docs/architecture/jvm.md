@@ -169,6 +169,14 @@ longer when its OS thread is not scheduled. MIDP's instances post the
 app's input from a control thread of their own
 (`docs/architecture/midp.md`).
 
+The machine is freed when the last `Vm` handle and the last of its
+threads let go of it, on the thread that lets go last. A host that holds
+a `Vm` decides where that happens. `fastemu-midp`'s instance keeps only a
+`WeakVm`, so a game that has ended gives its memory back once its
+threads have ended, while its tile stays open. A thread that upgrades a
+`WeakVm` holds the machine until it drops the `Vm` it got, and frees it
+if every other holder let go meanwhile.
+
 ## Values and references
 
 `Value` is one JVM value: `Int` (also `boolean`, `byte`, `char`,

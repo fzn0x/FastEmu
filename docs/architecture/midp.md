@@ -162,8 +162,8 @@ apps pass one with output, the headless runner and tests pass none.
   engine at the settings' volume;
 - every class of `fastemu_midp::classes(&profile)`: the vendor APIs only
   on profiles of their maker (`docs/architecture/vendors.md`);
-- the event thread started, then the control thread and the first
-  lifecycle thread.
+- the event thread started, then the first lifecycle thread, then the
+  control thread, which takes the host's only `Vm`.
 
 ## Threads
 
@@ -206,7 +206,9 @@ apps pass one with output, the headless runner and tests pass none.
   `notifyDestroyed` or a crash waits, the game's later messages are
   dropped. However often a game calls them, at most one `resumeRequest`
   waits between two messages of the app, and one `notifyDestroyed` or
-  crash.
+  crash. It holds the host's only `Vm`: `MidpInstance` keeps a `WeakVm`,
+  so the machine is freed when the game ends, on the control thread or
+  on the last Java thread to end, and never on the app's thread.
 
 ## The event loop
 
@@ -539,8 +541,11 @@ while they wait for anything. `set_volume` takes no lock: it stores the
 volume of the instance's sound group in an atomic, which the audio
 thread reads at its next slice of 128 frames.
 Stopping or dropping an instance ends its threads and closes its group,
-which takes its players out of the mixer; once the app lets go of the
-instance, its virtual machine is freed.
+which takes its players out of the mixer, and frees its virtual machine
+without waiting for the app to let go of the instance. The instance
+keeps its `HostLink`, so a tile still shows the last frame, the status,
+the log and a link the game asked for. `MidpInstance::vm_freed` says
+when the machine is gone.
 
 `tests/many_instances.rs` runs eight instances of one MIDlet at once and
 checks frames, input, a pause, record stores, sound and the stop of each.
