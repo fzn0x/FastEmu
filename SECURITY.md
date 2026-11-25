@@ -136,7 +136,9 @@ links to the page that describes the limit.
 | Pixels of an image | counted on the heap, 4 bytes a pixel | `OutOfMemoryError` before the pixels exist | [graphics.md][gfx-images] |
 | One image | 2^25 pixels | `OutOfMemoryError` | [graphics.md][gfx-images] |
 | Size an image file declares | checked against the heap before decoding; 16384 pixels a side | `OutOfMemoryError`; a JPEG over 16384 pixels a side that the heap could hold is a decode error instead: `IllegalArgumentException`, or `IOException` from `createImage(String)` and `createImage(InputStream)` | [graphics.md][gfx-decoding] |
-| `Image.createImage(InputStream)` | 16 MiB, or 1000 reads in a row that give no bytes | `IOException` | [graphics.md][gfx-images] |
+| `Image.createImage(InputStream)` | 16 MiB, or 1000 reads in a row that give no bytes; the bytes read are counted on the heap as they grow | `IOException`; `OutOfMemoryError` when the heap cannot hold the bytes | [graphics.md][gfx-images] |
+| Images one game decodes at once | one at a time: the other threads wait their turn with the VM lock released, before they read or copy their file; a stream is read first, and its bytes stay counted on the heap while the thread waits | no error of its own; streams read at once share the heap's room | [graphics.md][gfx-images] |
+| First frame of a GIF with more pixels than its image | checked against the heap before it decodes, 5 bytes a pixel | the image does not decode: `IllegalArgumentException`, or `IOException` from `createImage(String)` and `createImage(InputStream)` | [graphics.md][gfx-decoding] |
 | Repair of a damaged PNG | 64 MiB of rows | `OutOfMemoryError` | [graphics.md][gfx-decoding] |
 | Extended XMP segments of a JPEG | 16 | the image does not decode | [graphics.md][gfx-decoding] |
 | Nokia `drawPixels` block | 4194304 pixels | `IllegalArgumentException` | [graphics.md][gfx-nokia] |
@@ -181,7 +183,7 @@ instead, as they throw no `MediaException`.
 | Tones of a Nokia ringing tone | 65536 | `MediaException`; a Nokia `Sound` stays uninitialized, and a Samsung sound stays silent, with a warning | [audio.md][audio-formats] |
 | Tones of a tone sequence | 65536 in the sequence or in one block, 262144 in all its lists together | `IllegalArgumentException` from `setSequence`; a player of such data is silent | [audio.md][audio-formats] |
 | AMR file | 30000 frames, ten minutes | `MediaException`; a Nokia `Sound` stays uninitialized, and a Samsung sound stays silent, with a warning | [audio.md][audio-formats] |
-| Sound read from a stream | what one request of the runtime may take, never more than the heap or 32 MiB | `OutOfMemoryError` | [media.md][media-players] |
+| Sound read from a stream | counted on the heap as it is read, so streams read at once share the heap's room; never more than the heap or 32 MiB | `OutOfMemoryError` | [media.md][media-players] |
 | Sound events waiting | 1024 for a game, 4096 in the engine for all games; twice that for the events that end a run | the repeats are dropped first; `CLOSED` never is | [media.md][media-events] |
 | An MP3 seek the reader cannot do | 8 s of sound caught up in each render call | silence until the place is reached | [audio.md][audio-gaps] |
 | Hold of the audio thread on the shared mixer | one slice of 128 frames, with the lock free between slices | another game's call waits for the slice under way, or about a millisecond while the slices are short | [audio.md][audio-locking] |
@@ -279,17 +281,23 @@ section says is in scope.
   4 MiB each can be held parsed at once: up to 1 GiB of class files, and
   a few times that while parsed, far past the 128 MiB of class data, for
   a moment.
-- A GIF is checked against the heap by its logical screen. Its first
-  frame can be larger: it is decoded whole, up to 2^25 pixels and
-  128 MiB that the heap does not count, before it is cut to the screen. A
-  larger frame does not decode.
-- `Image.createImage(InputStream)` holds the data it reads, up to
-  16 MiB, outside the heap until the image is made. Each thread that
-  calls it holds its own.
-- Image decoding runs without the VM lock, and the heap check before it
-  reserves nothing. Threads that decode at once each pass the check
-  against the same free room, so each can hold an image of up to the
-  whole heap until its call returns.
+- While a game makes an image from a file, FastEmu holds the file and
+  the decoder's buffers beside the heap until the image is counted. A
+  game's image decodes take turns, so this is one file of up to the
+  heap's size and one decode for each game. A decode holds a few times
+  the image's pixels, and a GIF whose first frame has more pixels than
+  its image holds that frame too, of up to the heap's size.
+- A resource that a call reads by name stays outside the heap until
+  the thread gets the VM lock back and makes it a Java object. One
+  resource inflates at a time for each game, but threads that read with
+  `getResourceAsStream` or a sound locator at once can each hold one,
+  of up to the heap's size, for that moment. A Samsung `AudioClip` made
+  from a resource holds it until its sound is decoded, with the VM lock
+  released.
+- A Nokia `Sound` or a Samsung `AudioClip` made from a `byte[]` copies
+  the bytes outside the heap and decodes them with the VM lock
+  released. Threads that make such sounds at once can each hold a copy
+  of up to the heap's size until their sound is decoded.
 - The record stores a game holds open are kept in memory outside its heap
   count: at most about 1 MiB for its own suite and for each of the 16
   other suites it may open.
