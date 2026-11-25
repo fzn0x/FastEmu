@@ -17,6 +17,11 @@ pub(crate) const WRITE: i32 = 2;
 /// `Connector.READ_WRITE`.
 pub(crate) const READ_WRITE: i32 = 3;
 
+/// The longest name `Connector.open` takes, in bytes. A phone's limit was
+/// a few KiB and web servers refuse a request line over 8 KiB. Each
+/// connection keeps copies of its name, which the heap does not count.
+const MAX_NAME_BYTES: usize = 8 << 10;
+
 /// The arguments of `Connector.open` besides the name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Options {
@@ -45,6 +50,10 @@ pub(crate) fn open(ctx: &mut Ctx<'_>, name: Value, mode: i32, timeouts: bool) ->
     let Some(name) = ctx.opt_string(name)? else {
         return ctx.throw("java/lang/IllegalArgumentException", "Null URL");
     };
+    if name.len() > MAX_NAME_BYTES {
+        let message = format!("the connection name is longer than {MAX_NAME_BYTES} bytes");
+        return ctx.throw("java/lang/IllegalArgumentException", &message);
+    }
     if !(READ..=READ_WRITE).contains(&mode) {
         let message = format!("illegal mode {mode}");
         return ctx.throw("java/lang/IllegalArgumentException", &message);
