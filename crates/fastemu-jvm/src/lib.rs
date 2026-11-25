@@ -43,7 +43,7 @@ pub use native::{FieldConstant, NativeClass, NativeField, NativeFn, NativeMethod
 pub use source::{ClassSource, DirSource, MemorySource, ResourceRead};
 pub use thread::ThreadId;
 pub use value::{ObjRef, Value};
-pub use vm::{Diagnostic, DiagnosticSink, LogSink, Task, Vm, VmConfig, WeakVm};
+pub use vm::{Activity, Diagnostic, DiagnosticSink, LogSink, Task, Vm, VmConfig, WeakVm};
 
 /// Every class of the CLDC 1.1 library: `java.lang`, `java.io` and
 /// `java.util`.
