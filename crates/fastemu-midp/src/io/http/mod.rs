@@ -40,6 +40,13 @@ const METHODS: [&str; 3] = ["GET", "POST", "HEAD"];
 /// and some photos; nothing legitimate sends more than this from a game.
 const MAX_REQUEST_BODY: usize = 4 << 20;
 
+/// The most request headers a game may set on one connection.
+const MAX_REQUEST_HEADERS: usize = 64;
+
+/// The most the names and values of a connection's request headers may
+/// take together.
+const MAX_REQUEST_HEADER_BYTES: usize = 16 << 10;
+
 /// Whether the request has gone out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
@@ -60,6 +67,8 @@ struct State {
     method: String,
     /// The request headers in the order the game set them.
     headers: Vec<(String, String)>,
+    /// The bytes of the names and values in `headers`.
+    header_bytes: usize,
     /// The request body the output stream collected, until the request
     /// goes out.
     body: Vec<u8>,
@@ -236,6 +245,7 @@ pub(crate) fn open(
         options,
         method: "GET".to_owned(),
         headers: Vec::new(),
+        header_bytes: 0,
         body: Vec::new(),
         pending: Some(pending),
         phase: Phase::Setup,
@@ -622,6 +632,21 @@ fn set_request_property(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         .headers
         .iter()
         .position(|(k, _)| k.eq_ignore_ascii_case(&key));
+    // What the headers come to after this call.
+    let old = at.map_or(0, |i| s.headers[i].0.len() + s.headers[i].1.len());
+    let new = value.as_ref().map_or(0, |v| key.len() + v.len());
+    let count = s.headers.len() + usize::from(at.is_none() && value.is_some())
+        - usize::from(at.is_some() && value.is_none());
+    let bytes = s.header_bytes - old + new;
+    if count > MAX_REQUEST_HEADERS {
+        drop(s);
+        return throw_io(ctx, "too many request headers");
+    }
+    if bytes > MAX_REQUEST_HEADER_BYTES {
+        drop(s);
+        return throw_io(ctx, "the request headers are larger than 16 KiB");
+    }
+    s.header_bytes = bytes;
     match (at, value) {
         (Some(i), Some(v)) => s.headers[i].1 = v,
         (Some(i), None) => {
