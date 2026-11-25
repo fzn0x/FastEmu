@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use fastemu_core::{LogLevel, LogLine, SuiteInfo};
 use fastemu_jvm::{Ctx, DirSource, Vm, VmConfig};
@@ -129,15 +129,21 @@ fn suite_env(dir: &Path, vendor: &str, name: &str) -> InstanceEnv {
     env
 }
 
-/// Runs `main` of `class` with `args` in a new virtual machine for `env`;
-/// `setup` runs first, with the environment installed.
-fn run(
+/// A program that was started: its machine and what it has logged.
+struct Started {
+    vm: Vm,
+    lines: Arc<Mutex<Vec<LogLine>>>,
+}
+
+/// Starts `main` of `class` with `args` in a new virtual machine for
+/// `env`; `setup` runs first, with the environment installed.
+fn start(
     classes: &Path,
     class: &str,
     args: &[&str],
     env: InstanceEnv,
     setup: impl FnOnce(&mut Ctx<'_>),
-) -> Output {
+) -> Started {
     let lines: Arc<Mutex<Vec<LogLine>>> = Arc::default();
     let sink = Arc::clone(&lines);
     let config = VmConfig {
@@ -154,6 +160,12 @@ fn run(
         setup(ctx);
     });
     vm.run_main(class, args).expect("starting the main thread");
+    Started { vm, lines }
+}
+
+/// Waits for a started program to end and gives what it printed.
+fn finish(started: Started, class: &str) -> Output {
+    let Started { vm, lines } = started;
     if !vm.wait_finished(Some(Duration::from_secs(60))) {
         vm.stop();
         vm.wait_finished(Some(Duration::from_secs(5)));
@@ -167,7 +179,10 @@ fn run(
             .filter(|l| l.level == level)
             .map(|l| l.text.as_str())
             .collect::<Vec<_>>()
-            .join("\n")
+            .join(
+                "
+",
+            )
     };
     Output {
         out: pick(LogLevel::Out),
@@ -178,6 +193,18 @@ fn run(
             .map(|l| l.text.clone())
             .collect(),
     }
+}
+
+/// Runs `main` of `class` with `args` in a new virtual machine for `env`;
+/// `setup` runs first, with the environment installed.
+fn run(
+    classes: &Path,
+    class: &str,
+    args: &[&str],
+    env: InstanceEnv,
+    setup: impl FnOnce(&mut Ctx<'_>),
+) -> Output {
+    finish(start(classes, class, args, env, setup), class)
 }
 
 /// Checks a program's output line by line against `expected`.
@@ -598,4 +625,110 @@ fn a_suite_has_at_most_64_stores() {
         .unwrap()
         .count();
     assert_eq!(files, 64);
+}
+
+/// What the log says when a game's saves are made to wait.
+const SLOWED: &str = "wait for the disk";
+
+#[test]
+fn saves_past_the_write_budget_wait_and_still_reach_the_disk() {
+    let Some(classes) = programs() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let started = Instant::now();
+    // 128 KiB at once, then 2 MiB a second: eleven saves of 200 KiB are
+    // about 1.8 MiB past the burst, a wait of most of a second.
+    let output = run(
+        classes,
+        "RmsWrites",
+        &["heavy", "204800", "10"],
+        InstanceEnv::for_tests(dir.path()),
+        |ctx| fastemu_midp::rms::set_write_limit(ctx, 128 << 10, 2 << 20),
+    );
+    let took = started.elapsed();
+    check(
+        &output,
+        "
+        added 1
+        rewrote 10
+        last 10 of 204800
+        ",
+    );
+    // A bound from below only: a loaded machine takes longer, never less.
+    assert!(took >= Duration::from_millis(500), "{took:?}");
+    assert!(
+        output.warnings.iter().any(|w| w.contains(SLOWED)),
+        "{:?}",
+        output.warnings
+    );
+    // Every save was on the disk when it returned, the last one too.
+    let heavy = read_store(&disk::rms_dir(dir.path()), "heavy");
+    assert_eq!((heavy.records.len(), heavy.records[&1][0]), (1, 10));
+}
+
+#[test]
+fn a_hundred_small_saves_are_not_slowed() {
+    let Some(classes) = programs() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let output = run(
+        classes,
+        "RmsWrites",
+        &["small", "100"],
+        InstanceEnv::for_tests(dir.path()),
+        |_| {},
+    );
+    check(&output, "records 100");
+    // The budget never made a save wait, whatever the machine's speed.
+    assert!(
+        !output.warnings.iter().any(|w| w.contains(SLOWED)),
+        "{:?}",
+        output.warnings
+    );
+    assert_eq!(
+        read_store(&disk::rms_dir(dir.path()), "small")
+            .records
+            .len(),
+        100
+    );
+}
+
+#[test]
+fn a_machine_that_stops_ends_a_save_that_waits() {
+    let Some(classes) = programs() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    // 4 KiB at once, then 1 KiB a second: the second save of 100 KiB would
+    // wait for about a hundred seconds.
+    let started = start(
+        classes,
+        "RmsWrites",
+        &["heavy", "102400", "5"],
+        InstanceEnv::for_tests(dir.path()),
+        |ctx| fastemu_midp::rms::set_write_limit(ctx, 4096, 1024),
+    );
+    // Wait for the log to say that a save waits. The deadline is far off;
+    // it only ends a test that would hang.
+    let give_up = Instant::now() + Duration::from_secs(30);
+    while !started
+        .lines
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|l| l.level == LogLevel::Warn && l.text.contains(SLOWED))
+    {
+        assert!(Instant::now() < give_up, "no save ever waited");
+        assert!(
+            started.vm.thread_count() > 0,
+            "the program ended and no save waited"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    started.vm.stop();
+    assert!(
+        started.vm.wait_finished(Some(Duration::from_secs(20))),
+        "the machine did not stop while a save waited"
+    );
+    let output = finish(started, "RmsWrites");
+    // The program did not go on, and the store holds the last save made.
+    assert!(!output.out.contains("rewrote"), "{}", output.out);
+    let heavy = read_store(&disk::rms_dir(dir.path()), "heavy");
+    assert_eq!((heavy.records.len(), heavy.records[&1][0]), (1, 0));
 }
