@@ -23,7 +23,7 @@ const RATES: std::ops::RangeInclusive<u32> = 8_000..=384_000;
 /// rendered in slices of this size, and the lock is handed to a waiting
 /// call between them, so another game's call waits for one slice at most,
 /// however big the buffer and however many players the audio thread mixes.
-const SLICE_FRAMES: usize = 128;
+pub(crate) const SLICE_FRAMES: usize = 128;
 
 /// How the engine starts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

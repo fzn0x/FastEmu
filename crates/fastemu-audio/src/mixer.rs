@@ -439,7 +439,7 @@ impl Mixer {
         for (&(group, most), &share) in dearest.iter().zip(&shares) {
             self.credits.insert(group, share.credit);
             let left = self.paces.get(&group).copied().unwrap_or(i64::MAX);
-            let pace = Pace::new(left, share.part);
+            let pace = Pace::new(left, share.part, frames);
             turns.push(Turn::new(budget, share, most).with_pace(pace));
         }
         self.shares = shares;
@@ -1406,6 +1406,22 @@ mod tests {
                 assert!(mixer.slots[v].voice.waiting);
                 assert_eq!(mixer.slots[v].voice.gain, 0.0);
             }
+        }
+
+        #[test]
+        fn the_short_last_slice_of_a_buffer_holds_back_no_sound() {
+            // Buffers of 441 frames: three whole slices and one of 57
+            // frames. A game starts a cheap sound before each of them.
+            let (engine, clock) = engine_with(Some(RenderBudget::DEFAULT));
+            let group = engine.create_group();
+            let mut out = vec![0.0f32; 441 * 2];
+            for i in 0..8 {
+                costly(&engine, &group, &clock, i, 1, 0.01);
+                engine.render(&mut out);
+            }
+            engine.render(&mut out);
+            // Each sound started at once, after a short slice too.
+            assert_eq!(engine.budget_waits(), 0);
         }
     }
 }

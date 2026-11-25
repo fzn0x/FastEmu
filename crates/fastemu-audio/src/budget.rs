@@ -27,6 +27,8 @@
 
 use std::time::{Duration, Instant};
 
+use crate::engine::SLICE_FRAMES;
+
 /// How much of real time the sound of all games may take to render, set
 /// with [`Engine::set_render_budget`](crate::Engine::set_render_budget).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -172,9 +174,11 @@ pub(crate) fn frames_ns(per_frame_ps: u64, frames: usize) -> i64 {
 /// Each slice the pace grows by the game's part and a quarter more. So a
 /// game past its part spends the time it saved a quarter of its part a
 /// slice, its oldest sound aside, and the games together take not much
-/// more than the share in any slice. It holds at most two slices' worth:
-/// a sound reads its source two slices at a time, so sounds started
-/// together cost twice their average in one slice and little in the next.
+/// more than the share in any slice. It holds at most two whole slices'
+/// worth: a sound reads its source two whole slices at a time, so sounds
+/// started together cost twice their average in one slice and little in
+/// the next. That holds however short the slice is: the last slice of a
+/// buffer is often a few frames, and a sound may read a whole block in it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Pace {
     /// What the sounds may take this slice, in nanoseconds; less than 0
@@ -194,13 +198,17 @@ impl Pace {
         full: true,
     };
 
-    /// The pace of a game whose `part` of this slice is given, after the
-    /// slices before left `left` of it (`i64::MAX` for a game new to the
-    /// budget, which starts full).
-    pub fn new(left: i64, part: i64) -> Self {
+    /// The pace of a game whose `part` of this slice of `frames` frames is
+    /// given, after the slices before left `left` of it (`i64::MAX` for a
+    /// game new to the budget, which starts full).
+    pub fn new(left: i64, part: i64, frames: usize) -> Self {
         let part = part.max(0);
         let rate = part.saturating_add(part / 4);
-        let cap = rate.saturating_mul(2);
+        let whole = match frames {
+            1..SLICE_FRAMES => rate.saturating_mul(SLICE_FRAMES as i64) / frames as i64,
+            _ => rate,
+        };
+        let cap = whole.saturating_mul(2);
         let room = left.saturating_add(rate).min(cap);
         Self {
             room,
@@ -545,15 +553,26 @@ mod tests {
     #[test]
     fn the_pace_grows_by_a_part_and_a_quarter_up_to_two_slices() {
         // A game new to the budget starts with a full pace.
-        let new = Pace::new(i64::MAX, 800);
+        let new = Pace::new(i64::MAX, 800, SLICE_FRAMES);
         assert_eq!((new.room, new.cap, new.full), (2000, 2000, true));
         // After a slice that took all of it, a part and a quarter comes
         // back; after slices that took more, less.
-        let after = Pace::new(0, 800);
+        let after = Pace::new(0, 800, SLICE_FRAMES);
         assert_eq!((after.room, after.full), (1000, false));
-        assert_eq!(Pace::new(-1500, 800).room, -500);
-        assert!(Pace::new(1000, 800).full);
-        assert_eq!(Pace::new(0, 0).room, 0);
+        assert_eq!(Pace::new(-1500, 800, SLICE_FRAMES).room, -500);
+        assert!(Pace::new(1000, 800, SLICE_FRAMES).full);
+        assert_eq!(Pace::new(0, 0, SLICE_FRAMES).room, 0);
+    }
+
+    #[test]
+    fn a_short_slice_holds_two_whole_slices_of_pace() {
+        // The last 2 frames of a buffer: a sixty-fourth of the part, but
+        // the pace still holds two whole slices' worth, and a whole slice
+        // after it starts full.
+        let short = Pace::new(i64::MAX, 800 * 2 / 128, 2);
+        assert_eq!((short.room, short.cap, short.full), (1920, 1920, true));
+        let next = Pace::new(short.room, 800, SLICE_FRAMES);
+        assert!(next.full);
     }
 
     /// Offers sounds that each cost 100 by their estimate but take `took`
@@ -577,7 +596,7 @@ mod tests {
         // estimate: one of those 500 is not counted. The oldest is not
         // counted at all. So the sounds after it took 100, 700, 1300 and
         // 1900 when the next is offered, and 2500 after the fifth.
-        let full = Pace::new(i64::MAX, 800);
+        let full = Pace::new(i64::MAX, 800, SLICE_FRAMES);
         let mut t = turn(1000).with_pace(full);
         assert_eq!(offer_paced(&mut t, &[600; 8]), 6);
         assert_eq!(t.pace_left(), -500);
@@ -589,12 +608,12 @@ mod tests {
     fn the_render_that_took_most_past_its_estimate_is_not_counted() {
         // The system pauses the thread in the third sound's render: it
         // takes 5000 by the clock. The sounds after it play on.
-        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800));
+        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800, SLICE_FRAMES));
         let took = [100, 100, 5000, 100, 100, 100];
         assert_eq!(offer_paced(&mut t, &took), 6);
         assert_eq!(t.pace_left(), 2000 - 500);
         // Two such renders: the second counts, and the pace is taken.
-        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800));
+        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800, SLICE_FRAMES));
         let took = [100, 5000, 5000, 100, 100];
         assert_eq!(offer_paced(&mut t, &took), 3);
     }
@@ -604,13 +623,13 @@ mod tests {
         // The pace is short of full after a slice that took it all: a
         // sound that played goes on, one that waited does not come back,
         // though both fit in the part.
-        let short = Pace::new(0, 800);
+        let short = Pace::new(0, 800, SLICE_FRAMES);
         let mut t = turn(1000).with_pace(short);
         assert_eq!(
             offer_all(&mut t, 100, &[false, false, true, false], 1000),
             2
         );
-        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800));
+        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800, SLICE_FRAMES));
         assert_eq!(
             offer_all(&mut t, 100, &[false, false, true, false], 1000),
             4
@@ -619,7 +638,7 @@ mod tests {
 
     #[test]
     fn a_pace_left_stops_at_minus_what_it_holds() {
-        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800));
+        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800, SLICE_FRAMES));
         // The oldest, then one sound that takes far more than its pace
         // twice over, with a second one so the first is not forgiven.
         assert_eq!(offer_paced(&mut t, &[100, 9000, 9000]), 3);
