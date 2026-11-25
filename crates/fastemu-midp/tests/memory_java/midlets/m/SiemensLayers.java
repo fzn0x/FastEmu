@@ -9,6 +9,22 @@ import javax.microedition.midlet.MIDlet;
 public class SiemensLayers extends MIDlet {
     protected void startApp() {
         Image tiles = Image.createImage(16, 16);
+
+        // One layer has at most 32767 animated tiles.
+        TiledLayer capped = new TiledLayer(2, 2, tiles, 8, 8);
+        int tilesMade = 0;
+        try {
+            for (int i = 0; i < 40000; i++) {
+                capped.createAnimatedTile(1);
+                tilesMade++;
+            }
+            System.out.println("siemens animated " + tilesMade + " made");
+        } catch (IllegalArgumentException e) {
+            System.out.println("siemens animated " + tilesMade + " then IllegalArgumentException");
+        }
+        capped = null;
+        System.gc();
+
         Vector kept = new Vector();
         int count = 0;
         boolean full = false;

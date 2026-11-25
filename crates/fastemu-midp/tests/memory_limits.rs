@@ -546,6 +546,10 @@ fn siemens_layers_count_their_animated_tiles() {
     let mut run = siemens(&jar, midlet::SIEMENS_LAYERS, HEAP);
     let kept = run.wait_log("siemens layers ");
     let log = run.dump();
+    assert!(
+        run.has("siemens animated 32767 then IllegalArgumentException"),
+        "{log}"
+    );
     assert!(kept.ends_with("then OutOfMemoryError"), "{log}");
     let count = numbers(&kept, "siemens layers ")[0];
     assert!((1..12).contains(&count), "{log}");
