@@ -114,9 +114,12 @@ impl<'a> Chunks<'a> {
                 b"IHDR" => {
                     header.get_or_insert(body);
                 }
-                b"PLTE" => {
-                    palette.get_or_insert(body);
-                }
+                // The png crate indexes a palette in whole colours and
+                // panics on a stray byte or two, so only one of 1 to 256
+                // colours is passed on. An indexed picture without one
+                // fails to decode, and any other picture has no use for
+                // it.
+                b"PLTE" if palette.is_none() && is_palette(body) => palette = Some(body),
                 b"tRNS" => {
                     transparency.get_or_insert(body);
                 }
@@ -169,6 +172,12 @@ fn walk(data: &[u8]) -> impl Iterator<Item = ([u8; 4], &[u8])> {
         next = (end < data.len()).then(|| end + 4);
         Some((kind, &data[start..end.min(data.len())]))
     })
+}
+
+/// Whether `body` is a palette the `png` crate can use: one to 256 whole
+/// colours of three bytes.
+fn is_palette(body: &[u8]) -> bool {
+    (3..=768).contains(&body.len()) && body.len().is_multiple_of(3)
 }
 
 fn write_chunk(out: &mut Vec<u8>, kind: [u8; 4], body: &[u8]) -> Result<()> {
@@ -648,6 +657,63 @@ pub(crate) mod tests {
         // Just under the cap is repaired: 4 x 8 pixels of 16-bit RGBA.
         let file = crafted(ihdr(4, 8, 16, 6, 0), &[], &[0, 1, 2, 3]);
         assert_eq!(Surface::decode(&file).unwrap().width(), 4);
+    }
+
+    /// An indexed 1 x 1 image whose palette chunk is `palette`.
+    fn with_palette(palette: &[u8]) -> Vec<u8> {
+        crafted(ihdr(1, 1, 8, 3, 0), &[chunk(*b"PLTE", palette)], &[0, 0])
+    }
+
+    #[test]
+    fn a_palette_that_is_not_whole_colours_is_dropped() {
+        // The png crate panics on these (range end index 3 out of range
+        // for slice of length 1), which stopped the game's whole VM.
+        for len in [1, 2, 4, 5, 767, 769, 771, 1000] {
+            let file = with_palette(&vec![9; len]);
+            assert!(
+                matches!(Surface::decode(&file), Err(GfxError::Decode(_))),
+                "{len} byte palette"
+            );
+        }
+        // An empty one is no palette at all.
+        assert!(matches!(
+            Surface::decode(&with_palette(&[])),
+            Err(GfxError::Decode(_))
+        ));
+        // Whole colours still work, from one to 256.
+        for entries in [1, 2, 255, 256] {
+            let file = with_palette(&vec![7; entries * 3]);
+            assert_eq!(pixels(&file), [0xFF07_0707], "{entries} entries");
+        }
+        // A bad palette on a picture that needs none does no harm.
+        let rgb = crafted(
+            ihdr(1, 1, 8, 2, 0),
+            &[chunk(*b"PLTE", &[1, 2, 3, 4])],
+            &[0, 5, 6, 7],
+        );
+        assert_eq!(pixels(&rgb), [0xFF05_0607]);
+        // A later palette stands in for a bad first one.
+        let two = crafted(
+            ihdr(1, 1, 8, 3, 0),
+            &[chunk(*b"PLTE", &[1, 2, 3, 4]), chunk(*b"PLTE", &[1, 2, 3])],
+            &[0, 0],
+        );
+        assert_eq!(pixels(&two), [0xFF01_0203]);
+    }
+
+    #[test]
+    fn the_odd_palette_file_from_the_audit_fails_cleanly() {
+        let file = encode(
+            1,
+            1,
+            ColorType::Indexed,
+            BitDepth::Eight,
+            &[0],
+            Some(&[1, 2, 3, 4]),
+            None,
+        );
+        assert!(file.len() < 100);
+        assert!(matches!(Surface::decode(&file), Err(GfxError::Decode(_))));
     }
 
     #[test]
