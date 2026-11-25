@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::midi::Synth;
-use crate::midi::smf::{Event, Sequence};
+use crate::midi::smf::{Event, Sequence, TimeSignature};
 use crate::source::Source;
 
 /// Frames rendered per synthesizer call.
@@ -113,9 +113,12 @@ impl Source for MidiSource {
         true
     }
 
-    /// The parsed events and the frame each falls on.
+    /// The parsed events, the frame each falls on, and the time
+    /// signatures, which a file of nothing else can fill the memory with.
     fn memory_bytes(&self) -> usize {
-        self.sequence.events.len() * size_of::<Event>() + self.frames.len() * size_of::<u64>()
+        self.sequence.events.len() * size_of::<Event>()
+            + self.sequence.time_signatures.len() * size_of::<TimeSignature>()
+            + self.frames.len() * size_of::<u64>()
     }
 }
 
@@ -176,6 +179,22 @@ pub(crate) mod tests {
         assert_eq!(sequence.events.len(), 6);
         let source = MidiSource::new(sequence, Box::new(Recorder::default()), 1000);
         assert_eq!(source.memory_bytes(), 6 * 24);
+    }
+
+    #[test]
+    fn time_signatures_are_memory_too() {
+        // A time signature is eight bytes of file and sixteen of memory,
+        // and a file of nothing else holds no events at all.
+        let mut track = Vec::new();
+        for _ in 0..1000 {
+            track.extend_from_slice(&[0x00, 0xFF, 0x58, 0x04, 4, 2, 24, 8]);
+        }
+        track.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
+        let sequence = Arc::new(smf::parse(&smf(0, 96, &[&track])).unwrap());
+        assert!(sequence.events.is_empty());
+        assert_eq!(sequence.time_signatures.len(), 1000);
+        let source = MidiSource::new(sequence, Box::new(Recorder::default()), 1000);
+        assert_eq!(source.memory_bytes(), 1000 * size_of::<TimeSignature>());
     }
 
     #[test]
