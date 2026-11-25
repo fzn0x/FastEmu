@@ -359,6 +359,15 @@ inside an APP1 block or a block the `gif` crate skips, is no size here.
   too. The size is only what the file claims. It can be far over the
   decoder's limits, which `Surface::decode` still enforces.
 
+`probe_frame_bytes(data) -> Option<u64>` gives the bytes
+`Surface::decode` holds for a GIF's first frame when that frame has more
+pixels than the image `probe_size` gives: 4 bytes a pixel, and 1 for the
+index the `gif` crate reads it into first. It reads the file up to the
+frame header with the options decoding uses, as the probe does. Every
+other file is `None`, a GIF whose frame has no more pixels than its image
+too: those decoders hold a few times the image's own size at most. It is
+exported from the crate root.
+
 ## Nokia DirectGraphics
 
 Constants match Nokia's UI API 1.1 documentation and J2ME Loader's
