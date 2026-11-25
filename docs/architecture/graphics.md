@@ -310,17 +310,23 @@ from its header, without decoding anything, so a caller can check it
 against the heap before `Surface::decode` allocates the pixels. It is
 exported from the crate root.
 
+The decoders find the header, so the probe cannot take a different one
+from the decoder. A header the decoder skips, such as a frame header
+inside an APP1 block or a block the `gif` crate skips, is no size here.
+
 - PNG: the first IHDR chunk, found with the walk decoding uses.
 - GIF: the logical screen, or the first frame's offset plus its size when
-  the screen is empty.
+  the screen is empty, read by the `gif` crate up to the frame header
+  with the options decoding uses.
 - BMP: the width and height of the header, without the sign of the
   height, for the 12 byte and the 40 byte (or longer) headers.
-- JPEG: the first frame header (SOF0 to SOF15), found by skipping each
-  segment by its length, so a thumbnail inside an APP1 block does not
-  count. The scan stops at the start of the image data.
+- JPEG: the frame header zune-jpeg takes (SOF0, SOF1 or SOF2), read by
+  its header pass, which stops at the start of the image data. It skips
+  the other SOF markers by their length, as it does when it decodes.
 - `None` when the format is unknown, the header is cut short or the
-  picture is empty. The size is only what the file claims. It can be far
-  over the decoder's limits, which `Surface::decode` still enforces.
+  picture is empty, and when a crate panics. Decoding such a file fails
+  too. The size is only what the file claims. It can be far over the
+  decoder's limits, which `Surface::decode` still enforces.
 
 ## Nokia DirectGraphics
 
