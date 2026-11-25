@@ -109,14 +109,14 @@ from their maker. When a game asks to open one, its screen shows the
 game's name and the whole address, with **Open** and **Dismiss**. Nothing
 opens until you choose **Open**; the page then opens in your browser and
 the game keeps running. **Dismiss** drops the request. The buttons
-ignore clicks for half a second after the question appears, and look
-faint until then, so a quick tap in the game cannot answer a question
-you have not read. On a small screen, scroll the question to reach its
-buttons, below the address.
-Each game has its own question, and restarting or closing the game
-drops it. In the focus
-layout, a globe next to a game's name in the strip means it is waiting
-for an answer.
+ignore clicks for half a second after the game asks, and look faint
+until then, so a quick tap in the game cannot answer a question you have
+not read. On a small screen, scroll the question to reach its buttons,
+below the address. Each game has its own question, and restarting or
+closing the game drops it. In the focus layout, a globe next to a game's
+name in the strip means it is waiting for an answer. A question that
+waited while its game was in the strip takes clicks as soon as the game
+comes forward.
 
 FastEmu opens only web pages, `http` and `https` addresses without a
 backslash or a port outside 1 to 65535, and only after you agree. A game
