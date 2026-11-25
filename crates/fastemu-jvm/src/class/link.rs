@@ -1,7 +1,7 @@
 //! Linking: turning a class file or a native class definition into a
 //! runtime class with its field layout, vtable and interface map.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
 use super::table::{ClassTable, LoadError, MAX_HIERARCHY_DEPTH, too_deep};
@@ -223,8 +223,15 @@ impl ClassTable {
             return Err(too_deep(&def.name));
         }
         let mut interfaces = Vec::with_capacity(def.interfaces.len());
+        let mut named = HashSet::new();
         for name in &def.interfaces {
             let id = self.load(name)?;
+            // A class file can name one interface 65535 times, and each
+            // mention would add the interface's whole list of ancestors
+            // to the class's before the list is sorted and cleaned.
+            if !named.insert(id) {
+                continue;
+            }
             if !self.get(id).is_interface() {
                 return Err(LoadError::new(
                     "java/lang/IncompatibleClassChangeError",

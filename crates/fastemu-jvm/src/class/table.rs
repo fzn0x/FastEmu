@@ -802,6 +802,28 @@ mod tests {
     }
 
     #[test]
+    fn a_class_that_names_an_interface_twice_holds_it_once() {
+        let mut t = table_of(vec![
+            NativeClass::interface("a/I"),
+            NativeClass::interface("a/J").implements("a/I"),
+            NativeClass::new("a/A")
+                .implements("a/J")
+                .implements("a/I")
+                .implements("a/J")
+                .implements("a/J"),
+        ]);
+        let a = t.load("a/A").unwrap();
+        let (i, j) = (t.load("a/I").unwrap(), t.load("a/J").unwrap());
+        let a = t.get(a);
+        // The list of the interfaces a class names does not repeat one, and
+        // the list of all of them is what it was.
+        assert_eq!(&*a.interfaces, [j, i]);
+        let mut all = vec![i, j];
+        all.sort_unstable();
+        assert_eq!(&*a.all_interfaces, all);
+    }
+
+    #[test]
     fn array_classes_count_against_the_class_memory_and_primitive_arrays_do_not() {
         let natives = vec![
             NativeClass::new("java/lang/Object"),

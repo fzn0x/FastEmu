@@ -115,3 +115,41 @@ fn methods_that_share_a_long_descriptor_do_not_each_hold_a_parse_of_it() {
     let peak = peak_of_load(classes, "Wide").expect("the class loads");
     assert!(peak < ROOM, "the load held {peak} bytes at its peak");
 }
+
+/// The interface `name`, which extends all of `parents`.
+fn interface(name: &str, parents: &[String]) -> Vec<u8> {
+    let mut c = ClassBuilder::new(name, "java/lang/Object", 49, 0);
+    c.access(0x0601);
+    let parents: Vec<[u8; 2]> = parents.iter().map(|p| c.class(p).to_be_bytes()).collect();
+    let mut bytes = c.build();
+    // With no fields, methods or attributes, the class file ends in four
+    // counts of 2 bytes: the interfaces, then the three others.
+    let at = bytes.len() - 8;
+    let list = (parents.len() as u16).to_be_bytes().into_iter();
+    bytes.splice(at..at + 2, list.chain(parents.into_iter().flatten()));
+    bytes
+}
+
+#[test]
+fn a_class_that_names_an_interface_over_and_over_does_not_copy_its_ancestors_each_time() {
+    // `J` has 1500 ancestors. A class that names it 5000 times would add
+    // the 1500 to its own list 5000 times, 30 MB, before the list was
+    // cleaned: with 65535 mentions and 10000 ancestors it is 2.6 GB.
+    let ancestors: Vec<String> = (0..1500).map(|i| format!("I{i}")).collect();
+    let mut classes: Vec<(String, Vec<u8>)> = ancestors
+        .iter()
+        .map(|name| (name.clone(), interface(name, &[])))
+        .collect();
+    classes.push(("J".to_owned(), interface("J", &ancestors)));
+    classes.push(("C".to_owned(), {
+        let mut c = ClassBuilder::new("C", "java/lang/Object", 49, 0);
+        let j = c.class("J").to_be_bytes();
+        let mut bytes = c.build();
+        let at = bytes.len() - 8;
+        let list = 5000u16.to_be_bytes().into_iter();
+        bytes.splice(at..at + 2, list.chain(j.into_iter().cycle().take(2 * 5000)));
+        bytes
+    }));
+    let peak = peak_of_load(classes, "C").expect("the class loads");
+    assert!(peak < ROOM, "the load held {peak} bytes at its peak");
+}
