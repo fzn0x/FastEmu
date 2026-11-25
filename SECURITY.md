@@ -188,7 +188,7 @@ instead, as they throw no `MediaException`.
 | Sound read from a stream | counted on the heap as it is read, so streams read at once share the heap's room; never more than the heap or 32 MiB | `OutOfMemoryError` | [media.md][media-players] |
 | Sound events waiting | 1024 for a game, 4096 in the engine for all games; twice that for the events that end a run | the repeats are dropped first; `CLOSED` never is | [media.md][media-events] |
 | An MP3 seek the reader cannot do | 8 s of sound caught up in each render call | silence until the place is reached | [audio.md][audio-gaps] |
-| Hold of the audio thread on the shared mixer | one slice of 128 frames, with the lock handed to a waiting call after each slice | another game's call waits for the slice under way | [audio.md][audio-locking] |
+| Hold of the audio thread on the shared mixer | one slice of 128 frames, with the lock handed to a waiting call after each slice | another game's call waits for the slice under way; a volume or mute change from the app never waits | [audio.md][audio-locking] |
 
 [audio-players]: docs/architecture/audio.md#players
 [audio-formats]: docs/architecture/audio.md#formats
