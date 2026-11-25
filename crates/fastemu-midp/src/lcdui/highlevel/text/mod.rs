@@ -371,3 +371,43 @@ pub(crate) fn display_text(editor: &TextEditor) -> Vec<u16> {
         .map(|(i, &u)| if Some(i) == open { u } else { u16::from(b'*') })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use fastemu_jvm::{MemorySource, Vm, VmConfig};
+
+    use super::*;
+
+    #[test]
+    fn text_the_heap_cannot_hold_is_refused() {
+        let config = VmConfig {
+            heap_bytes: 1 << 20,
+            ..VmConfig::default()
+        };
+        let vm = Vm::new(config, Arc::new(MemorySource::new()), Vec::new());
+        vm.attach("test", |ctx| {
+            // Typed text goes in while it fits and is dropped when it
+            // does not: 600000 units are 1.2 MB, more than the heap.
+            assert!(room_for(ctx, 10, "abc"));
+            assert!(room_for(ctx, 100_000, "abc"));
+            assert!(!room_for(ctx, 600_000, "abc"));
+            assert!(!room_for(ctx, 0, &"a".repeat(600_000)));
+
+            // A constructor takes a text the heap has room for, and
+            // refuses one that would come to more than twice the heap
+            // with what it already holds.
+            let long = ctx.new_string(&"a".repeat(300_000))?;
+            assert!(new_editor(ctx, Some(long), 300_000, editor::ANY).is_ok());
+            assert!(new_editor(ctx, None, 10, editor::ANY).is_ok());
+            for _ in 0..3 {
+                ctx.new_byte_array(&vec![0; 400_000])?;
+            }
+            assert!(new_editor(ctx, Some(long), 300_000, editor::ANY).is_err());
+            assert!(new_editor(ctx, None, 10, editor::ANY).is_ok());
+            JResult::Ok(())
+        })
+        .expect("the test ran");
+    }
+}
