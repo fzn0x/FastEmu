@@ -10,6 +10,8 @@
 //!
 //! `t.SelfPause` pauses itself once and waits. The app's pause still
 //! freezes it, without a `pauseApp`, and the app's resume resumes it.
+//! `t.ResumeInPause` asks to be resumed from its `pauseApp`, which does
+//! not undo the app's pause.
 //!
 //! Each MIDlet is one of the shared test programs, in a suite of its own.
 //! Without a JDK the tests print why and pass, unless
@@ -29,10 +31,14 @@ MIDlet-Name: Threads\r\n\
 MIDlet-Vendor: FastEmu\r\n\
 MIDlet-Version: 1.0\r\n\
 MIDlet-1: PauseFlood, , t.PauseFlood\r\n\
-MIDlet-2: SelfPause, , t.SelfPause\r\n";
+MIDlet-2: SelfPause, , t.SelfPause\r\n\
+MIDlet-3: ResumeInPause, , t.ResumeInPause\r\n";
 
 /// `MIDlet-2`: pauses itself once and waits.
 const SELF_PAUSE: usize = 1;
+
+/// `MIDlet-3`: asks to be resumed from its `pauseApp`.
+const RESUME_IN_PAUSE: usize = 2;
 
 fn suite(name: &str) -> Option<PathBuf> {
     let classes = classes()?;
@@ -112,4 +118,29 @@ fn the_app_pauses_and_resumes_a_game_that_paused_itself() {
     run.instance.stop();
     run.wait_status(InstanceStatus::is_finished);
     assert!(run.has("destroyApp true"), "{}", run.dump());
+}
+
+#[test]
+fn a_game_the_app_paused_does_not_resume_itself() {
+    let Some(jar) = suite("resume-in-pause") else {
+        return;
+    };
+    let mut run = Running::launch(&jar, RESUME_IN_PAUSE);
+    run.wait_log("startApp 1");
+    run.wait_status(|s| *s == InstanceStatus::Running);
+    run.instance.pause();
+    // Its resumeRequest is queued before the line.
+    run.wait_log("pauseApp");
+    // Had the request resumed the game, this second pause would land on
+    // a running game and call pauseApp again.
+    run.instance.pause();
+    run.instance.resume();
+    run.wait_log("startApp 2");
+    run.instance.stop();
+    run.wait_status(InstanceStatus::is_finished);
+    let lines = run.lines();
+    let count = |line: &str| lines.iter().filter(|l| *l == line).count();
+    assert_eq!(count("pauseApp"), 1, "{}", lines.join("\n"));
+    assert_eq!(count("startApp 3"), 0, "{}", lines.join("\n"));
+    assert_eq!(count("destroyApp true"), 1, "{}", lines.join("\n"));
 }

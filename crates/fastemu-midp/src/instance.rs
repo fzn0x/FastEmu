@@ -183,7 +183,11 @@ impl Controller {
             match message {
                 Control::Input(event) => self.input(event),
                 Control::Pause => self.pause(),
-                Control::Resume | Control::ResumeRequest => self.resume(),
+                Control::Resume => self.resume(),
+                // The game's request resumes only a pause it made itself;
+                // one the app made waits for the app's resume.
+                Control::ResumeRequest if !self.frozen => self.resume(),
+                Control::ResumeRequest => {}
                 Control::Stop => {
                     self.destroy();
                     return self.finish(InstanceStatus::Exited);
