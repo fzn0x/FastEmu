@@ -10,6 +10,14 @@ use crate::voice::MIN_LOOP_US;
 /// Frames rendered per synthesizer call.
 const CHUNK: usize = 256;
 
+/// Messages one call of [`Source::render`] sends at most. A file can put
+/// tens of thousands of events at one instant, and sending them all at once
+/// holds the mixer, and every game's sound, for as long as that takes.
+/// The rest wait for the next call, a few milliseconds on, so a pile is
+/// sent in order over several blocks. A real file has a few hundred events
+/// at its start and a few a block after that.
+const MAX_MESSAGES_PER_CALL: usize = 512;
+
 /// A MIDI file as a [`Source`]: messages go to the synthesizer at the
 /// frame their time falls on.
 pub(crate) struct MidiSource {
@@ -51,11 +59,13 @@ impl MidiSource {
         }
     }
 
-    fn send_due(&mut self) {
-        while self.next < self.frames.len() && self.frames[self.next] <= self.pos {
+    /// Sends the events whose frame has come, up to `budget` of them.
+    fn send_due(&mut self, budget: &mut usize) {
+        while *budget > 0 && self.next < self.frames.len() && self.frames[self.next] <= self.pos {
             let event = self.sequence.events[self.next];
             self.synth.message(event.status, event.data1, event.data2);
             self.next += 1;
+            *budget -= 1;
         }
     }
 }
@@ -79,13 +89,16 @@ impl Source for MidiSource {
         let wanted =
             (out.len() / 2).min(usize::try_from(self.total - self.pos).unwrap_or(usize::MAX));
         let mut done = 0;
+        let mut budget = MAX_MESSAGES_PER_CALL;
         while done < wanted {
-            self.send_due();
-            // Render up to the next event, the chunk size, or the end.
-            let until_event = self
-                .frames
-                .get(self.next)
-                .map_or(u64::MAX, |&frame| frame - self.pos);
+            self.send_due(&mut budget);
+            // Render up to the next event, the chunk size, or the end. An
+            // event that is due already is one the budget kept back: it
+            // waits for the next call.
+            let until_event = match self.frames.get(self.next) {
+                Some(&frame) if frame > self.pos => frame - self.pos,
+                _ => u64::MAX,
+            };
             let count = (wanted - done)
                 .min(CHUNK)
                 .min(usize::try_from(until_event).unwrap_or(usize::MAX));
@@ -293,12 +306,45 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_pile_of_events_at_one_instant_is_sent_over_several_calls() {
+        // 3000 controllers at tick 0, then a note on half a second later.
+        let mut track = Vec::new();
+        for i in 0..3000 {
+            track.extend_from_slice(&[0x00, 0xB0 | (i % 16) as u8, (i % 128) as u8, 1]);
+        }
+        track.extend_from_slice(&[
+            0x60, 0x90, 60, 100, //
+            0x60, 0x80, 60, 0, //
+            0x60, 0xFF, 0x2F, 0x00,
+        ]);
+        let sequence = Arc::new(smf::parse(&smf(0, 96, &[&track])).unwrap());
+        let recorder = Recorder::default();
+        let log = recorder.log.clone();
+        let mut source = MidiSource::new(sequence, Box::new(recorder), 8000);
+        let mut out = vec![0.0; 2 * 256];
+        // The first call sends a budget's worth and renders its frames.
+        assert_eq!(source.render(&mut out), 256);
+        assert_eq!(log.lock().unwrap().len(), 512);
+        // The rest follow, in order, a block each; none is lost.
+        while source.render(&mut out) == 256 {}
+        let log = log.lock().unwrap();
+        assert_eq!(log.len(), 3002);
+        for (i, &(_, status, data1)) in log[..3000].iter().enumerate() {
+            assert_eq!((status, data1), (0xB0 | (i % 16) as u8, (i % 128) as u8));
+        }
+        // The pile was sent within a few blocks, and the note on that
+        // follows still came on its own frame, half a second in.
+        assert!(log[2999].0 < 8 * 256, "the last controller came at {}", log[2999].0);
+        assert_eq!(log[3000], (4000, 0x90, 60));
+    }
+
+    #[test]
     fn a_file_of_a_few_frames_plays_once_however_it_is_looped() {
         use crate::voice::{PlayerState, Reached, Voice};
 
         let recorder = Recorder::default();
         let log = recorder.log.clone();
-        let source = MidiSource::new(blink(2000), Box::new(recorder), 48_000);
+        let source = MidiSource::new(blink(400), Box::new(recorder), 48_000);
         assert_eq!(source.frames(), 1);
         let mut voice = Voice::new(Box::new(source), false);
         voice.set_loop_count(-1);
@@ -308,7 +354,7 @@ pub(crate) mod tests {
         let mut seen = Vec::new();
         voice.render(&mut out, 1.0, 1.0, 1.0, false, |r, _| seen.push(r));
         // Every note was sent once, not once for each of 1024 passes.
-        assert_eq!(log.lock().unwrap().len(), 2000);
+        assert_eq!(log.lock().unwrap().len(), 400);
         assert_eq!(seen, vec![Reached::End { error: None }]);
         assert_eq!(voice.state, PlayerState::Prefetched);
     }

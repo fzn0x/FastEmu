@@ -254,3 +254,28 @@ fn a_midi_of_more_than_65536_events_is_refused_as_too_large() {
     // still plays.
     assert!(group.create_player(&note_ons(65_534), None).is_ok());
 }
+
+/// The note ons of a file are sent a block at a time, so a file with
+/// 65,000 of them at one instant sounds, plays to its end, and never holds
+/// the mixer for all of them at once.
+#[test]
+fn a_midi_with_a_pile_of_notes_at_the_start_still_plays_through() {
+    let engine = engine(48_000);
+    let group = engine.create_group();
+    let events = group.subscribe();
+    let player = group.create_player(&note_ons(65_000), None).unwrap();
+    player.start().unwrap();
+    let mut buffer = vec![0.0f32; 2 * 1024];
+    let (mut loudest, mut calls) = (0.0f32, 0);
+    while player.state() == PlayerState::Started {
+        engine.render(&mut buffer);
+        loudest = buffer.iter().fold(loudest, |m, v| m.max(v.abs()));
+        calls += 1;
+        assert!(calls < 100, "the file never ended");
+    }
+    assert!(loudest > 0.05, "the pile made no sound: {loudest}");
+    assert!(matches!(
+        kinds(&events).last(),
+        Some(PlayerEventKind::EndOfMedia { last: true, .. })
+    ));
+}
