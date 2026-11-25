@@ -259,7 +259,12 @@ impl ClassTable {
         // Everything that can fail comes before anything is added to the
         // table, so a class that does not link leaves nothing behind: no
         // static storage, no selectors, no share of the class memory.
-        let mut descriptors = Vec::with_capacity(def.methods.len());
+        //
+        // Only the two numbers a method needs are kept of its descriptor.
+        // A descriptor can name tens of thousands of parameters and every
+        // method of a class can share one, so a parse kept for each method
+        // would hold gigabytes before the class memory is judged.
+        let mut shapes = Vec::with_capacity(def.methods.len());
         for m in &def.methods {
             let Some(parsed) = MethodDescriptor::parse(&m.desc) else {
                 return Err(format_error(
@@ -270,7 +275,7 @@ impl ClassTable {
             if matches!(m.src, MethodSrc::Code(_)) && def.pool.is_none() {
                 return Err(format_error(&def.name, "bytecode without a constant pool"));
             }
-            descriptors.push(parsed);
+            shapes.push((parsed.param_slots(), parsed.ret_kind()));
         }
         // The classes a game can make count against its class memory; the
         // library's, which are fixed, do not.
@@ -317,9 +322,9 @@ impl ClassTable {
         });
 
         let mut methods = Vec::with_capacity(def.methods.len());
-        for (m, parsed) in def.methods.into_iter().zip(descriptors) {
+        for (m, (param_slots, ret)) in def.methods.into_iter().zip(shapes) {
             let is_static = m.access & access::STATIC != 0;
-            let arg_slots = parsed.param_slots() + usize::from(!is_static);
+            let arg_slots = param_slots + usize::from(!is_static);
             let body = match m.src {
                 MethodSrc::Code(attr) => {
                     let pool = pool.as_ref().expect("a method with code has a pool");
@@ -341,7 +346,7 @@ impl ClassTable {
                 desc: m.desc,
                 access: m.access,
                 arg_slots: arg_slots as u16,
-                ret: parsed.ret_kind(),
+                ret,
                 body,
                 source_file: def.source_file.clone(),
             }));
