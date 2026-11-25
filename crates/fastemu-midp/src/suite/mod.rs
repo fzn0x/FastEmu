@@ -11,7 +11,9 @@
 //! A JAD is hostile input: its `MIDlet-Jar-URL` never makes the host
 //! touch a file outside the JAD's folder or a network share, and a JAR
 //! over [`MAX_JAR_BYTES`] or a JAD over [`MAX_JAD_BYTES`] is refused
-//! before it is read.
+//! before it is read. So are the JAR and its manifest: the manifest and
+//! the JAD are read to [`attributes::MAX_ATTRIBUTE_BYTES`] and
+//! [`attributes::MAX_ATTRIBUTES`] attributes.
 
 pub mod attributes;
 pub mod source;
@@ -39,6 +41,9 @@ pub const MAX_JAD_BYTES: u64 = 1024 * 1024;
 /// The longest file or folder name a JAD may use in its JAR path, as most
 /// file systems allow.
 const MAX_NAME_BYTES: usize = 255;
+
+/// The longest suite icon read, inflated. Icons are a few KB.
+const MAX_ICON_BYTES: usize = 1024 * 1024;
 
 /// An opened suite: its attributes and its JAR.
 #[derive(Clone, Debug)]
@@ -261,7 +266,7 @@ fn read_info(
     let manifest = ["META-INF/MANIFEST.MF", "META-INF/MANIFEST.FM"]
         .into_iter()
         .find_map(|name| jar.find_str(name))
-        .and_then(|entry| jar.read(entry).ok())
+        .and_then(|entry| jar.read_prefix(entry, attributes::MAX_ATTRIBUTE_BYTES).ok())
         .map(|bytes| attributes::parse(&bytes))
         .unwrap_or_default();
     let mut notes = Vec::new();
@@ -297,7 +302,7 @@ fn read_info(
         .or_else(|| midlets.first().and_then(|m| m.icon_path.clone()));
     let icon = icon_path.and_then(|path| {
         let entry = jar.find_str(&source::normalize(&path))?;
-        jar.read(entry).ok()
+        jar.read_limited(entry, MAX_ICON_BYTES).ok()
     });
     let info = SuiteInfo {
         name,
@@ -358,7 +363,7 @@ fn find_midlet_classes(jar: &ZipArchive, suite_name: &str) -> Vec<MidletInfo> {
 
 #[cfg(test)]
 mod tests {
-    use super::zip::testing::{TestEntry, write};
+    use super::zip::testing::{TestEntry, take_inflated, write};
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -401,6 +406,66 @@ mod tests {
         assert_eq!(info.jar_bytes, std::fs::metadata(&path).unwrap().len());
         assert!(suite.jad_path.is_none());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn open_jar(name: &str, bytes: &[u8]) -> Suite {
+        let dir = temp_dir(name);
+        let path = dir.join("game.jar");
+        std::fs::write(&path, bytes).unwrap();
+        let suite = Suite::open(&path).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+        suite
+    }
+
+    #[test]
+    fn a_manifest_of_40000_keys_opens_with_the_first_4096() {
+        use std::fmt::Write;
+        let mut keys = String::new();
+        for i in 0..40_000 {
+            write!(keys, "K{i:07}: v\r\n").unwrap();
+        }
+        let manifest = format!("MIDlet-Name: Many\r\nMIDlet-1: Many, , com.a.Many\r\n{keys}");
+        let suite = open_jar("keys", &jar("META-INF/MANIFEST.MF", manifest.as_bytes()));
+        assert_eq!(suite.info.properties.len(), attributes::MAX_ATTRIBUTES);
+        assert_eq!(suite.info.name, "Many");
+        assert_eq!(suite.info.midlets[0].class_name, "com.a.Many");
+    }
+
+    #[test]
+    fn a_manifest_that_inflates_to_much_is_read_to_a_mebibyte() {
+        // 8 MiB of text from a few KB of JAR. Only the first mebibyte is
+        // inflated, and the line that repeats gives one attribute.
+        let mut manifest = b"MIDlet-1: A, , com.a.A\n".to_vec();
+        manifest.resize(8 << 20, b'x');
+        let bytes = write(
+            &[
+                TestEntry::deflated("META-INF/MANIFEST.MF", &manifest),
+                TestEntry::stored("icon.png", b"PNG"),
+            ],
+            true,
+        );
+        take_inflated();
+        let suite = open_jar("mfbomb", &bytes);
+        assert_eq!(take_inflated(), attributes::MAX_ATTRIBUTE_BYTES as u64);
+        assert_eq!(suite.info.midlets[0].class_name, "com.a.A");
+    }
+
+    #[test]
+    fn an_icon_that_inflates_to_over_a_mebibyte_is_not_kept() {
+        let manifest = b"MIDlet-1: A, big.png, com.a.A\n";
+        let big = vec![0u8; MAX_ICON_BYTES + 1];
+        let fits = vec![0u8; MAX_ICON_BYTES];
+        let with = |icon: &[u8]| {
+            write(
+                &[
+                    TestEntry::deflated("META-INF/MANIFEST.MF", manifest),
+                    TestEntry::deflated("big.png", icon),
+                ],
+                true,
+            )
+        };
+        assert_eq!(open_jar("iconbig", &with(&big)).info.icon, None);
+        assert_eq!(open_jar("iconfits", &with(&fits)).info.icon, Some(fits));
     }
 
     #[test]
