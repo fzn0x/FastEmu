@@ -175,14 +175,26 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
             if res.direct {
                 return Ok(res.target());
             }
-            let class = ctx.state.classes.get(ctx.state.heap.class_of(recv));
+            let rc = ctx.state.heap.class_of(recv);
+            let class = ctx.state.classes.get(rc);
+            // The vtable index is the one of the referenced class. An object
+            // of an unrelated class holds another method at that index, or
+            // none, and its arguments would not be the ones the caller
+            // pushed. A selector stands for a name and a descriptor.
             let found = match res.vindex {
-                Some(v) => class.vtable.get(v as usize),
+                Some(v) => class
+                    .vtable
+                    .get(v as usize)
+                    .filter(|m| m.selector == res.selector),
                 None => class.virtual_method(res.selector),
             };
             match found {
                 Some(m) => Ok(Arc::clone(m)),
-                None => Err(abstract_error(&res.target())),
+                None => Err(incompatible(format!(
+                    "Class {} does not have the method '{}'",
+                    ctx.class_name(rc).replace('/', "."),
+                    res.target().describe().replace('/', ".")
+                ))),
             }
         }
         Insn::InvokeInterface(i) => {

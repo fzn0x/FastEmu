@@ -183,3 +183,55 @@ fn returns_that_match_the_method_run() {
         );
     }
 }
+
+/// Calls `Bad.f()`, whose code is `code`, with class `A` (a `foo()V`) and
+/// class `B` (a `bar` taking 100 longs) beside it; `foo` and `bar` sit at
+/// the same vtable index.
+fn run_with_a_and_b(code: impl FnOnce(&mut ClassBuilder) -> Vec<u8>) -> String {
+    let mut a = ClassBuilder::new("A", "java/lang/Object", 49, 0);
+    a.default_constructor("java/lang/Object");
+    a.method(PUBLIC, "foo", "()V", 0, 1, &[0xb1], &[]);
+    let mut b = ClassBuilder::new("B", "java/lang/Object", 49, 0);
+    b.default_constructor("java/lang/Object");
+    let desc = format!("({})V", "J".repeat(100));
+    b.method(PUBLIC, "bar", &desc, 0, 201, &[0xb1], &[]);
+    let mut bad = ClassBuilder::new("Bad", "java/lang/Object", 49, 0);
+    let code = code(&mut bad);
+    bad.method(PUBLIC | STATIC, "f", "()V", 3, 0, &code, &[]);
+    run_classes(&[("A", a.build()), ("B", b.build()), ("Bad", bad.build())])
+}
+
+/// The code of `new <class>; dup; invokespecial <class>.<init>; invokevirtual
+/// A.foo()V; return`.
+fn call_foo_on_new(bad: &mut ClassBuilder, class: &str) -> Vec<u8> {
+    let [ch, cl] = idx(bad.class(class));
+    let [ih, il] = idx(bad.method_ref(class, "<init>", "()V"));
+    let [fh, fl] = idx(bad.method_ref("A", "foo", "()V"));
+    vec![0xbb, ch, cl, 0x59, 0xb7, ih, il, 0xb6, fh, fl, 0xb1]
+}
+
+#[test]
+fn a_virtual_call_on_an_object_of_another_class_is_refused() {
+    // B.bar takes 100 longs: running it for a call of A.foo wrapped the
+    // frame pointer and panicked.
+    let result = run_with_a_and_b(|bad| call_foo_on_new(bad, "B"));
+    assert!(
+        result.starts_with("java.lang.IncompatibleClassChangeError")
+            && result.contains("Class B does not have the method 'A.foo()V'"),
+        "{result}"
+    );
+    // Object has no method at that index at all.
+    let result = run_with_a_and_b(|bad| call_foo_on_new(bad, "java/lang/Object"));
+    assert!(
+        result.starts_with("java.lang.IncompatibleClassChangeError"),
+        "{result}"
+    );
+}
+
+#[test]
+fn a_virtual_call_on_an_object_of_the_class_still_runs() {
+    assert_eq!(
+        run_with_a_and_b(|bad| call_foo_on_new(bad, "A")),
+        "returned"
+    );
+}
