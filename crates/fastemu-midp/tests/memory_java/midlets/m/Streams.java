@@ -56,6 +56,9 @@ public class Streams extends MIDlet {
         } catch (IOException e) {
             System.out.println("endless IOException " + e.getMessage() + " calls " + endless.calls
                     + " bytes " + endless.bytes);
+        } catch (OutOfMemoryError e) {
+            System.out.println("endless OutOfMemoryError calls " + endless.calls
+                    + " bytes " + endless.bytes);
         }
         Empty empty = new Empty();
         try {

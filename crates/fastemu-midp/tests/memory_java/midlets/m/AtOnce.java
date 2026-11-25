@@ -1,6 +1,7 @@
 package m;
 
 import java.io.IOException;
+import java.io.InputStream;
 import javax.microedition.lcdui.Image;
 import javax.microedition.midlet.MIDlet;
 
@@ -17,7 +18,7 @@ public abstract class AtOnce extends MIDlet {
     static int finished;
     /** What each thread got: 0 nothing yet, 1 made, 2 IOException, 3 OutOfMemoryError, 4 another error. */
     static final int[] OUTCOME = new int[THREADS];
-    /** What each thread counted: the images it made. */
+    /** What each thread counted: the images it made, or the bytes its stream gave. */
     static final long[] COUNT = new long[THREADS];
     static final String[] NAMES = {"none", "made", "IOException", "OutOfMemoryError", "other"};
 
@@ -35,6 +36,41 @@ public abstract class AtOnce extends MIDlet {
                 OUTCOME[id] = 3;
             }
         }
+    }
+
+    /** A stream that never ends and lets the other threads run on each read. */
+    static class Endless extends InputStream {
+        long bytes;
+
+        public int read() {
+            bytes++;
+            return 0;
+        }
+
+        public int read(byte[] b, int off, int len) {
+            Thread.yield();
+            // The stream ends in the end, so a runtime without a limit
+            // reads 64 MiB a thread and not all the memory there is.
+            if (bytes >= 64L * 1024 * 1024) {
+                return -1;
+            }
+            bytes += len;
+            return len;
+        }
+    }
+
+    /** Passes Image.createImage a stream that never ends. */
+    static void image(int id) {
+        Endless endless = new Endless();
+        try {
+            Image.createImage(endless);
+            OUTCOME[id] = 1;
+        } catch (IOException e) {
+            OUTCOME[id] = 2;
+        } catch (OutOfMemoryError e) {
+            OUTCOME[id] = 3;
+        }
+        COUNT[id] = endless.bytes;
     }
 
     /** The name the lines start with. */

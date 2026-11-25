@@ -130,7 +130,8 @@ MIDlet-9: SiemensBitmaps, , m.SiemensBitmaps\r\n\
 MIDlet-10: SiemensLayers, , m.SiemensLayers\r\n\
 MIDlet-11: SiemensSprites, , m.SiemensSprites\r\n\
 MIDlet-12: Returns, , m.Returns\r\n\
-MIDlet-13: DecodeThreads, , m.DecodeThreads\r\n";
+MIDlet-13: DecodeThreads, , m.DecodeThreads\r\n\
+MIDlet-14: StreamThreads, , m.StreamThreads\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 mod midlet {
@@ -147,6 +148,7 @@ mod midlet {
     pub const SIEMENS_SPRITES: usize = 10;
     pub const RETURNS: usize = 11;
     pub const DECODE_THREADS: usize = 12;
+    pub const STREAM_THREADS: usize = 13;
 }
 
 /// What the back buffer of a shown canvas takes of the heap on the default
@@ -432,29 +434,39 @@ fn a_file_that_declares_more_pixels_than_the_heap_holds_is_refused_before_it_is_
 }
 
 #[test]
-fn an_image_stream_that_never_ends_is_an_io_exception_at_16_mib() {
+fn an_image_stream_that_never_ends_ends_at_the_heap_or_at_16_mib() {
     let alone = Alone::new();
     let Some(jar) = suite("streams", &[]) else {
         return;
     };
+    // The bytes read count on the heap of 1 MiB as they grow, so the stream
+    // ends in OutOfMemoryError once they would pass it: 4 KiB a read, the
+    // 257th read at most.
     let mut run = launch(&jar, midlet::STREAMS, HEAP);
     let line = run.wait_log("endless ");
     let log = run.dump();
-    assert!(
-        line.starts_with("endless IOException the image data is larger than 16 MiB calls "),
-        "{log}"
-    );
-    // 4 KiB a read: 4096 reads fill 16 MiB and the next one is refused.
-    let message = "endless IOException the image data is larger than 16 MiB";
-    assert_eq!(numbers(&line, message), [4097, 4097 * 4096], "{log}");
+    let prefix = "endless OutOfMemoryError calls ";
+    assert!(line.starts_with(prefix), "{log}");
+    let counts = numbers(&line, prefix);
+    assert!((2..=257).contains(&counts[0]), "{log}");
+    assert_eq!(counts[1], counts[0] * 4096, "{log}");
     // A stream that gives no bytes ends after 1000 reads in a row.
     let empty = run.wait_log("empty ");
     assert_eq!(
         empty, "empty IOException the stream gives no data calls 1000",
         "{log}"
     );
+    drop(run);
+    // A heap of 16 MiB holds 16 MiB of them, and the stream ends where it
+    // always did: 4096 reads fill 16 MiB and the next one is refused.
+    let mut run = launch(&jar, midlet::STREAMS, 16 << 20);
+    let line = run.wait_log("endless ");
+    let log = run.dump();
+    let message = "endless IOException the image data is larger than 16 MiB";
+    assert!(line.starts_with(message), "{log}");
+    assert_eq!(numbers(&line, message), [4097, 4097 * 4096], "{log}");
     // The bytes read are held once and are 16 MiB at most; the vector they
-    // grow in may hold its old and its new block at a doubling.
+    // grow in holds its old and its new block at a doubling.
     assert!(alone.peak_mib() < 40, "{} MiB", alone.peak_mib());
 }
 
@@ -731,4 +743,25 @@ fn threads_that_decode_images_at_once_take_turns() {
     // One decode holds the PNG's rows and the image's pixels, 8 MiB, beside
     // the heap. Eight at once held 66 MiB and more.
     assert!(alone.peak_mib() < 40, "{} MiB", alone.peak_mib());
+}
+
+#[test]
+fn threads_that_read_image_streams_at_once_share_the_heap() {
+    let alone = Alone::new();
+    let Some(jar) = suite("stream-threads", &[]) else {
+        return;
+    };
+    let mut run = launch(&jar, midlet::STREAM_THREADS, HEAP);
+    let lines = thread_lines(&mut run, "stream");
+    let log = run.dump();
+    // The bytes of every thread count on the heap of 1 MiB, so each stream
+    // that never ends is an OutOfMemoryError once it gave 1 MiB at most,
+    // and the read that did not fit.
+    for (id, line) in lines.iter().enumerate() {
+        let prefix = format!("stream {id} OutOfMemoryError ");
+        assert!(line.starts_with(&prefix), "{log}");
+        assert!(numbers(line, &prefix)[0] <= (1 << 20) + 4096, "{log}");
+    }
+    // Eight threads held 16 MiB each beside the heap: 128 MiB.
+    assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
 }

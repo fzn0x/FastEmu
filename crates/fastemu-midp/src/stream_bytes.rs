@@ -81,3 +81,50 @@ impl CountedBytes {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use fastemu_jvm::{JResult, MemorySource, Vm, VmConfig};
+
+    use super::CountedBytes;
+
+    fn vm(heap: usize) -> Vm {
+        let config = VmConfig {
+            heap_bytes: heap,
+            log: Arc::new(|_| {}),
+            ..VmConfig::default()
+        };
+        Vm::new(config, Arc::new(MemorySource::new()), Vec::new())
+    }
+
+    #[test]
+    fn the_bytes_held_count_on_the_heap_and_end_at_its_size() {
+        let vm = vm(1 << 20);
+        let outcome = vm.attach("reader", |ctx| -> JResult<()> {
+            let held = CountedBytes::new(ctx)?;
+            let (_, before) = ctx.heap_usage();
+            held.push(ctx, &[7; 4096], 16 << 20)?;
+            held.push(ctx, &[7; 4096], 16 << 20)?;
+            // Counted at the room of the vector, doubled when it grew.
+            let (_, after) = ctx.heap_usage();
+            assert_eq!(after - before, 8192);
+            assert_eq!(held.len(ctx)?, 8192);
+            // A heap of 1 MiB holds 1 MiB and refuses the next growth.
+            let mut pushed = 2;
+            while held.push(ctx, &[7; 4096], 16 << 20).is_ok() {
+                pushed += 1;
+            }
+            assert_eq!(pushed, 256);
+            assert_eq!(held.len(ctx)?, 1 << 20);
+            // Taken out, they stay counted.
+            let bytes = held.take(ctx)?;
+            assert_eq!(bytes.len(), 1 << 20);
+            let (_, taken) = ctx.heap_usage();
+            assert!(taken - before >= 1 << 20);
+            Ok(())
+        });
+        assert!(outcome.is_ok());
+    }
+}
