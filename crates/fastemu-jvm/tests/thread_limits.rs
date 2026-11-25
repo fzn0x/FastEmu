@@ -266,6 +266,17 @@ fn timers_the_game_keeps_work_across_collections() {
 }
 
 #[test]
+fn a_timer_reached_only_through_its_running_task_keeps_working() {
+    let Some((vm, lines)) = machine() else { return };
+    let out = run(&vm, &lines, "running");
+    assert_eq!(out[0], "alive true", "{out:?}");
+    assert_eq!(out[1], "running ok", "{out:?}");
+    let errors = support::lines_at(&lines, LogLevel::Err);
+    assert!(errors.is_empty(), "{errors:?}");
+    stop(&vm);
+}
+
+#[test]
 fn a_start_at_the_limit_never_waits_for_a_timer_thread_that_runs_game_code() {
     let Some((vm, lines)) = machine() else { return };
     let out = run(&vm, &lines, "reporting");

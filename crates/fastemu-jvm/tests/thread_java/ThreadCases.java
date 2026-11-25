@@ -300,6 +300,59 @@ public class ThreadCases {
         System.out.println("task ok");
     }
 
+    static Timer handedTimer;
+    static Thread handedThread;
+
+    // Holds its timer and asks for a collection while it runs, when its
+    // queue is empty and it is the only way to the timer. Then it hands
+    // the timer and its thread to the case.
+    static class SelfKeeper extends TimerTask {
+        final Timer timer;
+
+        SelfKeeper(Timer timer) {
+            this.timer = timer;
+        }
+
+        public void run() {
+            System.gc();
+            synchronized (hold) {
+                handedTimer = timer;
+                handedThread = Thread.currentThread();
+                hold.notifyAll();
+            }
+        }
+    }
+
+    // A timer the game reaches only through the task it runs keeps its
+    // thread across a collection that task asks for, and takes new tasks.
+    static void running() throws InterruptedException {
+        Timer t = new Timer();
+        t.schedule(new SelfKeeper(t), 0);
+        t = null;
+        synchronized (hold) {
+            while (handedTimer == null) {
+                hold.wait();
+            }
+        }
+        // Time for the thread to finish the task and find its queue
+        // empty: a thread that took its timer for dropped would end.
+        handedThread.join(20);
+        boolean alive = handedThread.isAlive();
+        System.out.println("alive " + alive);
+        if (!alive) {
+            return;
+        }
+        Once later = new Once();
+        handedTimer.schedule(later, 0);
+        synchronized (later) {
+            while (!later.ran) {
+                later.wait();
+            }
+        }
+        handedTimer.cancel();
+        System.out.println("running ok");
+    }
+
     static final Object held = new Object();
     static final Object seen = new Object();
     static int reports;
@@ -402,6 +455,8 @@ public class ThreadCases {
             repeating();
         } else if (mode.equals("kept")) {
             kept();
+        } else if (mode.equals("running")) {
+            running();
         } else if (mode.equals("reporting")) {
             reporting();
         }
