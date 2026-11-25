@@ -334,7 +334,11 @@ pub(crate) mod tests {
         }
         // The pile was sent within a few blocks, and the note on that
         // follows still came on its own frame, half a second in.
-        assert!(log[2999].0 < 8 * 256, "the last controller came at {}", log[2999].0);
+        assert!(
+            log[2999].0 < 8 * 256,
+            "the last controller came at {}",
+            log[2999].0
+        );
         assert_eq!(log[3000], (4000, 0x90, 60));
     }
 

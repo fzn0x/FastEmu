@@ -13,8 +13,7 @@ use std::time::{Duration, Instant};
 
 use common::{constant_wav, controller_midi, engine, kinds, midi, wav};
 use fastemu_audio::{
-    AudioError, MAX_QUEUED, MAX_STARTED_PER_GROUP, MAX_STARTED_TOTAL, PlayerEventKind,
-    PlayerState,
+    AudioError, MAX_QUEUED, MAX_STARTED_PER_GROUP, MAX_STARTED_TOTAL, PlayerEventKind, PlayerState,
 };
 
 /// A listener that blocks on its first event until released, and counts
@@ -230,7 +229,10 @@ fn a_midi_of_30_ms_is_looped() {
         .iter()
         .filter(|kind| matches!(kind, PlayerEventKind::EndOfMedia { last: false, .. }))
         .count();
-    assert!((14..=17).contains(&loops), "{loops} passes in half a second");
+    assert!(
+        (14..=17).contains(&loops),
+        "{loops} passes in half a second"
+    );
 }
 
 /// A MIDI file of `n` note ons at tick 0 and a rest of half a second.
