@@ -29,9 +29,9 @@ const MAX_TONES: usize = 16;
 /// heap never sees its sound.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GroupLimits {
-    /// Bytes of sound the group's players hold together: decoded samples,
-    /// the file of an MP3, parsed MIDI events (see
-    /// [`Source::memory_bytes`](crate::source::Source::memory_bytes)).
+    /// Bytes of sound the group's players hold together: the decoded
+    /// samples of a WAV or AMR file, the file an MP3 is decoded from as
+    /// it plays, the events of a MIDI file or a tone sequence.
     pub max_bytes: usize,
     /// Players the group holds, playing or not. `playTone` tones are
     /// capped on their own.
@@ -39,8 +39,8 @@ pub struct GroupLimits {
 }
 
 impl GroupLimits {
-    /// 32 MiB of sound and 128 players, twice and a few times what the
-    /// games tried hold.
+    /// 32 MiB of sound and 128 players: several times what a phone held,
+    /// so a game written for one never reaches it.
     pub const DEFAULT: Self = Self {
         max_bytes: 32 * 1024 * 1024,
         max_players: 128,
