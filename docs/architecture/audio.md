@@ -117,9 +117,10 @@ that replaces another counts in its place. `Group::insert` checks both
 limits, and every player is made there: MMAPI players, tone players,
 beeps, and the Nokia, Samsung and Siemens sounds. `playTone` tones are
 not players and keep their own cap of 16, below. A sound that is bigger
-than the whole budget is `TooLarge`; any other request the group has no
-room for is `OutOfMemory`, which closing a player cures. A request the
-group refuses leaves nothing behind.
+than 16 MiB (`MAX_DECODED_BYTES`, in any format) or than the whole budget
+is `TooLarge`; any other request the group has no room for is
+`OutOfMemory`, which closing a player cures. A request the group refuses
+leaves nothing behind.
 
 `Group::play_tone` (for `Manager.playTone`) plays a tone with no handle
 that leaves the mixer when it ends. A group keeps at most 16 such tones;
@@ -186,7 +187,10 @@ should report.
   basic and temporary songs, patterns with loops and back references, note,
   scale, style, tempo and volume instructions). Volume 1 to 15 maps to
   MMAPI levels 44 to 100. A pattern loop value of 15 (forever) plays once;
-  the `Sound` object's own loop count covers repetition.
+  the `Sound` object's own loop count covers repetition. A pattern that
+  was defined can play again from a header of two bytes, so a file of a
+  kilobyte can unroll to millions of tones: the tones are counted as they
+  are made, and one that unrolls past 65536 is `TooLarge`.
 - **Tones** (sequences, `playTone`, Nokia songs and beeps) play as a
   band-limited square wave with 2 ms edges, the way phone tone generators
   sound.
