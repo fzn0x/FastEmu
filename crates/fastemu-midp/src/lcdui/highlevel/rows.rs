@@ -14,6 +14,22 @@ use crate::lcdui::image::surface_of;
 /// The tallest an element's image makes its row.
 const MAX_IMAGE: i32 = 48;
 
+/// The most units of an element's text a row keeps to measure and draw.
+/// The text is longer than any row shows: a line that does not wrap is
+/// cut to the width of the screen, and a paragraph this long fills many
+/// screens.
+const ROW_UNITS_MAX: usize = 4096;
+
+/// The fewest units of text a row keeps, however many rows there are.
+const ROW_UNITS_MIN: usize = 128;
+
+/// The units of text all the rows of one choice keep between them, as far
+/// as [`ROW_UNITS_MIN`] allows. Elements may share one long string, which
+/// the heap counts once, but each row copies its text: without a limit a
+/// choice of many elements that name one large string takes gigabytes
+/// each time it is drawn.
+const ROW_UNITS_BUDGET: usize = 1 << 20;
+
 /// One element as drawn: its text, font and image size.
 pub struct Row {
     pub text: Vec<u16>,
@@ -23,8 +39,11 @@ pub struct Row {
     pub selected: bool,
 }
 
-/// The elements of `model` ready to measure and draw.
+/// The elements of `model` ready to measure and draw. A row keeps the
+/// start of a text that is long, as far as the budget of the choice
+/// allows.
 pub fn rows(ctx: &Ctx<'_>, model: &ChoiceModel, fonts: &Fonts) -> JResult<Vec<Row>> {
+    let keep = (ROW_UNITS_BUDGET / model.len().max(1)).clamp(ROW_UNITS_MIN, ROW_UNITS_MAX);
     let mut rows = Vec::with_capacity(model.len());
     for e in &model.elements {
         let font = match e.font {
@@ -39,8 +58,9 @@ pub fn rows(ctx: &Ctx<'_>, model: &ChoiceModel, fonts: &Fonts) -> JResult<Vec<Ro
             }
             None => (0, 0),
         };
+        let text = ctx.string_utf16(e.text)?;
         rows.push(Row {
-            text: ctx.string_utf16(e.text)?.to_vec(),
+            text: text[..text.len().min(keep)].to_vec(),
             font,
             image: e.image,
             image_size,
@@ -131,4 +151,53 @@ pub fn paint_row(
         p.text(&row.font, &cut, x, y, ink);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use fastemu_core::FontSizes;
+    use fastemu_gfx::{FontLibrary, TextRendering};
+    use fastemu_jvm::{MemorySource, Vm, VmConfig};
+
+    use super::*;
+
+    #[test]
+    fn elements_that_share_a_long_string_do_not_copy_it_each() {
+        let vm = Vm::new(
+            VmConfig::default(),
+            Arc::new(MemorySource::new()),
+            Vec::new(),
+        );
+        vm.attach("test", |ctx| {
+            let sizes = FontSizes {
+                small: 12,
+                medium: 14,
+                large: 16,
+            };
+            let fonts = Fonts::new(&FontLibrary::new(sizes, TextRendering::Antialiased));
+            let long = ctx.new_string(&"a".repeat(50_000))?;
+            let short = ctx.new_string("short")?;
+
+            let mut many = ChoiceModel::new(MULTIPLE);
+            for _ in 0..500 {
+                let at = many.len();
+                many.insert(at, long, None);
+            }
+            let all = rows(ctx, &many, &fonts)?;
+            assert_eq!(all.len(), 500);
+            let copied: usize = all.iter().map(|r| r.text.len()).sum();
+            assert!(copied <= 2 << 20, "{copied} units copied for 500 rows");
+
+            let mut few = ChoiceModel::new(MULTIPLE);
+            few.insert(0, long, None);
+            few.insert(1, short, None);
+            let all = rows(ctx, &few, &fonts)?;
+            assert!(all[0].text.len() >= 1024, "a few rows keep much text");
+            assert_eq!(all[1].text, "short".encode_utf16().collect::<Vec<u16>>());
+            JResult::Ok(())
+        })
+        .expect("the test ran");
+    }
 }
