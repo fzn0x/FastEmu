@@ -632,26 +632,29 @@ fn saves_past_the_write_budget_wait_and_still_reach_the_disk() {
     let Some(classes) = programs() else { return };
     let dir = tempfile::tempdir().unwrap();
     let started = Instant::now();
-    // 128 KiB at once, then 2 MiB a second: eleven saves of 200 KiB are
-    // about 1.8 MiB past the burst, a wait of most of a second.
+    // 4 KiB at once, then 256 KiB a second: a save of 200 KiB takes the
+    // budget about 0.77 s into debt, and three of them wait for most of
+    // 1.5 s. A save would have to take longer than that for the debt to
+    // be paid before the next one, so a slow disk still sees the wait.
     let output = run(
         classes,
         "RmsWrites",
-        &["heavy", "204800", "10"],
+        &["heavy", "204800", "2"],
         InstanceEnv::for_tests(dir.path()),
-        |ctx| fastemu_midp::rms::set_write_limit(ctx, 128 << 10, 2 << 20),
+        |ctx| fastemu_midp::rms::set_write_limit(ctx, 4 << 10, 256 << 10),
     );
     let took = started.elapsed();
     check(
         &output,
         "
         added 1
-        rewrote 10
-        last 10 of 204800
+        rewrote 2
+        last 2 of 204800
         ",
     );
-    // A bound from below only: a loaded machine takes longer, never less.
-    assert!(took >= Duration::from_millis(500), "{took:?}");
+    // A bound from below only: the refill is real time, so no machine
+    // is quicker, and a loaded one takes longer.
+    assert!(took >= Duration::from_millis(1400), "{took:?}");
     assert!(
         output.warnings.iter().any(|w| w.contains(SLOWED)),
         "{:?}",
@@ -659,7 +662,7 @@ fn saves_past_the_write_budget_wait_and_still_reach_the_disk() {
     );
     // Every save was on the disk when it returned, the last one too.
     let heavy = read_store(&disk::rms_dir(dir.path()), "heavy");
-    assert_eq!((heavy.records.len(), heavy.records[&1][0]), (1, 10));
+    assert_eq!((heavy.records.len(), heavy.records[&1][0]), (1, 2));
 }
 
 #[test]
