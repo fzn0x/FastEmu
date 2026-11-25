@@ -311,7 +311,7 @@ section says is in scope.
   them.
 - Only a lifecycle call that does not return, such as a `startApp` that
   runs the game's loop, or a very slow one, lets 8 pause and resume
-  calls wait.
+  calls pile up; the ones after are dropped, as the table says.
 - A game that calls `notifyPaused` and `resumeRequest` in a tight loop
   queues requests for the app faster than the app handles them, and
   nothing bounds that queue, so the memory of the app grows while the
