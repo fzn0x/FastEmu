@@ -1,0 +1,83 @@
+//! Bytes a native reads from a game's stream, counted on the heap while
+//! they grow.
+//!
+//! `Image.createImage(InputStream)` reads a stream to its end through the
+//! game's own `read`. The game's code runs between the reads, and so does
+//! every other thread of the game, so bytes kept in a host vector the heap
+//! does not see add up over the threads: eight threads that each read an
+//! image stream held 128 MiB beside a heap of 2 MiB. Here the bytes grow
+//! in the payload of a plain `java/lang/Object` that the native roots,
+//! which the heap counts at the room of its vector. The heap is asked
+//! before the vector grows, so threads that read at once share the heap's
+//! room, and a stream the heap cannot hold ends in `OutOfMemoryError`.
+
+use fastemu_jvm::{Ctx, JResult, ObjRef, Payload};
+
+/// The bytes read so far.
+struct StreamBytes(Vec<u8>);
+
+impl Payload for StreamBytes {
+    fn heap_bytes(&self) -> usize {
+        self.0.capacity()
+    }
+}
+
+/// A holder of the bytes read from a stream: a plain object with a
+/// [`StreamBytes`] payload, rooted in the native's locals until it
+/// returns, and garbage after that.
+#[derive(Clone, Copy)]
+pub(crate) struct CountedBytes(ObjRef);
+
+impl CountedBytes {
+    /// An empty holder.
+    pub(crate) fn new(ctx: &mut Ctx<'_>) -> JResult<Self> {
+        let class = ctx.find_class("java/lang/Object")?;
+        let holder = ctx.new_object(class)?;
+        ctx.set_payload(holder, StreamBytes(Vec::new()));
+        Ok(Self(holder))
+    }
+
+    /// How many bytes it holds.
+    pub(crate) fn len(self, ctx: &Ctx<'_>) -> JResult<usize> {
+        Ok(ctx.payload::<StreamBytes>(self.0)?.0.len())
+    }
+
+    /// Adds `bytes`. When they do not fit, the vector grows, doubled as a
+    /// vector grows, but never past `max` or the whole heap unless the
+    /// bytes need it. The heap is asked for the grown vector first, while
+    /// it still counts the old one, as both exist while the bytes move:
+    /// `OutOfMemoryError` when it cannot hold it, with nothing added.
+    pub(crate) fn push(self, ctx: &mut Ctx<'_>, bytes: &[u8], max: usize) -> JResult<()> {
+        let (len, room) = {
+            let held = &ctx.payload::<StreamBytes>(self.0)?.0;
+            (held.len(), held.capacity())
+        };
+        let needed = len.saturating_add(bytes.len());
+        let grows = needed > room;
+        if grows {
+            let (heap, _) = ctx.heap_usage();
+            let grown = room.saturating_mul(2).min(max).min(heap).max(needed);
+            ctx.check_alloc(grown)?;
+            ctx.payload_mut::<StreamBytes>(self.0)?
+                .0
+                .reserve_exact(grown - len);
+        }
+        ctx.payload_mut::<StreamBytes>(self.0)?
+            .0
+            .extend_from_slice(bytes);
+        if grows {
+            ctx.recount(self.0);
+        }
+        Ok(())
+    }
+
+    /// Takes the bytes out and leaves the holder empty. The heap goes on
+    /// counting them, at the room they had, until it collects the holder
+    /// after the native returns: they are still held, by whatever the
+    /// native does with them next, while other threads run.
+    pub(crate) fn take(self, ctx: &mut Ctx<'_>) -> JResult<Vec<u8>> {
+        Ok(std::mem::take(
+            &mut ctx.payload_mut::<StreamBytes>(self.0)?.0,
+        ))
+    }
+}

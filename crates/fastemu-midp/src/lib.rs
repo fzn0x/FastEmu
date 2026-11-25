@@ -25,6 +25,7 @@ pub mod media;
 pub mod midlet;
 pub mod nokia;
 pub mod rms;
+mod stream_bytes;
 pub mod suite;
 pub mod vendor;
 pub mod wma;

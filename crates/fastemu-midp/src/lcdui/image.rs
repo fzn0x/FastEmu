@@ -15,6 +15,7 @@ use parking_lot::Mutex;
 
 use super::graphics::new_graphics;
 use super::throw_gfx;
+use crate::stream_bytes::CountedBytes;
 use crate::suite::source::normalize;
 
 const CLASS: &str = "javax/microedition/lcdui/Image";
@@ -299,10 +300,15 @@ const MAX_EMPTY_READS: u32 = 1000;
 /// Reads a Java `InputStream` to its end through its `read([BII)I`, at most
 /// [`MAX_IMAGE_FILE`] bytes: an image stream that goes on is an
 /// `IOException`, as a phone's would end in one, and not a Vec that grows
-/// until the host is out of memory.
-fn read_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<Vec<u8>> {
+/// until the host is out of memory. The bytes grow in a holder the heap
+/// counts, which this returns, and the heap is asked before they grow, so
+/// data the heap cannot hold is an `OutOfMemoryError` at about the heap's
+/// size. The game's `read` runs between the reads, and so do its other
+/// threads, which would each hold a stream of their own otherwise.
+fn read_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<CountedBytes> {
     let buffer = ctx.new_array(fastemu_jvm::ArrayType::Byte, 4096)?;
-    let mut bytes = Vec::new();
+    let bytes = CountedBytes::new(ctx)?;
+    let mut chunk = [0u8; 4096];
     let mut empty_reads = 0;
     loop {
         let n = ctx
@@ -316,8 +322,8 @@ fn read_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<Vec<u8>> {
         if n < 0 {
             break;
         }
-        let chunk = ctx.array::<i8>(buffer)?;
-        let n = (n as usize).min(chunk.len());
+        let read = ctx.array::<i8>(buffer)?;
+        let n = (n as usize).min(read.len());
         if n == 0 {
             empty_reads += 1;
             if empty_reads >= MAX_EMPTY_READS {
@@ -326,22 +332,27 @@ fn read_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<Vec<u8>> {
             continue;
         }
         empty_reads = 0;
-        if bytes.len() + n > MAX_IMAGE_FILE {
+        for (to, &from) in chunk.iter_mut().zip(&read[..n]) {
+            *to = from as u8;
+        }
+        if bytes.len(ctx)? + n > MAX_IMAGE_FILE {
             return ctx.throw(
                 "java/io/IOException",
                 "the image data is larger than 16 MiB",
             );
         }
-        bytes.extend(chunk[..n].iter().map(|&b| b as u8));
+        bytes.push(ctx, &chunk[..n], MAX_IMAGE_FILE)?;
     }
     Ok(bytes)
 }
 
 fn create_from_stream(ctx: &mut Ctx<'_>, stream: Value) -> JResult<Value> {
     let stream = ctx.non_null(stream)?;
-    // Read before the turn, as reading runs the game's code.
-    let bytes = read_stream(ctx, stream)?;
+    // Read before the turn, as reading runs the game's code. The bytes stay
+    // counted while the thread waits for its turn, and while they decode.
+    let read = read_stream(ctx, stream)?;
     let made = decode_in_turn(ctx, |ctx| {
+        let bytes = read.take(ctx)?;
         Ok(match decode_checked(ctx, bytes)? {
             Ok(surface) => Ok(new_image(ctx, surface)?),
             Err(e) => Err(e),
