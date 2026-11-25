@@ -32,6 +32,27 @@ public class Sprites extends MIDlet {
         kept = null;
         sequence = null;
         System.gc();
+
+        // A copy of a sprite has a frame sequence of its own: 80 KB each.
+        int[] small = new int[20000];
+        Sprite original = new Sprite(frame);
+        original.setFrameSequence(small);
+        small = null;
+        kept = new Vector();
+        count = 0;
+        boolean copiesFull = false;
+        try {
+            for (int i = 0; i < 50; i++) {
+                kept.addElement(new Sprite(original));
+                count++;
+            }
+        } catch (OutOfMemoryError e) {
+            copiesFull = true;
+            kept = null;
+        }
+        kept = null;
+        System.gc();
+        System.out.println("copies " + count + " kept" + (copiesFull ? " then OutOfMemoryError" : ""));
         System.out.println("done");
     }
 

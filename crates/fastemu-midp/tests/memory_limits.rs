@@ -127,7 +127,8 @@ MIDlet-6: Canvases, , m.Canvases\r\n\
 MIDlet-7: GameBuffer, , m.GameBuffer\r\n\
 MIDlet-8: Customs, , m.Customs\r\n\
 MIDlet-9: SiemensBitmaps, , m.SiemensBitmaps\r\n\
-MIDlet-10: SiemensLayers, , m.SiemensLayers\r\n";
+MIDlet-10: SiemensLayers, , m.SiemensLayers\r\n\
+MIDlet-11: SiemensSprites, , m.SiemensSprites\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 mod midlet {
@@ -141,6 +142,7 @@ mod midlet {
     pub const CUSTOMS: usize = 7;
     pub const SIEMENS_BITMAPS: usize = 8;
     pub const SIEMENS_LAYERS: usize = 9;
+    pub const SIEMENS_SPRITES: usize = 10;
 }
 
 /// What the back buffer of a shown canvas takes of the heap on the default
@@ -446,6 +448,11 @@ fn many_sprites_that_keep_one_big_frame_sequence_end_in_out_of_memory() {
     assert!(line.ends_with("kept then OutOfMemoryError"), "{log}");
     let count = numbers(&line, "sprites ")[0];
     assert!((1..10).contains(&count), "{log}");
+    // A copy of a sprite keeps a sequence of its own, 80 KB.
+    let copies = run.wait_log("copies ");
+    assert!(copies.ends_with("kept then OutOfMemoryError"), "{log}");
+    let count = numbers(&copies, "copies ")[0];
+    assert!((1..20).contains(&count), "{log}");
     run.wait_log("done");
 }
 
@@ -558,4 +565,25 @@ fn siemens_layers_count_their_animated_tiles() {
     assert!(kept.ends_with("then OutOfMemoryError"), "{log}");
     let count = numbers(&kept, "siemens layers ")[0];
     assert!((1..12).contains(&count), "{log}");
+}
+
+#[test]
+fn siemens_sprites_count_the_frame_sequences_they_keep() {
+    let _alone = Alone::new();
+    let Some(jar) = suite("siemens-sprites", &[]) else {
+        return;
+    };
+    let mut run = siemens(&jar, midlet::SIEMENS_SPRITES, HEAP);
+    // The array is 400 KB and each sprite keeps another copy.
+    let sprites = run.wait_log("siemens sprites ");
+    let log = run.dump();
+    assert!(sprites.ends_with("kept then OutOfMemoryError"), "{log}");
+    let count = numbers(&sprites, "siemens sprites ")[0];
+    assert!((1..10).contains(&count), "{log}");
+    // A copy of a sprite keeps a sequence of its own, 80 KB.
+    let copies = run.wait_log("siemens copies ");
+    assert!(copies.ends_with("kept then OutOfMemoryError"), "{log}");
+    let count = numbers(&copies, "siemens copies ")[0];
+    assert!((1..20).contains(&count), "{log}");
+    run.wait_log("done");
 }
