@@ -277,8 +277,9 @@ section says is in scope.
   its heap.
 - A class waits for its superclass and interfaces to load before the
   class data is charged for it. A chain of up to 256 classes of up to
-  4 MiB each can be held parsed at once, which can pass the 128 MiB of
-  class data for a moment.
+  4 MiB each can be held parsed at once: up to 1 GiB of class files, and
+  a few times that while parsed, far past the 128 MiB of class data, for
+  a moment.
 - A GIF is checked against the heap by its logical screen. Its first
   frame can be larger: it is decoded whole, up to 2^25 pixels and
   128 MiB that the heap does not count, before it is cut to the screen. A
