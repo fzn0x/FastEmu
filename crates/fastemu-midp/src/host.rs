@@ -509,6 +509,11 @@ mod tests {
         link.log(out("\u{1}".repeat(max)));
         for line in link.drain_log() {
             assert!(line.text.len() <= max, "{} bytes", line.text.len());
+            assert!(
+                !line.text.chars().any(|c| c.is_control()),
+                "{:?}",
+                line.text
+            );
         }
     }
 

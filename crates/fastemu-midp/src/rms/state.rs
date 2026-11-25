@@ -404,10 +404,13 @@ mod tests {
     fn asking_for_suites_that_are_not_there_keeps_nothing() {
         let dir = tempfile::tempdir().unwrap();
         with_ctx(dir.path(), |ctx| {
+            // This suite's own list is kept, even when it is empty.
+            scan(ctx, &Owner::Own).unwrap();
             for i in 0..1000 {
                 scan(ctx, &other(&format!("vendor {i}"), "game")).unwrap();
             }
             assert_eq!(others(ctx), 0);
+            assert!(rms(ctx).suites.contains_key(&Owner::Own));
             // Their stores are not there, and asking again is the same.
             let key = StoreKey {
                 owner: other("vendor 1", "game"),
@@ -415,15 +418,6 @@ mod tests {
             };
             assert!(!load(ctx, &key).unwrap());
             assert_eq!(others(ctx), 0);
-        });
-    }
-
-    #[test]
-    fn this_suites_own_stores_are_kept_even_when_there_are_none() {
-        let dir = tempfile::tempdir().unwrap();
-        with_ctx(dir.path(), |ctx| {
-            scan(ctx, &Owner::Own).unwrap();
-            assert!(rms(ctx).suites.contains_key(&Owner::Own));
         });
     }
 
