@@ -239,9 +239,11 @@ warning, and a start past the cap of started players plays nothing.
 
 | Limit | Bound | When a game reaches it | Described in |
 | --- | --- | --- | --- |
-| Name, vendor and version in the library | 100 characters | cut | [midp.md][midp-log] |
+| Name, vendor, version and MIDlet names in the library | 100 characters | cut | [midp.md][midp-suites] |
+| Description of a suite | 500 characters | cut | [midp.md][midp-suites] |
+| Icon of a suite | 1 MiB of file, 512 pixels a side | no icon is shown | [midp.md][midp-suites] |
 | Log a game's tile keeps | 2000 lines and 1 MiB | the oldest lines go first | [midp.md][midp-log] |
-| Clicks on the prompt for a link | none for 500 ms after it appears or its link changes | the buttons stay dimmed | [midp.md][midp-links] |
+| Clicks on the prompt for a link | none for 500 ms after the app takes the request or its link changes | the buttons stay dimmed | [midp.md][midp-links] |
 | A game opened on Android | `content:` links only, 64 MiB a file | a larger file is refused and its partial copy deleted; other links are ignored | [playing.md][playing-adding] |
 
 [playing-adding]: docs/playing.md#adding-games
