@@ -549,6 +549,7 @@ mod tests {
 
     use super::*;
     use crate::env::InstanceEnv;
+    use crate::io::connector::{Options, READ_WRITE};
 
     /// Runs `f` on a VM with the MIDP classes whose instance may use the
     /// network.
@@ -580,6 +581,54 @@ mod tests {
             assert!(!second.add(1));
             drop(second);
             assert_eq!(counts(ctx).pending.load(Ordering::Acquire), 0);
+        });
+    }
+
+    #[test]
+    fn each_kind_of_connection_has_its_own_limit_and_gives_a_place_back() {
+        with_network(|ctx| {
+            let counts = counts(ctx);
+            for kind in [Kind::Connection, Kind::Server, Kind::Datagram] {
+                let mut held: Vec<Slot> = (0..kind.limit())
+                    .map(|_| counts.take(kind).expect("a place"))
+                    .collect();
+                assert!(counts.take(kind).is_none(), "{kind:?}");
+                // The others have their own places.
+                held.truncate(kind.limit() - 1);
+                assert!(counts.take(kind).is_some(), "{kind:?}");
+            }
+            for kind in [Kind::Connection, Kind::Server, Kind::Datagram] {
+                assert_eq!(counts.open[kind.index()].load(Ordering::Acquire), 0);
+            }
+        });
+    }
+
+    #[test]
+    fn a_collection_gives_back_the_places_of_connections_nobody_refers_to() {
+        with_network(|ctx| {
+            let options = Options {
+                mode: READ_WRITE,
+                timeouts: false,
+            };
+            let open = |ctx: &mut Ctx<'_>| {
+                let rest = "//127.0.0.1:1/";
+                super::super::http::open(ctx, "http", rest, "http://127.0.0.1:1/", options)
+            };
+            // A game that never closes its connections keeps opening them.
+            for _ in 0..3 * MAX_CONNECTIONS {
+                ctx.local_frame(|ctx| open(ctx).unwrap());
+            }
+            // One that keeps them is refused at its limit.
+            let mut kept = 0;
+            let refused = loop {
+                match open(ctx) {
+                    Ok(_) => kept += 1,
+                    Err(Throw::Exception(e)) => break ctx.describe_exception(e),
+                    Err(Throw::Stop) => panic!("stopped"),
+                }
+            };
+            assert_eq!(kept, MAX_CONNECTIONS);
+            assert_eq!(refused, "java.io.IOException: too many open connections");
         });
     }
 }

@@ -97,3 +97,47 @@ done"
     );
     io_support::assert_output(&output, &expected);
 }
+
+/// A listener that accepts every connection and closes it at once, so the
+/// test holds no more descriptors than the game does.
+fn start_dropping_listener() -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || for _ in listener.incoming() {});
+    port
+}
+
+#[test]
+fn a_game_holds_at_most_64_connections_and_8_server_sockets() {
+    let Some(classes) = io_support::classes() else {
+        return;
+    };
+    let listener = start_dropping_listener().to_string();
+    let closed = io_support::closed_port().to_string();
+    let output = io_support::run(
+        classes,
+        "SocketLimits",
+        &[&listener, &closed],
+        NetworkPolicy::Allow,
+    );
+    let full = "too many open connections";
+    let expected = format!(
+        "failed 70
+held 64
+65th {full}
+http {full}
+after close opened
+stream open {full}
+stream closed opened
+all closed opened
+accepted
+second {full}
+accepted again
+forgotten 200
+servers 8
+9th too many open server sockets
+server closed opened
+done"
+    );
+    io_support::assert_output(&output, &expected);
+}

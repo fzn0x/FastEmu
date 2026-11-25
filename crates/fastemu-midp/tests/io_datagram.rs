@@ -48,3 +48,25 @@ receive on close -> connection is closed
 done";
     io_support::assert_output(&output, expected);
 }
+
+#[test]
+fn a_game_holds_at_most_16_datagram_connections() {
+    let Some(classes) = io_support::classes() else {
+        return;
+    };
+    // Nothing is sent: the clients only name the peer.
+    let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let port = peer.local_addr().unwrap().port().to_string();
+    let output = io_support::run(classes, "DatagramLimits", &[&port], NetworkPolicy::Allow);
+    let full = "too many open datagram sockets";
+    let expected = format!(
+        "held 16
+17th {full}
+client {full}
+after close opened
+forgotten opened
+all closed opened
+done"
+    );
+    io_support::assert_output(&output, &expected);
+}
