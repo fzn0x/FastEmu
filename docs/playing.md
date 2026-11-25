@@ -54,7 +54,10 @@ first copy always uses the first slot, so a game started again finds its
 saves.
 
 Every game plays its sound at the same time. Mute a game from its title
-bar, or set its volume in its settings.
+bar, or set its volume in its settings. The games share the time the
+computer has for sound. A game that plays dozens of sounds at once keeps
+its oldest ones playing, and the sounds it started last pause until there
+is room, so the sound of the other games plays on.
 
 When the Android app goes to the background, or the system pauses it, every
 running game is paused, as a phone pauses its game for a call. They resume
