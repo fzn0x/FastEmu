@@ -27,6 +27,12 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "calloop"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # parking_lot 0.13 hands a lock to a waiting thread only through its
+      # explicit fair unlocks. The shared audio mixer relies on the eventual
+      # fairness of 0.12 to bound how long one game's call waits behind
+      # another's, so 0.13 waits until the mixer hands its lock over itself.
+      - dependency-name: "parking_lot"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: github-actions
     directories: ["/", "/.github/actions/*"]
