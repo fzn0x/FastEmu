@@ -117,6 +117,37 @@ pub(crate) struct ThreadEntry {
 /// What a Rust-bodied Java thread runs.
 pub(crate) type ThreadBody = Box<dyn FnOnce(&mut Ctx<'_>) -> JResult<()> + Send>;
 
+/// Threads the host may start beyond [`crate::VmLimits::max_threads`]: the
+/// event thread, the lifecycle threads and the threads the library runs
+/// for a game. A game that has used up its own threads cannot starve them.
+pub(crate) const HOST_RESERVE: usize = 16;
+
+/// Who asks for a thread. The machine counts every live thread, the host's
+/// own among them, and lets a game have [`crate::VmLimits::max_threads`] of
+/// them in all; the host may go [`HOST_RESERVE`] past that.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Starter {
+    /// `Thread.start` and `Timer`.
+    Game,
+    /// `Vm::spawn` and the threads the library starts for itself.
+    Host,
+}
+
+/// Whether one more thread fits for `starter`.
+fn check_room(shared: &VmShared, state: &VmState, starter: Starter) -> Result<(), String> {
+    let max = shared.config.limits.max_threads;
+    let limit = match starter {
+        Starter::Game => max,
+        Starter::Host => max.saturating_add(HOST_RESERVE),
+    };
+    if state.live_threads >= limit {
+        return Err(format!(
+            "unable to create a thread: too many threads (limit {limit})"
+        ));
+    }
+    Ok(())
+}
+
 /// The name the OS gets for a thread: Java's name without control
 /// characters, cut to 32 characters. `std` panics on a NUL in a thread
 /// name, and the name is only a label for debuggers; the Java side keeps
@@ -127,13 +158,17 @@ fn os_name(name: &str) -> String {
 }
 
 /// Adds a thread for `java_thread` to the table and starts its OS thread.
+/// Fails, with nothing added, when `starter` has no room for another
+/// thread.
 pub(crate) fn spawn(
     shared: &VmShared,
     state: &mut VmState,
     java_thread: ObjRef,
     name: String,
     body: ThreadBody,
+    starter: Starter,
 ) -> Result<ThreadId, String> {
+    check_room(shared, state, starter)?;
     let tid = register(shared, state, java_thread, name.clone());
     let arc = shared.arc();
     let result = std::thread::Builder::new()
@@ -150,13 +185,15 @@ pub(crate) fn spawn(
 }
 
 /// Makes a `java.lang.Thread` object named `name` and starts it with
-/// `body`.
+/// `body`. Without room for the thread, no object is made.
 pub(crate) fn spawn_with_new_object(
     shared: &VmShared,
     state: &mut VmState,
     name: &str,
     body: ThreadBody,
+    starter: Starter,
 ) -> Result<ObjRef, String> {
+    check_room(shared, state, starter)?;
     let object = lang::thread::new_thread_object(state, name);
     if let Some(data) = state
         .heap
@@ -165,7 +202,7 @@ pub(crate) fn spawn_with_new_object(
     {
         data.started = true;
     }
-    spawn(shared, state, object, name.to_owned(), body)?;
+    spawn(shared, state, object, name.to_owned(), body, starter)?;
     Ok(object)
 }
 

@@ -20,7 +20,7 @@ use crate::limits::{VmLimits, cut_log_text};
 use crate::monitor::Monitor;
 use crate::native::NativeClass;
 use crate::source::ClassSource;
-use crate::thread::{self, ThreadEntry, ThreadId};
+use crate::thread::{self, Starter, ThreadEntry, ThreadId};
 use crate::value::ObjRef;
 use crate::wait::WaitQueue;
 
@@ -462,7 +462,10 @@ impl Vm {
     ///
     /// Fails with [`std::io::ErrorKind::TimedOut`] when a thread holds the
     /// VM lock for a second without a safepoint, as one wedged in a native
-    /// does.
+    /// does. It fails too when the machine has as many threads as
+    /// [`VmLimits::max_threads`] plus a reserve of 16 for the host, so a
+    /// game that has used up its own threads cannot keep the host from
+    /// starting the ones it needs.
     pub fn spawn(
         &self,
         name: &str,
@@ -474,9 +477,15 @@ impl Vm {
                 "the virtual machine is busy: a thread holds its lock",
             ));
         };
-        thread::spawn_with_new_object(&self.shared, &mut state, name, Box::new(body))
-            .map(|_| ())
-            .map_err(std::io::Error::other)
+        thread::spawn_with_new_object(
+            &self.shared,
+            &mut state,
+            name,
+            Box::new(body),
+            Starter::Host,
+        )
+        .map(|_| ())
+        .map_err(std::io::Error::other)
     }
 
     /// Starts the thread `main` running `public static void

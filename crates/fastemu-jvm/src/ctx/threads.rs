@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use fastemu_core::LogLevel;
 
 use super::{Ctx, JResult, Throw};
-use crate::thread;
+use crate::thread::{self, Starter};
 use crate::value::ObjRef;
 
 /// Why [`Ctx::wait_until`] returned. Wakeups are not precise: callers
@@ -114,16 +114,27 @@ impl Ctx<'_> {
         self.root(obj)
     }
 
-    /// Starts a Java thread whose body is `body`, as MIDP's event thread
-    /// and `Timer` threads are, and returns its `Thread` object. An
-    /// exception the body returns is reported as uncaught. The closure
-    /// must not capture [`ObjRef`]s; pass [`crate::GlobalRef`]s.
+    /// Starts a Java thread whose body is `body`, as `Timer` threads are,
+    /// and returns its `Thread` object. An exception the body returns is
+    /// reported as uncaught. The closure must not capture [`ObjRef`]s; pass
+    /// [`crate::GlobalRef`]s.
+    ///
+    /// The thread is one of the game's: it counts against
+    /// [`crate::VmLimits::max_threads`], and past that this throws
+    /// `OutOfMemoryError`, as `Thread.start` does.
     pub fn spawn_thread(
         &mut self,
         name: &str,
         body: impl FnOnce(&mut Ctx<'_>) -> JResult<()> + Send + 'static,
     ) -> JResult<ObjRef> {
-        match thread::spawn_with_new_object(self.shared, &mut self.state, name, Box::new(body)) {
+        let spawned = thread::spawn_with_new_object(
+            self.shared,
+            &mut self.state,
+            name,
+            Box::new(body),
+            Starter::Game,
+        );
+        match spawned {
             Ok(obj) => Ok(self.root(obj)),
             Err(message) => Err(self.new_exception("java/lang/OutOfMemoryError", Some(&message))),
         }

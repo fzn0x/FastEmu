@@ -6,7 +6,7 @@ use super::{string_value, this, throw};
 use crate::ctx::{Ctx, JResult};
 use crate::heap::{Payload, Tracer};
 use crate::native::NativeClass;
-use crate::thread::{self, ThreadId};
+use crate::thread::{self, Starter, ThreadId};
 use crate::value::{ObjRef, Value};
 use crate::vm::VmState;
 
@@ -120,10 +120,15 @@ fn start(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
             ctx.call_virtual(me, "run", "()V", &[])?;
             Ok(())
         }),
+        Starter::Game,
     );
     match result {
         Ok(_) => Ok(Value::Void),
-        Err(message) => throw(ctx, "java/lang/OutOfMemoryError", &message),
+        Err(message) => {
+            // The thread never started, so a later `start` may try again.
+            data(ctx, a)?.started = false;
+            throw(ctx, "java/lang/OutOfMemoryError", &message)
+        }
     }
 }
 
