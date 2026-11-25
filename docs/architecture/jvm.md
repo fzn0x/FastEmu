@@ -391,8 +391,10 @@ field, so a game made of very many tiny objects holds several times its
 heap in real memory, about ten times in a test with many small timer
 tasks. A monitor entry for each locked object and a second copy of each
 interned string also live outside the count. The heap lives as long as the
-machine: a game that has ended keeps its memory until the host lets go of
-its `Vm`, which the apps do when its tile is closed.
+machine, which is freed when the last `Vm` handle and the last of its
+threads let go of it: a game that has ended gives its memory back once its
+threads have ended, while its tile stays open (see [Using a virtual machine
+from the host](#using-a-virtual-machine-from-the-host)).
 
 ### Limits
 
