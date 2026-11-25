@@ -987,4 +987,70 @@ mod tests {
             assert_eq!(count_started(&started), MAX_HELPERS);
         });
     }
+
+    /// Ports 1 to `n` on 127.0.0.1.
+    fn addrs(n: u16) -> Vec<SocketAddr> {
+        (1..=n)
+            .map(|port| SocketAddr::from(([127, 0, 0, 1], port)))
+            .collect()
+    }
+
+    #[test]
+    fn the_addresses_of_a_name_share_the_connect_deadline() {
+        // Each attempt waits its whole timeout, as a connect to an address
+        // that drops packets does, but never more than 300 ms.
+        let deadline = Instant::now() + Duration::from_millis(200);
+        let mut given = Vec::new();
+        let result = connect_each(addrs(3), deadline, |_, timeout| {
+            given.push(timeout);
+            std::thread::sleep(timeout.min(Duration::from_millis(300)));
+            Err::<(), _>(io::Error::from(io::ErrorKind::TimedOut))
+        });
+        assert!(matches!(result, Err(ConnectError::Io(e)) if e.kind() == io::ErrorKind::TimedOut));
+        // A sleep never ends early, so the deadline has passed once the
+        // first attempt returns, however busy the machine is.
+        assert!(
+            given.iter().all(|t| *t <= Duration::from_millis(200)),
+            "{given:?}"
+        );
+        let total: Duration = given.iter().sum();
+        assert!(total < Duration::from_millis(400), "{given:?}");
+    }
+
+    #[test]
+    fn no_address_is_tried_after_the_deadline() {
+        let result = connect_each(addrs(3), Instant::now(), |_, _| -> io::Result<()> {
+            panic!("an address was tried after the deadline")
+        });
+        assert!(matches!(result, Err(ConnectError::Io(e)) if e.kind() == io::ErrorKind::TimedOut));
+    }
+
+    #[test]
+    fn connect_each_keeps_the_first_success_and_the_last_error() {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut tried = Vec::new();
+        let result = connect_each(addrs(3), deadline, |addr, _| {
+            tried.push(addr.port());
+            match addr.port() {
+                2 => Ok(addr.port()),
+                _ => Err(io::Error::from(io::ErrorKind::ConnectionRefused)),
+            }
+        });
+        assert!(matches!(result, Ok(2)));
+        assert_eq!(tried, [1, 2]);
+        let result = connect_each(addrs(2), deadline, |addr, _| -> io::Result<()> {
+            Err(io::Error::from(match addr.port() {
+                1 => io::ErrorKind::ConnectionRefused,
+                _ => io::ErrorKind::ConnectionReset,
+            }))
+        });
+        assert!(
+            matches!(result, Err(ConnectError::Io(e)) if e.kind() == io::ErrorKind::ConnectionReset)
+        );
+        // No address at all keeps the ConnectionNotFoundException.
+        let result = connect_each(Vec::new(), deadline, |_, _| -> io::Result<()> {
+            unreachable!("there is no address to try")
+        });
+        assert!(matches!(result, Err(ConnectError::Unknown)));
+    }
 }
