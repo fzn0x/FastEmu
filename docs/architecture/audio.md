@@ -427,6 +427,10 @@ tone (ffmpeg's `sine` source encoded with LAME).
 - No AMR wideband, AAC, iMelody, MMF (SMAF) or XMF.
 - Media time does not account for the device's output latency (usually
   10 to 30 ms).
-- MP3 seeks that the reader cannot do accurately fall back to decoding
-  from the start; MIDI seeks replay controllers but not notes already
+- MP3 seeks that the reader cannot do accurately (a damaged header in the
+  middle of the file) fall back to decoding from the start. A render call
+  decodes at most 8 seconds of that, so the mixer is not held for long,
+  and plays silence until the target is reached: the silence takes its
+  share of the timeline, so the sound that follows is the sound of its
+  place in the file. MIDI seeks replay controllers but not notes already
   sounding.
