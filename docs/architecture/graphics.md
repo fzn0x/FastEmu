@@ -185,6 +185,13 @@ counts already. A file is checked by the size its header declares,
 declares 16384 by 2048 pixels never reaches the decoder on a small heap.
 A file whose size cannot be read goes to the decoder, which refuses it.
 
+A GIF's first frame is decoded whole, at its own size, before it is cut
+to the image ([Decoding](#decoding)). When the frame has more pixels than
+the image, the wrapper also asks the heap for the frame and its index, 5
+bytes a pixel (`probe_frame_bytes`). A frame the heap cannot hold is a
+file that does not decode, and no pixel of it is read: 34 bytes can
+declare a frame of 160 MiB on an image of one pixel.
+
 The image decodes of one game take turns, one at a time, as its resource
 reads do. A turn runs from before the file is read or copied until the
 image is counted on the heap. The decode runs with the VM lock released,
@@ -322,7 +329,12 @@ throws as `IllegalArgumentException` (or `IOException` for
   segments again after every marker, which took 4.8 s for a 1.6 MB file
   of thousands of them.
 - **GIF**: the first frame, placed on the logical screen, transparent
-  index clear.
+  index clear. The frame is decoded whole, at its own size, before it is
+  cut to the screen, so a frame with more pixels than the screen holds
+  more than the image does while it decodes: the wrapper asks the heap
+  for it first, as the Images section says. The standard has every frame
+  fit in the logical screen. A frame partly outside it, or of another
+  shape with no more pixels, is cut to the screen.
 - **BMP**: 1, 4, 8, 16, 24 and 32 bits, bit-field masks, bottom-up or
   top-down; run-length compressed files are refused. 32-bit files whose
   alpha mask is set but all zero are shown opaque.
