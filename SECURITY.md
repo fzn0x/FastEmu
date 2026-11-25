@@ -262,8 +262,9 @@ section says is in scope.
 - Each object a thread holds locked also takes an entry outside the heap,
   so a game that locks very many small objects at once uses more real
   memory than the ten times above.
-- `String.intern` keeps a second copy of each interned string outside the
-  heap, up to about the heap's size again.
+- `String.intern` keeps a second copy of each interned string, and a
+  table entry for it, outside the heap: about the heap's size again for
+  long strings, and more for very short ones.
 - A call into the runtime is judged after it returns. It can take the
   heap past its limit for a moment, and its change stays: a
   `List.append` past the heap adds the element, then throws
