@@ -347,27 +347,19 @@ pub(crate) fn load(ctx: &mut Ctx<'_>, key: &StoreKey) -> JResult<bool> {
             return Ok(None);
         };
         let loaded = StoreData::decode(&bytes, &name, now);
-        let copy = (!loaded.problems.is_empty()).then(|| disk::keep_damaged(&path, &bytes));
-        io::Result::Ok(Some((loaded, copy)))
+        let damaged = (!loaded.problems.is_empty()).then_some(bytes);
+        io::Result::Ok(Some((loaded, damaged)))
     });
     match read {
-        Ok(Some((loaded, copy))) => {
+        Ok(Some((loaded, damaged))) => {
             for problem in &loaded.problems {
                 ctx.log(
                     LogLevel::Warn,
                     format!("RMS: record store {name:?} ({}): {problem}", path.display()),
                 );
             }
-            match copy {
-                Some(Ok(copy)) => ctx.log(
-                    LogLevel::Warn,
-                    format!("RMS: the damaged file is kept as {}", copy.display()),
-                ),
-                Some(Err(e)) => ctx.log(
-                    LogLevel::Warn,
-                    format!("RMS: could not keep a copy of the damaged file: {e}"),
-                ),
-                None => {}
+            if let Some(bytes) = damaged {
+                keep_copy(ctx, &path, &bytes)?;
             }
             if let Some(entry) = rms(ctx).entry_mut(key) {
                 entry.size = loaded.data.size();
@@ -384,6 +376,27 @@ pub(crate) fn load(ctx: &mut Ctx<'_>, key: &StoreKey) -> JResult<bool> {
         }
         Err(e) => Err(io_failure(ctx, "read", &path, &e)),
     }
+}
+
+/// Keeps a copy of a damaged store file, which is another write of the
+/// whole file: a game that opens a damaged store again and again, as it
+/// can before it changes the store, writes the copy each time. So the
+/// copy waits for the write budget and is paid from it like a save.
+fn keep_copy(ctx: &mut Ctx<'_>, path: &Path, bytes: &[u8]) -> JResult<()> {
+    pace(ctx)?;
+    let copy = ctx.without_lock(|| disk::keep_damaged(path, bytes));
+    charge(ctx, bytes.len() as u64);
+    match copy {
+        Ok(copy) => ctx.log(
+            LogLevel::Warn,
+            format!("RMS: the damaged file is kept as {}", copy.display()),
+        ),
+        Err(e) => ctx.log(
+            LogLevel::Warn,
+            format!("RMS: could not keep a copy of the damaged file: {e}"),
+        ),
+    }
+    Ok(())
 }
 
 /// Writes a store's new contents to its file and, once they are there,
