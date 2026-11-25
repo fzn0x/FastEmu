@@ -116,7 +116,9 @@ pub(crate) struct ClassTable {
     /// The `java.lang.Class` object of each class, made on first use.
     pub(crate) mirrors: Vec<Option<ObjRef>>,
     /// What the classes a game can make take of the machine's limit on
-    /// class data. Classes are never unloaded, so nothing is given back.
+    /// class data, the classes still waiting for their superclass and
+    /// interfaces included. Classes are never unloaded, so only a class
+    /// that fails to load gives anything back.
     pub(super) budget: ClassBudget,
 }
 
@@ -799,6 +801,113 @@ mod tests {
         let def = super::super::link::from_class_file(class_file("a/Good", 100, "()V")).unwrap();
         t.define(def).unwrap();
         assert_eq!(t.statics.len(), statics + 100);
+    }
+
+    /// The class `a/Bad` of a class file, which extends `sup` and names
+    /// `interfaces`.
+    fn bad(sup: &str, interfaces: &[&str]) -> super::super::link::ClassDef {
+        let mut file = class_file("a/Bad", 10, "()V");
+        file.super_name = Some(sup.into());
+        file.interfaces = interfaces.iter().map(|&i| i.into()).collect();
+        super::super::link::from_class_file(file).unwrap()
+    }
+
+    #[test]
+    fn a_class_that_fails_after_it_was_charged_gives_the_charge_back() {
+        // `n254` has 256 classes on its path, with Object: the most.
+        let mut natives = vec![NativeClass::interface("a/I"), NativeClass::new("a/C")];
+        natives.extend((0..255).map(|i| match i {
+            0 => NativeClass::new("n0"),
+            _ => NativeClass::new(&format!("n{i}")).extends(&format!("n{}", i - 1)),
+        }));
+        let mut t = table_of(natives);
+        for i in 0..255 {
+            t.load(&format!("n{i}")).unwrap();
+        }
+        let bad_descriptor =
+            super::super::link::from_class_file(class_file("a/Bad", 10, "(")).unwrap();
+        let cases = vec![
+            (
+                "missing superclass",
+                bad("a/Missing", &[]),
+                "NoClassDefFoundError",
+            ),
+            (
+                "interface as superclass",
+                bad("a/I", &[]),
+                "IncompatibleClassChangeError",
+            ),
+            (
+                "missing interface",
+                bad("java/lang/Object", &["a/M"]),
+                "NoClassDefFoundError",
+            ),
+            (
+                "class as interface",
+                bad("java/lang/Object", &["a/C"]),
+                "IncompatibleClassChangeError",
+            ),
+            ("too high", bad("n254", &[]), "ClassFormatError"),
+            ("bad descriptor", bad_descriptor, "ClassFormatError"),
+        ];
+        let (statics, used) = (t.statics.len(), t.budget.used);
+        // A class that waits in `load` for its superclass: `a/Bad` again
+        // is circular, and so is a 257th class waiting.
+        let nested = [
+            ("circular", vec!["a/Bad".into()], "ClassCircularityError"),
+            (
+                "too deep",
+                vec!["a/W".into(); MAX_HIERARCHY_DEPTH],
+                "ClassFormatError",
+            ),
+        ];
+        for (case, loading, exception) in nested {
+            t.loading = loading;
+            let err = t.define(bad("a/Bad", &[])).unwrap_err();
+            t.loading.clear();
+            assert_eq!(err.exception, format!("java/lang/{exception}"), "{case}");
+            assert_eq!(t.budget.used, used, "{case}");
+        }
+        for (case, def, exception) in cases {
+            let err = t.define(def).unwrap_err();
+            assert_eq!(err.exception, format!("java/lang/{exception}"), "{case}");
+            assert_eq!(t.budget.used, used, "{case}");
+        }
+        assert_eq!(t.statics.len(), statics);
+        assert!(t.lookup("a/Bad").is_none());
+    }
+
+    #[test]
+    fn a_class_whose_inherited_part_does_not_fit_gives_its_own_part_back() {
+        // `a/Wide` has 50 methods in its method table, which a class that
+        // extends it copies: 1600 bytes. The class's own part fits.
+        let mut wide = NativeClass::new("a/Wide");
+        for i in 0..50 {
+            wide = wide.abstract_method(&format!("m{i}"), "()V");
+        }
+        let natives = vec![NativeClass::new("java/lang/Object"), wide];
+        let own = ClassTable::own_class_bytes(&bad("a/Wide", &[]));
+        let mut t = ClassTable::new(Arc::new(MemorySource::new()), natives, own + 100);
+        let err = t.define(bad("a/Wide", &[])).unwrap_err();
+        assert_eq!(err.exception, "java/lang/OutOfMemoryError");
+        assert_eq!(t.budget.used, 0);
+        assert!(t.lookup("a/Bad").is_none());
+        // Without its superclass's table, the class fits.
+        t.define(bad("java/lang/Object", &[])).unwrap();
+    }
+
+    #[test]
+    fn a_class_that_does_not_fit_on_its_own_is_refused_before_its_superclass_loads() {
+        let natives = vec![
+            NativeClass::new("java/lang/Object"),
+            NativeClass::new("a/C"),
+        ];
+        let mut t = ClassTable::new(Arc::new(MemorySource::new()), natives, 0);
+        let err = t.define(bad("a/C", &[])).unwrap_err();
+        assert_eq!(err.exception, "java/lang/OutOfMemoryError");
+        assert!(t.lookup("a/C").is_none(), "the superclass was loaded");
+        let err = t.define(bad("a/Missing", &[])).unwrap_err();
+        assert_eq!(err.exception, "java/lang/OutOfMemoryError");
     }
 
     #[test]

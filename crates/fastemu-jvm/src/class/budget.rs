@@ -10,9 +10,14 @@
 //!
 //! The size of a class is an estimate, worked out from its definition
 //! before anything of it is built, so a class that does not fit costs
-//! almost nothing to refuse. Only classes a game can make count: those
-//! read from class files, and the array classes of any name a game asks
-//! for. The classes of the library are fixed and not counted.
+//! almost nothing to refuse. A class is charged in two parts: what it
+//! holds on its own as soon as it is parsed, before its superclass and
+//! interfaces load, and what it copies from them once they have. A class
+//! that does not load gives its charge back.
+//!
+//! Only classes a game can make count: those read from class files, and
+//! the array classes of any name a game asks for. The classes of the
+//! library are fixed and not counted.
 //!
 //! [`VmLimits::max_class_bytes`]: crate::VmLimits::max_class_bytes
 
@@ -93,6 +98,13 @@ impl ClassBudget {
             }
             _ => Err(limit_reached()),
         }
+    }
+
+    /// Gives back `bytes` that [`ClassBudget::charge`] took, for a class
+    /// that did not load.
+    pub(super) fn release(&mut self, bytes: usize) {
+        debug_assert!(bytes <= self.used, "{bytes} released of {}", self.used);
+        self.used = self.used.saturating_sub(bytes);
     }
 }
 
