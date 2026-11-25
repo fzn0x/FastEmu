@@ -20,7 +20,9 @@ use fastemu_jvm::{
 };
 
 use super::NATIVE_MEM;
-use crate::lcdui::image::{SharedSurface, new_image, reserve_decoded, reserve_pixels, surface_of};
+use crate::lcdui::image::{
+    SharedSurface, image_from_array, image_from_resource, new_image, reserve_pixels, surface_of,
+};
 use crate::lcdui::throw_gfx;
 use crate::suite::source::normalize;
 
@@ -208,14 +210,11 @@ fn load(ctx: &mut Ctx<'_>, name: Value) -> JResult<ObjRef> {
     let name = ctx.non_null(name)?;
     let name = ctx.string(name)?;
     let path = normalize(&name);
-    let Some(bytes) = ctx.read_resource(&path)? else {
-        return Err(io_error(ctx, &format!("resource not found: {name}")));
-    };
-    reserve_decoded(ctx, &bytes)?;
-    match ctx.without_lock(move || Surface::decode(&bytes)) {
-        Ok(surface) => new_image(ctx, surface),
-        Err(GfxError::OutOfMemory) => Err(throw_gfx(ctx, &GfxError::OutOfMemory)),
-        Err(e) => Err(io_error(ctx, &e.to_string())),
+    match image_from_resource(ctx, &path)? {
+        Some(Ok(image)) => Ok(image),
+        Some(Err(GfxError::OutOfMemory)) => Err(throw_gfx(ctx, &GfxError::OutOfMemory)),
+        Some(Err(e)) => Err(io_error(ctx, &e.to_string())),
+        None => Err(io_error(ctx, &format!("resource not found: {name}"))),
     }
 }
 
@@ -354,10 +353,11 @@ pub fn class() -> NativeClass {
             wrap(ctx, a[0], image)
         })
         .method("<init>", "([B)V", |ctx, a| {
-            let data: Vec<u8> = bytes(ctx, a[1])?.iter().map(|&b| b as u8).collect();
-            reserve_decoded(ctx, &data)?;
-            let decoded = ctx.without_lock(move || Surface::decode(&data));
-            let image = image_or_throw(ctx, decoded)?;
+            let data = ctx.non_null(a[1])?;
+            let image = match image_from_array(ctx, data, None, SurfaceKind::Immutable)? {
+                Ok(image) => image,
+                Err(e) => return Err(throw_gfx(ctx, &e)),
+            };
             wrap(ctx, a[0], image)
         })
         .method("<init>", "([BIII)V", |ctx, a| {
