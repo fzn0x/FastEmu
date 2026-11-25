@@ -364,3 +364,17 @@ fn nokia_sounds_share_the_sound_budget_of_players() {
         ",
     );
 }
+
+#[test]
+fn a_game_with_all_its_threads_still_gets_its_sound() {
+    let (_engine, group) = audio();
+    check(
+        "MediaThreads",
+        Some(group),
+        r"
+        game threads refused: true
+        events: started:0 endOfMedia:500000
+        past the game's share: true
+        ",
+    );
+}
