@@ -198,12 +198,23 @@ pub fn test_png() -> Vec<u8> {
 /// and `audio` as the instance's sound, and returns what it printed, or
 /// `None` when there is no JDK. The program ends by printing `done`.
 pub fn run(class: &str, profile: &DeviceProfile, audio: Option<Group>) -> Option<Output> {
+    run_on(class, profile, audio, VmConfig::default().heap_bytes)
+}
+
+/// [`run`] on a machine whose heap is `heap_bytes`.
+pub fn run_on(
+    class: &str,
+    profile: &DeviceProfile,
+    audio: Option<Group>,
+    heap_bytes: usize,
+) -> Option<Output> {
     let classes = classes()?;
     let lines: Arc<Mutex<Vec<LogLine>>> = Arc::default();
     let sink = Arc::clone(&lines);
     let config = VmConfig {
         log: Arc::new(move |line| sink.lock().unwrap().push(line)),
         allow_exit: false,
+        heap_bytes,
         ..VmConfig::default()
     };
     let vm = Vm::new(

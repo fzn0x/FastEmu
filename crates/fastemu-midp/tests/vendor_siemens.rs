@@ -8,7 +8,7 @@ mod vendor_support;
 
 use fastemu_core::Key;
 use support::{Running, rgb};
-use vendor_support::{audio, check, check_with, profile, suite};
+use vendor_support::{audio, check, check_with, profile, run_on, suite};
 
 const SIEMENS: &str = "siemens-132x176";
 
@@ -154,4 +154,37 @@ fn extreme_arguments_return_at_once() {
         ",
     );
     assert!(started.elapsed() < std::time::Duration::from_secs(20));
+}
+
+#[test]
+fn a_manager_holds_an_object_once() {
+    // A heap of 1 MiB, so that inserting the same object without end is
+    // refused in milliseconds.
+    let Some(output) = run_on("SiemensManager", &profile(SIEMENS), None, 1 << 20) else {
+        return;
+    };
+    assert_eq!(output.err, Vec::<String>::new());
+    assert_eq!(
+        output.out,
+        [
+            "added twice: #0 none",
+            "then another: #0 #1 none a at 0",
+            "deleted once: #1 none",
+            "200000 adds: #0 none",
+            "inserts: oom true",
+            "done"
+        ]
+    );
+}
+
+#[test]
+fn sprites_made_from_one_picture_count_against_the_heap() {
+    let Some(output) = run_on("SiemensKept", &profile(SIEMENS), None, 1 << 20) else {
+        return;
+    };
+    assert_eq!(output.err, Vec::<String>::new());
+    assert_eq!(
+        output.out,
+        ["kept sprites: oom", "dropped sprites: ok", "done"]
+    );
 }
