@@ -189,6 +189,9 @@ A file whose size cannot be read goes to the decoder, which refuses it.
 more ends with `IOException`, and so does one whose `read` returns no
 bytes 1000 times in a row.
 
+[SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists these
+limits with every other limit a game meets.
+
 `getRGB(rgbData, offset, scanlength, x, y, w, h)` stores pixel `(i, j)` at
 `offset + i + j * scanlength`; a negative `scanlength` stores rows
 bottom-up. Its checks run in this order: `|scanlength| < w`, then a
