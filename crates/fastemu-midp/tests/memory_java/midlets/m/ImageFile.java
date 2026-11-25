@@ -16,6 +16,12 @@ public class ImageFile extends MIDlet {
         byte[] data = new byte[4096];
         int n = 0;
         while (true) {
+            if (n == data.length) {
+                // A file larger than the buffer: read on into a bigger one.
+                byte[] bigger = new byte[n * 2];
+                System.arraycopy(data, 0, bigger, 0, n);
+                data = bigger;
+            }
             int got = in.read(data, n, data.length - n);
             if (got < 0) {
                 break;
