@@ -65,6 +65,21 @@ fn samsung_clips_play_through_the_sound_engine() {
 }
 
 #[test]
+fn samsung_clips_are_players_of_the_same_capped_group() {
+    let (engine, group) = audio();
+    check_with(
+        "SamsungMemory",
+        &made_by("samsung-176x220"),
+        Some(group),
+        r"
+        the 129th clip: java.lang.OutOfMemoryError
+        clips held: 128
+        ",
+    );
+    drop(engine);
+}
+
+#[test]
 fn lg_backlight_and_vibration() {
     let Some(output) = check(
         "LgMedia",

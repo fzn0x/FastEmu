@@ -318,3 +318,48 @@ fn players_read_the_game_s_own_data_source() {
         ",
     );
 }
+
+#[test]
+fn a_game_holds_only_so_much_sound_and_so_many_players() {
+    let (_engine, group) = audio();
+    check(
+        "MediaMemory",
+        Some(group),
+        r"
+        source counted on the heap: true
+        source dropped after realize: true
+        source counted again: true
+        source dropped on close: true
+        the 33rd sound: java.lang.OutOfMemoryError
+        players held by the sound budget: 32
+        room after a close: 200
+        full again: java.lang.OutOfMemoryError
+        forgotten players make room: true
+        the 129th player: java.lang.OutOfMemoryError
+        players held by the count: 128
+        a tone player: java.lang.OutOfMemoryError
+        playTone still works: true
+        amr state: 100
+        amr of empty frames: javax.microedition.media.MediaException
+        amr started: javax.microedition.media.MediaException
+        amr state after: 100
+        endless stream: java.lang.OutOfMemoryError
+        ",
+    );
+}
+
+#[test]
+fn nokia_sounds_share_the_sound_budget_of_players() {
+    let (_engine, group) = audio();
+    check(
+        "NokiaMemory",
+        Some(group),
+        r"
+        the 33rd sound: java.lang.OutOfMemoryError
+        sounds held: 32
+        state of the first: 1
+        room after a release: 1
+        an MMAPI player: java.lang.OutOfMemoryError
+        ",
+    );
+}

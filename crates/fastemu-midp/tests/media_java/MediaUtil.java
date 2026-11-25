@@ -63,4 +63,34 @@ public class MediaUtil {
         }
         return out.toString();
     }
+
+    /** A mono 16-bit WAV at 8 kHz holding {@code data} bytes of silence. */
+    public static byte[] wav(int data) {
+        byte[] out = new byte[44 + data];
+        text(out, 0, "RIFF");
+        little(out, 4, 36 + data, 4);
+        text(out, 8, "WAVEfmt ");
+        little(out, 16, 16, 4);
+        little(out, 20, 1, 2);
+        little(out, 22, 1, 2);
+        little(out, 24, 8000, 4);
+        little(out, 28, 16000, 4);
+        little(out, 32, 2, 2);
+        little(out, 34, 16, 2);
+        text(out, 36, "data");
+        little(out, 40, data, 4);
+        return out;
+    }
+
+    private static void text(byte[] out, int at, String text) {
+        for (int i = 0; i < text.length(); i++) {
+            out[at + i] = (byte) text.charAt(i);
+        }
+    }
+
+    private static void little(byte[] out, int at, int value, int size) {
+        for (int i = 0; i < size; i++) {
+            out[at + i] = (byte) (value >> (8 * i));
+        }
+    }
 }
