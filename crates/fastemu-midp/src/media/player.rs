@@ -49,6 +49,7 @@ pub(crate) enum Source {
 pub(crate) struct PlayerData {
     pub track: Track,
     /// The sound to decode on `realize`; dropped once realized or closed.
+    /// Its bytes count on the Java heap while it is kept.
     source: Option<Source>,
     closed: bool,
     /// A loop count set while unrealized, applied on `realize`.
@@ -60,6 +61,17 @@ pub(crate) struct PlayerData {
 }
 
 impl Payload for PlayerData {
+    /// The sound bytes the player keeps until `realize`. The decoded
+    /// sound is in the engine, in the instance's sound group, whose own
+    /// budget bounds it: a phone kept decoded sound apart from the Java
+    /// heap, and a few megabytes of it would fill a small heap.
+    fn heap_bytes(&self) -> usize {
+        match &self.source {
+            Some(Source::Data { bytes, .. }) => bytes.len(),
+            _ => 0,
+        }
+    }
+
     fn trace(&self, tracer: &mut Tracer<'_>) {
         for &listener in &self.listeners {
             tracer.mark(listener);
@@ -95,6 +107,7 @@ pub(crate) fn new_player(ctx: &mut Ctx<'_>, source: Source) -> JResult<ObjRef> {
     let data = ctx.payload_mut::<PlayerData>(obj)?;
     data.track = track;
     data.source = Some(source);
+    ctx.recount(obj);
     Ok(obj)
 }
 
@@ -258,6 +271,8 @@ pub(crate) fn realize(ctx: &mut Ctx<'_>, this: ObjRef) -> JResult<()> {
     if player.closed || player.track.has_backend() {
         return Ok(());
     }
+    // The bytes are decoded: the engine holds the sound, and the heap
+    // counts the bytes no more.
     player.source = None;
     player
         .track
@@ -266,7 +281,9 @@ pub(crate) fn realize(ctx: &mut Ctx<'_>, this: ObjRef) -> JResult<()> {
         let _ = player.track.set_loop_count(count);
     }
     let serial = player.track.serial();
-    if let Some(id) = player.track.engine_id() {
+    let engine_id = player.track.engine_id();
+    ctx.recount(this);
+    if let Some(id) = engine_id {
         events::link(ctx, id, serial);
     }
     if let (Some(why), Source::Data { bytes, .. }) = (opened.silenced, &source) {
@@ -305,6 +322,7 @@ fn close(ctx: &mut Ctx<'_>, this: ObjRef) -> JResult<()> {
     } else {
         player.track.announce(Event::Closed);
     }
+    ctx.recount(this);
     Ok(())
 }
 

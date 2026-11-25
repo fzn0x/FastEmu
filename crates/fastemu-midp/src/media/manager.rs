@@ -51,13 +51,21 @@ pub(super) fn player_for(
     declared: Option<String>,
 ) -> JResult<ObjRef> {
     let format = decide(&bytes, declared.as_deref());
-    let bytes: Arc<[u8]> = Arc::from(bytes);
     let what = match &declared {
         Some(content_type) => format!("{content_type:?}"),
         None => "a sound with no content type".to_owned(),
     };
+    // The player keeps the bytes until it realizes, and the heap counts
+    // them: a request the heap could never hold is refused before the
+    // copy. A sound of no known format is never decoded, so it keeps none.
+    let kept: Arc<[u8]> = if format.is_some() {
+        ctx.check_alloc(bytes.len())?;
+        Arc::from(bytes.as_slice())
+    } else {
+        Arc::from(Vec::new())
+    };
     let source = Source::Data {
-        bytes: Arc::clone(&bytes),
+        bytes: kept,
         format,
         declared,
     };
