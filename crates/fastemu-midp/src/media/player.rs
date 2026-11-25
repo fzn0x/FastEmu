@@ -11,7 +11,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use fastemu_audio::{Format, Group, PlayerState};
+use fastemu_audio::{AudioError, Format, Group, PlayerState};
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Payload, Tracer, Value};
 
 use super::api::{self, PLAYER_UPDATE, TIME_UNKNOWN, event_name};
@@ -20,7 +20,7 @@ use super::event::Event;
 use super::events::{self, Owner};
 use super::silent::{Silent, UNKNOWN_LENGTH_US};
 use super::track::{Backend, Track};
-use super::{throw_audio, time_base};
+use super::{make_sound, throw_audio, time_base};
 
 pub(crate) const PLAYER_IMPL: &str = "javax/microedition/media/PlayerImpl";
 const ILLEGAL_STATE: &str = "java/lang/IllegalStateException";
@@ -143,38 +143,47 @@ impl Opened {
 
 /// Decodes `source` into the instance's group, or, without one, decodes
 /// it in `probe` only to learn its length for a silent player.
-fn open(source: &Source, group: Option<&Group>, probe: Option<&Group>) -> Opened {
+///
+/// Sound that does not play becomes a silent player. A sound the engine
+/// refuses for its size (too large, or no room in the group) is the
+/// exception: it is an `Err`, which `realize` throws.
+fn open(
+    source: &Source,
+    group: Option<&Group>,
+    probe: Option<&Group>,
+) -> Result<Opened, AudioError> {
     match source {
         Source::ToneDevice => match group.map(Group::create_tone_player) {
-            Some(Ok(player)) => Opened {
+            Some(Ok(player)) => Ok(Opened {
                 backend: Backend::Engine(player),
                 format: Some(Format::ToneSequence),
                 content_type: Format::ToneSequence.content_type().to_owned(),
                 silenced: None,
-            },
-            _ => Opened::silent(
+            }),
+            Some(Err(error)) if error.is_size_limit() => Err(error),
+            _ => Ok(Opened::silent(
                 0,
                 Some(Format::ToneSequence),
                 Format::ToneSequence.content_type().to_owned(),
-            ),
+            )),
         },
-        Source::MidiDevice => Opened::silent(
+        Source::MidiDevice => Ok(Opened::silent(
             0,
             Some(Format::Midi),
             Format::Midi.content_type().to_owned(),
-        ),
+        )),
         Source::Data {
             format: None,
             declared,
             ..
-        } => Opened::silent(
+        } => Ok(Opened::silent(
             UNKNOWN_LENGTH_US,
             None,
             declared
                 .clone()
                 .filter(|t| !t.is_empty())
                 .unwrap_or_else(|| "application/octet-stream".to_owned()),
-        ),
+        )),
         Source::Data {
             bytes,
             format: Some(format),
@@ -185,36 +194,46 @@ fn open(source: &Source, group: Option<&Group>, probe: Option<&Group>) -> Opened
                 (Some(group), _) => group.create_player_as(bytes, *format),
                 (None, Some(probe)) => probe.create_player_as(bytes, *format),
                 (None, None) => {
-                    return Opened::silent(UNKNOWN_LENGTH_US, Some(*format), content_type);
+                    return Ok(Opened::silent(
+                        UNKNOWN_LENGTH_US,
+                        Some(*format),
+                        content_type,
+                    ));
                 }
             };
             match made {
-                Ok(player) if group.is_some() => Opened {
+                Ok(player) if group.is_some() => Ok(Opened {
                     backend: Backend::Engine(player),
                     format: Some(*format),
                     content_type,
                     silenced: None,
-                },
+                }),
                 Ok(player) => {
                     let duration = player.duration().unwrap_or(UNKNOWN_LENGTH_US);
-                    Opened::silent(duration, Some(*format), content_type)
+                    Ok(Opened::silent(duration, Some(*format), content_type))
                 }
                 // The group closed: the instance is ending, and silence is
                 // all it needs.
-                Err(fastemu_audio::AudioError::Closed) => {
-                    Opened::silent(UNKNOWN_LENGTH_US, Some(*format), content_type)
-                }
-                Err(error) => Opened {
+                Err(AudioError::Closed) => Ok(Opened::silent(
+                    UNKNOWN_LENGTH_US,
+                    Some(*format),
+                    content_type,
+                )),
+                Err(error) if error.is_size_limit() => Err(error),
+                Err(error) => Ok(Opened {
                     silenced: Some(format!("{} that does not decode ({error})", format.name())),
                     ..Opened::silent(UNKNOWN_LENGTH_US, Some(*format), content_type)
-                },
+                }),
             }
         }
     }
 }
 
 /// `realize`: decodes the sound with the VM lock released. Sound FastEmu
-/// cannot play becomes a silent player, never an exception.
+/// cannot play becomes a silent player, never an exception. Sound that is
+/// too large throws `MediaException`, and a game that holds all the sound
+/// it may, `OutOfMemoryError`; the player stays unrealized, with its
+/// bytes, so it can realize once the game has freed room.
 pub(crate) fn realize(ctx: &mut Ctx<'_>, this: ObjRef) -> JResult<()> {
     check_open(ctx, this)?;
     let player = data(ctx, this)?;
@@ -229,7 +248,11 @@ pub(crate) fn realize(ctx: &mut Ctx<'_>, this: ObjRef) -> JResult<()> {
         Some(_) => None,
         None => Some(events::probe(ctx)?),
     };
-    let opened = ctx.without_lock(|| open(&source, group.as_ref(), probe.as_ref()));
+    let opened = make_sound(ctx, || open(&source, group.as_ref(), probe.as_ref()));
+    let opened = match opened {
+        Ok(opened) => opened,
+        Err(error) => return throw_audio(ctx, error),
+    };
     let player = data(ctx, this)?;
     // Closed meanwhile, or realized by another thread: this sound goes.
     if player.closed || player.track.has_backend() {

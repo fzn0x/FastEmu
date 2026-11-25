@@ -33,6 +33,27 @@ pub fn classes() -> Vec<NativeClass> {
     classes
 }
 
+/// Makes a sound in the engine with the VM lock released: `make` decodes
+/// and adds a player to the instance's group.
+///
+/// A game that holds all the sound its group allows gets one collection
+/// and a second try before the engine's `OutOfMemory` reaches it. On a
+/// phone the collector freed the memory of players nobody referenced, and
+/// games rely on it: they make a player for each sound and never close
+/// it, and nothing on the Java heap grows enough to start a collection
+/// of its own. A game that really holds the sound is refused again.
+pub(crate) fn make_sound<R>(
+    ctx: &mut Ctx<'_>,
+    mut make: impl FnMut() -> Result<R, AudioError>,
+) -> Result<R, AudioError> {
+    let made = ctx.without_lock(&mut make);
+    if !matches!(made, Err(AudioError::OutOfMemory(_))) {
+        return made;
+    }
+    ctx.gc();
+    ctx.without_lock(&mut make)
+}
+
 /// Throws the Java exception JSR-135 names for an engine error:
 /// `MediaException` for media the engine cannot handle or that is too
 /// large, `IllegalArgumentException` for bad arguments and tone
