@@ -180,6 +180,16 @@ fn is_palette(body: &[u8]) -> bool {
     (3..=768).contains(&body.len()) && body.len().is_multiple_of(3)
 }
 
+/// The size an image file declares: its first IHDR, found as decoding
+/// finds it. `None` when there is none, it is cut short or the picture is
+/// empty.
+pub(super) fn probe(data: &[u8]) -> Option<(u32, u32)> {
+    let (_, header) = walk(data).find(|(kind, _)| kind == b"IHDR")?;
+    let field = |at: usize| Some(u32::from_be_bytes(header.get(at..at + 4)?.try_into().ok()?));
+    let (width, height) = (field(0)?, field(4)?);
+    (width > 0 && height > 0).then_some((width, height))
+}
+
 fn write_chunk(out: &mut Vec<u8>, kind: [u8; 4], body: &[u8]) -> Result<()> {
     let len = u32::try_from(body.len()).map_err(|_| GfxError::OutOfMemory)?;
     out.extend_from_slice(&len.to_be_bytes());

@@ -12,6 +12,7 @@ mod bmp;
 mod gif;
 mod jpeg;
 mod png;
+mod probe;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -48,6 +49,36 @@ impl ImageFormat {
         } else {
             None
         }
+    }
+}
+
+/// The size, in pixels, a PNG, GIF, BMP or JPEG file declares in its
+/// header, as `(width, height)`, found without decoding anything: a
+/// caller can weigh what the image will need before [`Surface::decode`]
+/// allocates it.
+///
+/// The size is the one the decoder goes by: a PNG's first IHDR chunk, a
+/// GIF's logical screen (or its first frame, when the screen is empty), a
+/// BMP's header without the sign of its height, and a JPEG's first frame
+/// header. `None` when the format is not one of these, the header is cut
+/// short or the picture is empty; decoding such a file fails too, apart
+/// from rare odd files, so `None` is no reason to refuse it. The size is
+/// only what the file claims: decoding stays within its own limits
+/// (16 384 pixels a side and [`MAX_PIXELS`] in all) whatever it says.
+///
+/// ```
+/// use fastemu_gfx::probe_size;
+///
+/// let gif = b"GIF89a\x10\x00\x20\x00\x00\x00\x00";
+/// assert_eq!(probe_size(gif), Some((16, 32)));
+/// assert_eq!(probe_size(b"not an image"), None);
+/// ```
+pub fn probe_size(data: &[u8]) -> Option<(u32, u32)> {
+    match ImageFormat::sniff(data)? {
+        ImageFormat::Png => png::probe(data),
+        ImageFormat::Jpeg => probe::jpeg(data),
+        ImageFormat::Gif => probe::gif(data),
+        ImageFormat::Bmp => probe::bmp(data),
     }
 }
 
@@ -160,5 +191,165 @@ mod tests {
             guarded(|| -> Result<u8> { Err(GfxError::OutOfMemory) }),
             Err(GfxError::OutOfMemory)
         );
+    }
+
+    /// A BMP with a 40-byte header and no pixel rows.
+    fn bmp_header(width: i32, height: i32) -> Vec<u8> {
+        let mut out = b"BM".to_vec();
+        out.extend_from_slice(&[0; 8]);
+        out.extend_from_slice(&54_u32.to_le_bytes());
+        out.extend_from_slice(&40_u32.to_le_bytes());
+        out.extend_from_slice(&width.to_le_bytes());
+        out.extend_from_slice(&height.to_le_bytes());
+        out.extend_from_slice(&1_u16.to_le_bytes());
+        out.extend_from_slice(&24_u16.to_le_bytes());
+        out.extend_from_slice(&[0; 24]);
+        out
+    }
+
+    /// A GIF whose first frame, 2 by 2 pixels, sits one column in on a
+    /// screen of 3 by 2.
+    fn gif_file() -> Vec<u8> {
+        let mut out = Vec::new();
+        {
+            let mut encoder = ::gif::Encoder::new(&mut out, 3, 2, &[1, 2, 3, 4, 5, 6]).unwrap();
+            let mut frame = ::gif::Frame::from_indexed_pixels(2, 2, vec![0, 1, 1, 0], None);
+            frame.left = 1;
+            encoder.write_frame(&frame).unwrap();
+        }
+        out
+    }
+
+    fn jpeg_file() -> Vec<u8> {
+        let mut out = Vec::new();
+        let encoder = jpeg_encoder::Encoder::new(&mut out, 90);
+        encoder
+            .encode(&[200; 5 * 3 * 3], 5, 3, jpeg_encoder::ColorType::Rgb)
+            .unwrap();
+        out
+    }
+
+    fn png_file() -> Vec<u8> {
+        png::tests::encode(
+            3,
+            4,
+            ::png::ColorType::Rgb,
+            ::png::BitDepth::Eight,
+            &[9; 36],
+            None,
+            None,
+        )
+    }
+
+    /// The size `probe_size` reads is the size the decoder makes.
+    fn assert_probe_matches_decode(file: &[u8], size: (u32, u32)) {
+        let image = Surface::decode(file).unwrap();
+        assert_eq!((image.width(), image.height()), size);
+        assert_eq!(probe_size(file), Some(size));
+    }
+
+    #[test]
+    fn probe_size_reads_every_format() {
+        assert_probe_matches_decode(&png_file(), (3, 4));
+        assert_probe_matches_decode(&gif_file(), (3, 2));
+        assert_probe_matches_decode(&jpeg_file(), (5, 3));
+        assert_probe_matches_decode(&bmp_header(6, 2), (6, 2));
+        // A negative height only turns the rows over.
+        assert_probe_matches_decode(&bmp_header(6, -2), (6, 2));
+    }
+
+    #[test]
+    fn probe_size_follows_the_decoders_own_rules() {
+        // A PNG counts its first IHDR, even behind another chunk.
+        let png = png_file();
+        let mut behind = png[..8].to_vec();
+        behind.extend_from_slice(&[0, 0, 0, 2, b't', b'E', b'X', b't', 1, 2, 0, 0, 0, 0]);
+        behind.extend_from_slice(&png[8..]);
+        assert_eq!(probe_size(&behind), Some((3, 4)));
+        // A GIF with an empty screen is as large as its first frame
+        // reaches.
+        let mut gif = gif_file();
+        gif[6..10].fill(0);
+        assert_probe_matches_decode(&gif, (3, 2));
+        // The old OS/2 BMP header is 12 bytes with 16-bit sizes.
+        let mut os2 = b"BM".to_vec();
+        os2.extend_from_slice(&[0; 8]);
+        os2.extend_from_slice(&26_u32.to_le_bytes());
+        os2.extend_from_slice(&12_u32.to_le_bytes());
+        os2.extend_from_slice(&[5, 0, 0xF9, 0xFF, 1, 0, 24, 0]);
+        assert_probe_matches_decode(&os2, (5, 7));
+        // A JPEG's fill bytes and the segments before the frame header
+        // do not matter, and the frame header is found by its length
+        // fields: a SOF0 inside an APP1 segment is no frame.
+        let jpeg = jpeg_file();
+        let at = jpeg.windows(2).position(|w| w == [0xFF, 0xC0]).unwrap();
+        let mut padded = jpeg[..at].to_vec();
+        padded.extend_from_slice(&[0xFF, 0xFF, 0xFF]);
+        padded.extend_from_slice(&jpeg[at..]);
+        assert_probe_matches_decode(&padded, (5, 3));
+        let mut exif = jpeg[..2].to_vec();
+        exif.extend_from_slice(&[0xFF, 0xE1, 0, 10, 0xFF, 0xC0, 0, 0x11, 8, 0xFF, 0xFF, 0xFF]);
+        exif.extend_from_slice(&jpeg[2..]);
+        assert_eq!(probe_size(&exif), Some((5, 3)));
+    }
+
+    #[test]
+    fn probe_size_gives_up_on_what_it_cannot_read() {
+        assert_eq!(probe_size(b""), None);
+        assert_eq!(probe_size(b"not an image at all"), None);
+        // Cut short, or no size to read.
+        let png = png_file();
+        assert_eq!(probe_size(&png[..8]), None);
+        assert_eq!(probe_size(&png[..20]), None);
+        let mut empty = png.clone();
+        empty[16..20].fill(0);
+        assert_eq!(probe_size(&empty), None);
+        assert_eq!(probe_size(&gif_file()[..8]), None);
+        assert_eq!(probe_size(&jpeg_file()[..12]), None);
+        assert_eq!(probe_size(&[0xFF, 0xD8, 0xFF]), None);
+        assert_eq!(probe_size(&bmp_header(0, 4)), None);
+        assert_eq!(probe_size(&bmp_header(4, 0)), None);
+        assert_eq!(probe_size(&bmp_header(-4, 4)), None);
+        assert_eq!(probe_size(&bmp_header(4, 4)[..20]), None);
+        let mut odd_header = bmp_header(4, 4);
+        odd_header[14..18].copy_from_slice(&20_u32.to_le_bytes());
+        assert_eq!(probe_size(&odd_header), None);
+        // A JPEG that starts its image data before any frame header.
+        let mut no_frame = vec![0xFF, 0xD8, 0xFF, 0xDA, 0, 4, 0, 0];
+        assert_eq!(probe_size(&no_frame), None);
+        no_frame.truncate(2);
+        assert_eq!(probe_size(&no_frame), None);
+    }
+
+    #[test]
+    fn probe_size_survives_damaged_headers() {
+        let files = [png_file(), gif_file(), jpeg_file(), bmp_header(6, 2)];
+        for file in &files {
+            let head = file.len().min(80);
+            for len in 0..=head {
+                let _ = probe_size(&file[..len]);
+            }
+            for at in 0..head {
+                for byte in [0x00, 0x01, 0x7F, 0x80, 0xFF] {
+                    let mut damaged = file.clone();
+                    damaged[at] = byte;
+                    let _ = probe_size(&damaged);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn probe_size_reports_what_the_file_claims() {
+        // Far more than a decoder accepts: the caller sees the claim and
+        // the decoder refuses it.
+        let mut huge = png_file();
+        huge[16..24].copy_from_slice(&[0, 0, 0x40, 0, 0, 0, 0x20, 0]);
+        assert_eq!(probe_size(&huge), Some((16384, 8192)));
+        let mut wide = bmp_header(0x7FFF_FFFF, i32::MIN + 1);
+        assert_eq!(probe_size(&wide), Some((0x7FFF_FFFF, 0x7FFF_FFFF)));
+        wide[22..26].copy_from_slice(&i32::MIN.to_le_bytes());
+        assert_eq!(probe_size(&wide), Some((0x7FFF_FFFF, 0x8000_0000)));
+        assert_eq!(Surface::decode(&wide), Err(GfxError::OutOfMemory));
     }
 }
