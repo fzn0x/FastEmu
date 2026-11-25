@@ -1172,5 +1172,37 @@ mod tests {
             // at the cheap sound's cost, it would have played.
             assert_eq!(frame(&engine, heavy), at);
         }
+
+        #[test]
+        fn a_sound_never_measured_counts_at_the_dearest_of_its_game() {
+            // The part and the sounds of the test above.
+            let (engine, clock) = engine_with(Some(RenderBudget {
+                share: 0.275,
+                burst: Duration::from_millis(20),
+            }));
+            let group = engine.create_group();
+            costly(&engine, &group, &clock, 0, 1, 0.01);
+            let heavy = costly(&engine, &group, &clock, 1, 25, 0.01);
+            slices(&engine, 100);
+            // A cheap sound starts, then the heavy one starts again behind
+            // it, with no credit left to let either in past the part.
+            let fresh = costly(&engine, &group, &clock, 2, 1, 0.01);
+            {
+                let mut mixer = engine.lock();
+                let order = mixer.next_start_order();
+                let voice = &mut mixer.slots.get_mut(&heavy).unwrap().voice;
+                voice.state = PlayerState::Prefetched;
+                voice.start();
+                voice.start_order = order;
+                mixer.credits.insert(group.id(), 0);
+            }
+            let at = frame(&engine, fresh);
+            slices(&engine, 1);
+            // Never measured, it counts at the heavy sound's cost, though
+            // that one comes after it, and waits. Counted at the dearest of
+            // the sounds before it, the oldest and cheap one, it would have
+            // played.
+            assert_eq!(frame(&engine, fresh), at);
+        }
     }
 }
