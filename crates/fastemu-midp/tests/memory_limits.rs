@@ -26,11 +26,13 @@ const MANIFEST: &str = "Manifest-Version: 1.0\r\n\
 MIDlet-Name: Memory\r\n\
 MIDlet-Vendor: FastEmu\r\n\
 MIDlet-Version: 1.0\r\n\
-MIDlet-1: BigImage, , m.BigImage\r\n";
+MIDlet-1: BigImage, , m.BigImage\r\n\
+MIDlet-2: ImageFile, , m.ImageFile\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 mod midlet {
     pub const BIG_IMAGE: usize = 0;
+    pub const IMAGE_FILE: usize = 1;
 }
 
 /// The MIDlets, compiled once against the shared stubs and this test's
@@ -119,8 +121,49 @@ fn launch(jar: &Path, midlet: usize, heap: u64) -> Running {
     Running::launch_on(jar, midlet, profile)
 }
 
-/// The numbers after `prefix` in the first printed line that starts with
-/// it.
+/// A PNG whose header declares `width` by `height` pixels and whose data
+/// is one row: a few hundred bytes for an image the decoder would give
+/// 128 MiB.
+fn declared_png(width: u32, height: u32) -> Vec<u8> {
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut chunk = |kind: &[u8], data: &[u8]| {
+        png.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        let mut body = kind.to_vec();
+        body.extend_from_slice(data);
+        png.extend_from_slice(&body);
+        png.extend_from_slice(&crc32fast::hash(&body).to_be_bytes());
+    };
+    let mut header = Vec::new();
+    header.extend_from_slice(&width.to_be_bytes());
+    header.extend_from_slice(&height.to_be_bytes());
+    header.extend_from_slice(&[8, 2, 0, 0, 0]);
+    chunk(b"IHDR", &header);
+    let row = vec![0; 1 + 3 * width as usize];
+    chunk(
+        b"IDAT",
+        &miniz_oxide::deflate::compress_to_vec_zlib(&row, 6),
+    );
+    chunk(b"IEND", &[]);
+    png
+}
+
+/// A BMP of 54 bytes, a header and no pixels, that declares `width` by
+/// `height` pixels of 24 bits.
+fn declared_bmp(width: i32, height: i32) -> Vec<u8> {
+    let mut bmp = b"BM".to_vec();
+    bmp.extend_from_slice(&54_u32.to_le_bytes());
+    bmp.extend_from_slice(&[0; 4]);
+    bmp.extend_from_slice(&54_u32.to_le_bytes());
+    bmp.extend_from_slice(&40_u32.to_le_bytes());
+    bmp.extend_from_slice(&width.to_le_bytes());
+    bmp.extend_from_slice(&height.to_le_bytes());
+    bmp.extend_from_slice(&1_u16.to_le_bytes());
+    bmp.extend_from_slice(&24_u16.to_le_bytes());
+    bmp.extend_from_slice(&[0; 24]);
+    bmp
+}
+
+/// The numbers after `prefix` in `line`, which starts with it.
 fn numbers(line: &str, prefix: &str) -> Vec<i64> {
     line[prefix.len()..]
         .split(|c: char| !c.is_ascii_digit() && c != '-')
@@ -169,4 +212,34 @@ fn images_kept_in_a_list_end_in_out_of_memory_at_the_heap() {
         run.dump()
     );
     run.wait_log("done ");
+}
+
+#[test]
+fn a_file_that_declares_more_pixels_than_the_heap_holds_is_refused_before_it_is_decoded() {
+    let png = declared_png(16384, 2048);
+    let bmp = declared_bmp(16384, 2048);
+    assert_eq!(fastemu_gfx::probe_size(&png), Some((16384, 2048)));
+    assert_eq!(fastemu_gfx::probe_size(&bmp), Some((16384, 2048)));
+    let resources = [
+        ("bomb.png", png),
+        ("bomb.bmp", bmp),
+        ("dot.png", support::test_png()),
+    ];
+    let Some(jar) = suite("image-file", &resources) else {
+        return;
+    };
+    let mut run = launch(&jar, midlet::IMAGE_FILE, HEAP);
+    run.wait_log("done");
+    let log = run.dump();
+    for file in ["/bomb.png", "/bomb.bmp"] {
+        for how in ["by name", "by bytes", "by stream"] {
+            let line = format!("{file} {how} OutOfMemoryError");
+            assert!(run.has(&line), "no {line:?}; the log:\n{log}");
+        }
+    }
+    // A real image still loads, the three ways.
+    for how in ["by name", "by bytes", "by stream"] {
+        let line = format!("/dot.png {how} ok 2x2");
+        assert!(run.has(&line), "no {line:?}; the log:\n{log}");
+    }
 }
