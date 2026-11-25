@@ -259,6 +259,11 @@ section says is in scope.
 - The heap counts memory the way a phone does. A game made of very many
   tiny objects uses several times its heap limit in real memory, about
   ten times in a test with many small timer tasks.
+- Each object a thread holds locked also takes an entry outside the heap,
+  so a game that locks very many small objects at once uses more real
+  memory than the ten times above.
+- `String.intern` keeps a second copy of each interned string outside the
+  heap, up to about the heap's size again.
 - A call into the runtime is judged after it returns. It can take the
   heap past its limit for a moment, and its change stays: a
   `List.append` past the heap adds the element, then throws
@@ -303,11 +308,9 @@ section says is in scope.
 - A `Timer` keeps its thread until `cancel()`, as in Java. A game that
   never cancels its timers gets `OutOfMemoryError` after about 62 of
   them.
-- Past 8 pause and resume calls waiting or running, besides the first
-  `startApp`, later `pauseApp` and `startApp` calls are dropped; the game
-  still pauses and resumes. Only a lifecycle call that does not return,
-  such as a `startApp` that runs the game's loop, or a very slow one,
-  lets that many pile up.
+- Only a lifecycle call that does not return, such as a `startApp` that
+  runs the game's loop, or a very slow one, lets 8 pause and resume
+  calls wait.
 - A game that calls `notifyPaused` and `resumeRequest` in a tight loop
   queues requests for the app faster than the app handles them, and
   nothing bounds that queue, so the memory of the app grows while the
@@ -385,7 +388,8 @@ section says is in scope.
 **Links and the apps**
 
 - Links to `localhost`, private addresses and downloads other than a
-  `.jad` or `.jar` are still offered. You read the whole link before you choose **Open**.
+  `.jad` or `.jar` are still offered. You read the whole link before you
+  choose **Open**.
 - The 500 ms in which a link prompt ignores clicks starts when the
   app takes the request, not when a tile in the focus layout comes
   forward.
