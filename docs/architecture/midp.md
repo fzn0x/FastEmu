@@ -177,6 +177,14 @@ the runnables already queued still run. Games queue a handful.
 - **Back buffer.** Every displayable has a screen-sized buffer
   (`canvas::buffer`), made on first use and kept between paints, since
   games repaint only what changed. A canvas paints at the top left of it.
+  The heap counts the buffer with the displayable, 4 bytes a pixel, from
+  the moment it is made: 307 KB at 240 by 320. It is counted and not
+  refused, because it is made on the event thread, where an
+  `OutOfMemoryError` has no game to go to; a game that keeps many shown
+  canvases fills the heap and its next allocation fails. A screen that is
+  no longer shown gives its buffer back and makes a new one when it is
+  shown again, since it paints all of its content each time. A canvas
+  keeps its buffer and its `Graphics`, which a game may hold on to.
 - **Repaint.** `repaint(x, y, w, h)` on a shown canvas grows one dirty
   rectangle (clamped to the canvas); requests for a canvas that is not
   shown are dropped. The event thread resets the canvas's `Graphics`
@@ -520,8 +528,11 @@ changes one of these calls `highlevel::wake_timer`.
   a tap; `DateField` shows `dd/mm/yyyy hh:mm` in its time zone's raw
   offset, left and right pick a part, digits type it and select sets an
   empty field to now; `Spacer` is empty space. A `CustomItem` paints in
-  `prepare` into a surface of its content size through a `Graphics` it
-  keeps; its key callbacks get every key but the up and down arrows,
+  `prepare` into a surface of its content size, which can reach 240 by
+  8192 pixels, through a `Graphics` it keeps. The surface is checked
+  against the heap before it is made and counted with the item. One the
+  heap cannot hold leaves the item blank, with a warning once. Its key
+  callbacks get every key but the up and down arrows,
   which are traversal, and `showNotify` and `hideNotify` follow the
   form's.
 - **Alerts.** An `Alert` centres its image or its type's icon, its text
@@ -609,7 +620,16 @@ sequence, the transform, the reference pixel, the collision rectangle),
   tiles when the new set has at least as many tiles, and otherwise
   empties every cell and deletes the animated tiles. A grid of more than
   2^24 cells is the `OutOfMemoryError` a phone would throw, and one wider
-  or taller than an `int` is `IllegalArgumentException`.
+  or taller than an `int` is `IllegalArgumentException`. The grid is 4
+  bytes a cell. The constructor asks the heap for it before it makes the
+  grid and counts it after, so a layer larger than the heap, or one more
+  than the heap holds, is an `OutOfMemoryError` and a game that keeps
+  layers in a list ends in one. A layer holds at most 32767 animated
+  tiles, as the Siemens layer does; `createAnimatedTile` past that throws
+  `OutOfMemoryError`. Each animated tile is counted when it is made, as it
+  makes no Java object. A `Sprite` counts its frame sequence the same way,
+  and a snapshot of a mutable image that a sprite, a screen or an item
+  keeps is checked against the heap before the copy is made.
 - **LayerManager.** It keeps its layers in a traced payload, index 0 on
   top. `append` and `insert` move a layer already present; `insert`
   checks its index against the other layers' count, as J2ME Loader does.
