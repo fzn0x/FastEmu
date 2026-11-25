@@ -30,8 +30,10 @@ pub struct VmLimits {
     /// machine reports; after that it says once that it stops. Enforced
     /// by #30.
     pub max_reported: usize,
-    /// Tasks posted to the machine and not yet run (`Display.callSerially`
-    /// and `Vm::post`); later ones are dropped. Enforced by #30.
+    /// Tasks posted to the machine and not yet run: `Vm::post` and
+    /// `Ctx::post` drop later ones and log a warning once, and MIDP's
+    /// `Display.callSerially` throws `OutOfMemoryError` past it. Enforced
+    /// by #30.
     pub max_posted: usize,
 }
 
