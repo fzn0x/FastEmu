@@ -58,8 +58,8 @@ The bench counts the processor time of every thread, so that cost shows.
 
   `microemulator.jar` alone lacks the Nokia classes that some games
   need, since its manifest names no other jar. MeBench keeps saves in
-  files, as FastEmu does, where MicroEmulator's headless runner keeps
-  them in memory, in a home folder of its own for each process.
+  files, as FastEmu does, in a home folder of its own for each process.
+  MicroEmulator's own headless runner keeps them in memory.
 - MicroEmulator's development snapshot on GitHub was not measured, only
   the 2.0.4 release.
 
