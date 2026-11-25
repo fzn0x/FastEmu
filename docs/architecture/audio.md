@@ -69,6 +69,20 @@ A seek in a MIDI file replays the controllers before the new position. It
 is up to 65536 events under the lock, about a millisecond. That stays a
 known limit, and the fair lock keeps it from starving anyone.
 
+A group's volume is the one value outside the lock. `Group::set_volume`
+stores it in an atomic that the group's handles share with the mixer,
+and the mix reads it for every slice. The app sets a game's volume from
+its UI thread, and mutes a game by setting its volume to 0, so that call
+never waits for the audio thread or for a game's player calls. The mix
+takes up a new volume at its next slice, and each voice slides to it
+over 3 ms like any gain change, so it does not click. A player's own
+level, `VolumeControl.setLevel`, stays under the lock: it comes from the
+game's threads, which wait for the mixer in every player call anyway,
+and its `VolumeChanged` event keeps its order among the player's other
+events. `Group::set_muted`, `Group::set_paused` and
+`Engine::set_master_volume` stay under the lock too; the app does not
+call them from its UI thread.
+
 [SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists the
 limits of sound with every other limit a game meets, and its
 [known limits](../../SECURITY.md#known-limits) say what this lock still
