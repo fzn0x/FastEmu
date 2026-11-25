@@ -856,11 +856,14 @@ hook.
 The estimate is not exact. Methods that all have names of their own fill
 the table of selectors fastest, and a set of classes of 60000 such
 methods each held about a fifth more than the estimate says. The static
-fields of all classes share one list, which doubles as it grows: classes
-of 65535 static fields each kept 3% more than the limit. A method's line
-numbers and the name of a class's source file take exactly what they are
-counted at. Kept in a list that doubled as it grew, and in a copy of the
-name, they held up to twice that.
+values of all classes share one list, which doubles as it grows. It can
+hold twice the 16 bytes a value is counted at, and while it grows, the
+old list too. A set of classes of 65535 static fields each kept 3% more
+than the limit. When the list had just doubled and classes of instance
+fields filled the rest, they kept 9% more, and 15% more for a moment. A
+method's line numbers and the name of a class's source file take exactly
+what they are counted at. Kept in a list that doubled as it grew, and in
+a copy of the name, they held up to twice that.
 
 By this model the JARs of the test game folder cost 3 KB to 29 MiB. The
 largest game (327 classes) costs 7.3 MiB. The 29 MiB is a desktop library
