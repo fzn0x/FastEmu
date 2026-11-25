@@ -445,6 +445,43 @@ mod tests {
     }
 
     #[test]
+    fn a_plan_names_the_bytes_of_the_grid_before_it_is_made() {
+        let plan = TiledLayer::plan(300, 200, 4, 2, 2, 1).unwrap();
+        assert_eq!(plan.heap_bytes(), 300 * 200 * 4);
+        assert_eq!(TiledLayer::from_plan(plan).heap_bytes(), 300 * 200 * 4);
+        let iae = |r: Result<Plan, GameError>| matches!(r, Err(GameError::IllegalArgument(_)));
+        assert!(iae(TiledLayer::plan(0, 1, 4, 2, 2, 1)));
+        assert!(iae(TiledLayer::plan(1, 1, 4, 2, 3, 1)));
+        // 64 MiB is the most a grid may be, whatever the heap says.
+        assert_eq!(
+            TiledLayer::plan(1 << 13, 1 << 13, 4, 2, 2, 1).unwrap_err(),
+            GameError::OutOfMemory
+        );
+        assert_eq!(
+            TiledLayer::plan(1 << 12, 1 << 12, 4, 2, 2, 1)
+                .unwrap()
+                .heap_bytes(),
+            64 << 20
+        );
+    }
+
+    #[test]
+    fn animated_tiles_stop_at_the_most_a_layer_may_have() {
+        let mut t = layer();
+        for k in 1..=MAX_ANIMATED_TILES {
+            assert_eq!(t.create_animated_tile(1), Ok(-(k as i32)));
+        }
+        assert_eq!(t.create_animated_tile(1), Err(GameError::OutOfMemory));
+        assert_eq!(t.heap_bytes(), (5 * 3 + MAX_ANIMATED_TILES) * 4);
+        // The last one still works, and the error left the layer as it was.
+        assert_eq!(t.animated_tile(-(MAX_ANIMATED_TILES as i32)), Ok(1));
+        assert_eq!(
+            t.animated_tile(-(MAX_ANIMATED_TILES as i32) - 1),
+            Err(GameError::IndexOutOfBounds("invalid animated tile index"))
+        );
+    }
+
+    #[test]
     fn cells_take_static_and_animated_tiles() {
         let mut t = layer();
         t.set_cell(4, 2, 4).unwrap();
