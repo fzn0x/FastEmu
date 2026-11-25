@@ -278,17 +278,29 @@ impl ClassTable {
         let object = Arc::clone(self.get(object));
         // The array of the innermost dimension is `name[dims - 1..]`, and
         // each dimension out from it adds one `[` in front.
-        let mut class = self.make_array(&name[dims - 1..], kind, &object);
+        let mut class = self.make_array(&name[dims - 1..], kind, &object)?;
         for start in (0..dims - 1).rev() {
-            class = self.make_array(&name[start..], ClassKind::RefArray(class), &object);
+            class = self.make_array(&name[start..], ClassKind::RefArray(class), &object)?;
         }
         Ok(class)
     }
 
     /// The array class `name` of `kind`, made if it is not there yet.
-    fn make_array(&mut self, name: &str, kind: ClassKind, object: &Arc<Class>) -> ClassId {
+    ///
+    /// A game can ask for 255 array classes of every class there is, so
+    /// they count against the class memory limit, except the arrays of
+    /// primitives, which are eight and which `prim_array` counts on.
+    fn make_array(
+        &mut self,
+        name: &str,
+        kind: ClassKind,
+        object: &Arc<Class>,
+    ) -> Result<ClassId, LoadError> {
         if let Some(id) = self.lookup(name) {
-            return id;
+            return Ok(id);
+        }
+        if !matches!(kind, ClassKind::PrimArray(_)) {
+            self.budget.charge(Self::array_class_bytes(name, object))?;
         }
         let id = self.next_id();
         let class = Class {
@@ -309,7 +321,7 @@ impl ClassTable {
             payload: None,
             array_type: std::sync::OnceLock::new(),
         };
-        self.insert(class, true)
+        Ok(self.insert(class, true))
     }
 
     /// The class of arrays whose elements are `component`.
@@ -787,5 +799,36 @@ mod tests {
         let def = super::super::link::from_class_file(class_file("a/Good", 100, "()V")).unwrap();
         t.define(def).unwrap();
         assert_eq!(t.statics.len(), statics + 100);
+    }
+
+    #[test]
+    fn array_classes_count_against_the_class_memory_and_primitive_arrays_do_not() {
+        let natives = vec![
+            NativeClass::new("java/lang/Object"),
+            NativeClass::new("a/A"),
+        ];
+        // An array class takes about 530 bytes: three fit.
+        let mut t = ClassTable::new(Arc::new(MemorySource::new()), natives, 2000);
+        for dims in 1..=3 {
+            t.load(&format!("{}La/A;", "[".repeat(dims))).unwrap();
+        }
+        let used = t.budget.used;
+        assert!((1500..=2000).contains(&used), "{used}");
+        let err = t.load("[[[[La/A;").unwrap_err();
+        assert_eq!(err.exception, "java/lang/OutOfMemoryError");
+        assert_eq!(err.message, "class memory limit reached");
+        // A refusal makes no class and takes nothing; what exists loads.
+        assert_eq!(t.budget.used, used);
+        assert!(t.lookup("[[[[La/A;").is_none());
+        assert!(t.load("[[La/A;").is_ok());
+        // The arrays of primitives are not counted: `prim_array` has no
+        // way to fail, and a game can fill the limit and then need one.
+        let before = t.budget.used;
+        for t_ in [ArrayType::Int, ArrayType::Double, ArrayType::Byte] {
+            t.prim_array(t_);
+        }
+        assert!(t.load("[J").is_ok());
+        assert_eq!(t.budget.used, before);
+        assert!(t.load("[[J").is_err());
     }
 }

@@ -110,6 +110,16 @@ fn is_virtual(flags: u16, name: &str) -> bool {
 }
 
 impl ClassTable {
+    /// Bytes charged for the array class `name`, which copies the method
+    /// table of its superclass `object`.
+    pub(super) fn array_class_bytes(name: &str, object: &Class) -> usize {
+        let mut sum = Sum::default();
+        sum.add(1, CLASS + name.len());
+        sum.add(2, CLASS_ID);
+        sum.add(object.vtable.len(), VTABLE_ENTRY);
+        sum.0
+    }
+
     /// The most bytes the class `def` holds once linked, given the
     /// classes it extends and implements (`all_interfaces`, sorted) and
     /// the number of its superclasses with itself (`supers`).
