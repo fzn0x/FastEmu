@@ -228,8 +228,10 @@ the machine has `max_threads` plus 16 threads, so a game that has used up
 its share cannot keep the app from starting the event thread, a lifecycle
 thread or the media thread. A `Timer`'s thread lives until `cancel()`, as
 in Java, so a game that makes a `Timer` for each screen and never cancels
-one gets the error after 64. A thread's stack holds at most 2 MiB (see
-[Limits](#limits)), so 64 threads hold 128 MiB at worst. The OS name of a
+one gets the error once the machine has 64 threads: after about 62
+timers, beside the event thread and a lifecycle thread. A thread's stack
+holds at most 2 MiB (see [Limits](#limits)), so 64 threads hold 128 MiB
+at worst, and the 80 the host may reach hold 160 MiB. The OS name of a
 thread is `java ` and Java's name without control characters, cut to 32
 characters, since `std` panics on a NUL; the Java name stays as given.
 
