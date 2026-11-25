@@ -81,6 +81,8 @@ pub fn cut_log_text(mut text: String, max_bytes: usize) -> String {
     if marker {
         let _ = write!(text, " ... ({more} more characters)");
     }
+    // A queue of cut lines must not hold on to the room of the long ones.
+    text.shrink_to_fit();
     text
 }
 
@@ -102,6 +104,7 @@ mod tests {
         assert!(cut.len() <= 4096);
         assert!(cut.ends_with(marker), "{cut:?}");
         assert!(cut.starts_with("xxxx"));
+        assert!(cut.capacity() < 2 * 4096, "{} bytes held", cut.capacity());
     }
 
     #[test]
