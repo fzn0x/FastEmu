@@ -8,7 +8,6 @@
 //! read/write pointer and an address, read and written through
 //! `DataInput` and `DataOutput`.
 
-use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
 
@@ -275,7 +274,7 @@ fn receive(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let mut buf = vec![0; MAX_LENGTH as usize];
     let (n, from) = net::block_on(ctx, deadline, || {
         if shared.socket().is_none() {
-            return Err(io::Error::other("connection is closed"));
+            return Err(net::failure("connection is closed"));
         }
         net::again(socket.recv_from(&mut buf))
     })?;

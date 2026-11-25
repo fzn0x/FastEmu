@@ -169,7 +169,7 @@ impl Input for SocketInput {
         let link = &self.shared.link;
         net::block_on(ctx, net::deadline(self.shared.timeout()), || {
             if self.closed.load(Ordering::Acquire) {
-                return Err(io::Error::other("stream closed"));
+                return Err(net::failure("stream closed"));
             }
             net::again(link.read(buf))
         })
@@ -496,7 +496,7 @@ fn accept(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<ObjRef> {
         // only as long as one accept call takes.
         let accepted = match &*lock(&shared.listener) {
             Some(listener) => listener.accept(),
-            None => return Err(io::Error::other("connection is closed")),
+            None => return Err(net::failure("connection is closed")),
         };
         match accepted {
             Ok((socket, _)) => Ok(Some(socket)),

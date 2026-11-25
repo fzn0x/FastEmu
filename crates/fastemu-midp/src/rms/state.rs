@@ -351,22 +351,28 @@ pub(crate) fn delete(ctx: &mut Ctx<'_>, key: &StoreKey) -> JResult<bool> {
     }
 }
 
-/// Logs a failed file operation with its path and returns the exception
-/// for the game, which names no host path: `RecordStoreFullException` for
-/// a full disk, `RecordStoreException` otherwise.
+/// Logs a failed file operation with its path and the system's text, and
+/// returns the exception for the game, which reads a fixed text for the
+/// kind of error and no host path or system text:
+/// `RecordStoreFullException` for a full disk, `RecordStoreException`
+/// otherwise.
 fn io_failure(ctx: &mut Ctx<'_>, what: &str, path: &Path, e: &io::Error) -> Throw {
     ctx.log(
         LogLevel::Warn,
         format!("RMS: could not {what} {}: {e}", path.display()),
     );
-    let class = if e.kind() == io::ErrorKind::StorageFull {
-        RECORD_STORE_FULL_EXCEPTION
-    } else {
-        RECORD_STORE_EXCEPTION
+    let (class, reason) = match e.kind() {
+        io::ErrorKind::StorageFull => (RECORD_STORE_FULL_EXCEPTION, "the disk is full"),
+        io::ErrorKind::PermissionDenied => (RECORD_STORE_EXCEPTION, "permission denied"),
+        io::ErrorKind::NotFound => (RECORD_STORE_EXCEPTION, "the file is missing"),
+        io::ErrorKind::ReadOnlyFilesystem => (RECORD_STORE_EXCEPTION, "the disk is read only"),
+        _ => (RECORD_STORE_EXCEPTION, "I/O error"),
     };
     ctx.new_exception(
         class,
-        Some(&format!("the record store file could not be used: {e}")),
+        Some(&format!(
+            "the record store file could not be used: {reason}"
+        )),
     )
 }
 

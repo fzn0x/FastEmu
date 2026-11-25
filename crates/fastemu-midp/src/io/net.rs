@@ -279,26 +279,45 @@ pub(crate) fn interrupted(ctx: &mut Ctx<'_>, message: &str) -> Throw {
     ctx.new_exception("java/io/InterruptedIOException", Some(message))
 }
 
+/// An error whose text FastEmu wrote for the game to read: the failures
+/// of the HTTP wire format, a closed stream. [`io_exception`] passes the
+/// text on, which it does for no error that came from the system.
+pub(crate) fn failure(message: impl Into<String>) -> io::Error {
+    io::Error::other(message.into())
+}
+
 /// The Java exception for an I/O error: `InterruptedIOException` for a
-/// timeout, `IOException` with a short message otherwise. The operating
-/// system's own text differs between hosts and leaks them, so the common
-/// kinds get fixed messages.
+/// timeout, `IOException` with a short message otherwise.
+///
+/// The operating system's own text differs between hosts, is in the
+/// host's language and can name its paths, so the game never reads it.
+/// The common kinds get fixed messages, an error made by [`failure`] or
+/// by the TLS library keeps its text, and any other kind is "I/O error".
 pub(crate) fn io_exception(ctx: &mut Ctx<'_>, e: &io::Error) -> Throw {
     let message = match e.kind() {
         io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => {
             return interrupted(ctx, "timed out");
         }
-        io::ErrorKind::ConnectionRefused => "connection refused".to_owned(),
-        io::ErrorKind::ConnectionReset => "connection reset by the peer".to_owned(),
-        io::ErrorKind::ConnectionAborted => "connection aborted".to_owned(),
-        io::ErrorKind::BrokenPipe => "connection closed by the peer".to_owned(),
-        io::ErrorKind::NotConnected => "not connected".to_owned(),
-        io::ErrorKind::AddrInUse => "address already in use".to_owned(),
-        io::ErrorKind::AddrNotAvailable => "address not available".to_owned(),
-        io::ErrorKind::UnexpectedEof => "unexpected end of stream".to_owned(),
-        _ => e.to_string(),
+        io::ErrorKind::ConnectionRefused => "connection refused",
+        io::ErrorKind::ConnectionReset => "connection reset by the peer",
+        io::ErrorKind::ConnectionAborted => "connection aborted",
+        io::ErrorKind::BrokenPipe => "connection closed by the peer",
+        io::ErrorKind::NotConnected => "not connected",
+        io::ErrorKind::AddrInUse => "address already in use",
+        io::ErrorKind::AddrNotAvailable => "address not available",
+        io::ErrorKind::UnexpectedEof => "unexpected end of stream",
+        io::ErrorKind::PermissionDenied => "permission denied",
+        io::ErrorKind::HostUnreachable
+        | io::ErrorKind::NetworkUnreachable
+        | io::ErrorKind::NetworkDown => "network unreachable",
+        // Only an error made from a text has one to give; a system error
+        // has a code and no text of its own.
+        _ if e.get_ref().is_some() => {
+            return ctx.new_exception("java/io/IOException", Some(&e.to_string()));
+        }
+        _ => "I/O error",
     };
-    ctx.new_exception("java/io/IOException", Some(&message))
+    ctx.new_exception("java/io/IOException", Some(message))
 }
 
 /// Runs `work` on a helper thread and waits for its result with the VM
@@ -324,7 +343,7 @@ pub(crate) fn off_thread<T: Send + 'static>(
     block_on(ctx, Some(deadline), || match rx.recv_timeout(SLICE) {
         Ok(v) => Ok(Some(v)),
         Err(RecvTimeoutError::Timeout) => Ok(None),
-        Err(RecvTimeoutError::Disconnected) => Err(io::Error::other(format!("{what} failed"))),
+        Err(RecvTimeoutError::Disconnected) => Err(failure(format!("{what} failed"))),
     })
 }
 

@@ -176,15 +176,13 @@ impl Exchange {
     /// an interrupt and its deadline, which a server that keeps sending
     /// (interim heads, a head one byte at a time) cannot keep from it.
     fn read_head(&mut self) -> std::io::Result<Option<Head>> {
-        match wire::parse_head(&self.buf, self.eof).map_err(std::io::Error::other)? {
+        match wire::parse_head(&self.buf, self.eof).map_err(net::failure)? {
             Parsed::Head(head, used) => {
                 self.buf.drain(..used);
                 if (100..200).contains(&head.code) && head.code != 101 {
                     self.interim += 1;
                     if self.interim > MAX_INTERIM {
-                        return Err(std::io::Error::other(
-                            "the server sent too many interim responses",
-                        ));
+                        return Err(net::failure("the server sent too many interim responses"));
                     }
                     return Ok(None);
                 }
@@ -196,7 +194,7 @@ impl Exchange {
                 return Ok(Some(Head::not_http()));
             }
             Parsed::Incomplete if self.eof => {
-                return Err(std::io::Error::other(
+                return Err(net::failure(
                     "the server closed the connection without a response",
                 ));
             }
@@ -213,16 +211,13 @@ impl Exchange {
     fn read_body(&mut self, out: &mut [u8]) -> std::io::Result<Option<usize>> {
         let mut filled = false;
         loop {
-            let (used, made) = self
-                .decoder
-                .decode(&self.buf, out)
-                .map_err(std::io::Error::other)?;
+            let (used, made) = self.decoder.decode(&self.buf, out).map_err(net::failure)?;
             self.buf.drain(..used);
             if made > 0 || self.decoder.is_done() {
                 return Ok(Some(made));
             }
             if self.eof {
-                self.decoder.end_of_input().map_err(std::io::Error::other)?;
+                self.decoder.end_of_input().map_err(net::failure)?;
                 return Ok(Some(0));
             }
             if filled || !self.fill()? {
@@ -471,7 +466,7 @@ impl Input for BodyInput {
             let dst = &mut buf[filled..];
             let read = net::block_on(ctx, net::deadline(self.timeout), || {
                 if self.closed.load(Ordering::Acquire) {
-                    return Err(std::io::Error::other("stream closed"));
+                    return Err(net::failure("stream closed"));
                 }
                 lock(exchange).read_body(dst)
             });
