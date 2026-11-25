@@ -213,6 +213,10 @@ launcher may set another burst and rate with `rms::set_write_limit`, as
 it sets the quota; the defaults are `rms::WRITE_BURST` and
 `rms::WRITE_RATE`.
 
+[SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists these
+limits with every other limit a game meets, and what the budget leaves
+among its [known limits](../../SECURITY.md#known-limits).
+
 ## What is guaranteed
 
 - **Every change is on disk before the call returns.** `addRecord`,

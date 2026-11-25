@@ -42,29 +42,35 @@ why, and how the MIDP layer should map each MMAPI call onto it.
 
 ## Threads and locking
 
-All mixer state sits behind one lock, a `parking_lot` mutex. It is fair:
-a caller that has waited a moment gets it next, so a thread that takes it
-again and again (a game that seeks a big MIDI file in a loop) cannot keep
-the audio thread or another game's calls out. API calls hold it briefly.
-The audio thread renders a buffer in slices of 128 frames and frees the
-lock between them, so a call waits for one slice at most. Decoding and
-parsing happen before the lock is taken (when a player is created), so
-the only work under the lock is rendering, which is the work the audio
-thread must do anyway. The lock has no poison: a panic while it was held
-leaves the mixer as it was rather than silencing every game.
+All mixer state sits behind one lock, a `parking_lot` mutex. It is fair over
+about a millisecond: a caller that has waited that long gets it next, so a
+thread that takes it again and again (a game that seeks a big MIDI file in a
+loop) cannot keep the audio thread or another game's calls out. API calls
+hold it briefly. The audio thread renders a buffer in slices of 128 frames
+and frees the lock between them, so a call waits for the slice under way, or
+about a millisecond while the slices are short. Decoding and parsing happen
+before the lock is taken (when a player is created), so the only work under
+the lock is rendering, which is the work the audio thread must do anyway.
+The lock has no poison: a panic while it was held leaves the mixer as it was
+rather than silencing every game.
 
 What one game can make the lock cost is bounded:
 
 - a game has at most 32 players started, and all games together 128 (see
   Players);
 - a MIDI file of a few frames plays once, a file sends at most 512
-  messages for each call to render, and a file holds at most 65,536
+  messages for each call to render, and a file holds at most 65536
   events (see Formats);
 - listeners hear of a loop at most every 20 ms of output per player.
 
 A seek in a MIDI file replays the controllers before the new position. It
-is up to 65,536 events under the lock, about a millisecond. That stays a
+is up to 65536 events under the lock, about a millisecond. That stays a
 known limit, and the fair lock keeps it from starving anyone.
+
+[SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists the
+limits of sound with every other limit a game meets, and its
+[known limits](../../SECURITY.md#known-limits) say what this lock still
+lets one game do to the others.
 
 The audio thread never unwinds. Each voice renders inside `catch_unwind`:
 a source that panics (a decoder or synthesizer bug on damaged data) is
@@ -121,7 +127,7 @@ the MIDP layer (see the mapping below):
   whole loop.
 - A loop is heard with no gap, but listeners are told of it at most once
   every 20 ms of output per player (`MIN_LOOP_US`): a sound of one frame
-  at 384 kHz loops 384,000 times a second, and each pass would be two
+  at 384 kHz loops 384000 times a second, and each pass would be two
   events. The first loop after a start, and the end of a run, are always
   told.
 - At most 32 players of a game and 128 of all games together are started
@@ -192,14 +198,16 @@ declared type second, because games often pass the wrong type:
 should report.
 
 - **WAV**: PCM 8 (unsigned), 16, 24 and 32-bit, IEEE float (32 and 64-bit),
-  IMA ADPCM, Microsoft ADPCM (with listed or standard coefficients),
-  mu-law, A-law, and the extensible format. Wrong sizes are tolerated: a
-  data size of zero or past the end runs to the end of the file, a RIFF
-  size is ignored, a missing pad byte after an odd chunk is noticed, a
-  torn last frame is dropped, and a lost chunk walk searches for `data`.
-  Wider than stereo keeps the front left and right. A file decodes up
-  front, to at most four times its size (ADPCM) and twice for mu-law,
-  A-law and 8-bit PCM. What it will decode to is worked out from the
+  IMA ADPCM, Microsoft ADPCM (with listed or standard coefficients), mu-law,
+  A-law, and the extensible format. Wrong sizes are tolerated: a data size
+  of zero or past the end runs to the end of the file, a RIFF size is
+  ignored, a missing pad byte after an odd chunk is noticed, a torn last
+  frame is dropped, and a lost chunk walk searches for `data`. Wider than
+  stereo keeps the front left and right. A rate of 0 or above 384 kHz is
+  `Malformed`: the mixer reads a source at its rate over the output rate, so
+  a garbage rate would read billions of frames for each frame played. A file
+  decodes up front, to at most four times its size (ADPCM) and twice for
+  mu-law, A-law and 8-bit PCM. What it will decode to is worked out from the
   bytes there are, never from a size the header claims, and a file that
   would decode to more than 16 MiB (`MAX_DECODED_BYTES`) is `TooLarge`
   before anything is allocated.
@@ -212,7 +220,7 @@ should report.
   wrong: the track is read to its end-of-track event instead. Seeking
   resets the synthesizer and replays program changes, controllers and
   pitch bends before the new position (not notes). A file of more than
-  65,536 events, tempo and time signature changes counted, is `TooLarge`;
+  65536 events, tempo and time signature changes counted, is `TooLarge`;
   game music has some thousands. Starting a file over for a loop sends all
   its events again, so a file shorter than 20 ms (`Source::min_loop_frames`)
   plays once whatever its loop count, and ends with the last
@@ -223,7 +231,9 @@ should report.
   sent in order over the next blocks.
 - **MP3**: MPEG-1 and MPEG-2 layer III. The length comes from the Xing or
   LAME header without the encoder delay and padding (which the decoder
-  trims), or else from the frame headers. ID3v2 tags are skipped.
+  trims), or else from the frame headers. ID3v2 tags are skipped. An MP3
+  that fails to decode more than 16 frames in a row ends there, with an
+  `Error` event.
 - **AMR narrowband**: the RFC 4867 storage format (`#!AMR\n`), mono 8 kHz,
   decoded up front. Frames of other codecs are concealed like lost frames;
   a file cut short keeps what decoded. AMR wideband (`#!AMR-WB\n`) and the
@@ -236,10 +246,12 @@ should report.
   optional `TEMPO` (5 to 127, times 4 bpm) and `RESOLUTION` (1 to 127) in
   either order, blocks (`BLOCK_START n ... BLOCK_END n`, defined before
   use, not nested), `PLAY_BLOCK`, `SET_VOLUME` (0 to 100), `REPEAT` (2 to
-  127), notes 0 to 127 and `SILENCE`. A note lasts
-  `duration * 60000 * 4 / (resolution * tempo)` ms. Errors carry the byte
-  offset where reading stopped. Sequences that unroll past 65536 tones are
-  refused, since blocks that play blocks grow without bound.
+  127), notes 0 to 127 and `SILENCE`. A sequence or a block holds at most
+  65536 tones, and all its lists together 262144, `SET_VOLUME` entries
+  included. A note lasts `duration * 60000 * 4 / (resolution * tempo)` ms.
+  Errors carry the byte offset where reading stopped. Sequences that
+  unroll past 65536 tones are refused, since blocks that play blocks grow
+  without bound.
 - **Nokia ringing tones**: the Smart Messaging bit stream (commands,
   basic and temporary songs, patterns with loops and back references, note,
   scale, style, tempo and volume instructions). Volume 1 to 15 maps to
@@ -397,8 +409,10 @@ Events map to `PlayerListener` constants and event data:
 | `SoundListener.soundStateChanged`      | From the group's events: `Started` to `SOUND_PLAYING`, `Stopped` and `EndOfMedia { last: true, .. }` to `SOUND_STOPPED` |
 | `getConcurrentSoundCount(type)`        | Any small number the games accept; the engine plays as many as asked |
 
-Other vendor APIs (Siemens, Samsung, Motorola, Sony Ericsson) take bytes
-and a format the same way and map onto `create_player_as`.
+Samsung's `AudioClip` hands its bytes to `create_player`, which finds the
+format from them. Siemens' `Melody` plays the MIDI file its
+`MelodyComposer` builds, through `create_player_as`. Motorola, LG and Sony
+Ericsson have no sound API of their own.
 
 ## Licenses
 

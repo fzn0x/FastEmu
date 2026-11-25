@@ -35,7 +35,7 @@ coordinates are translated by `translate(x, y)` (which wraps around like
 Java's `int`) and then computed in 64-bit integers, so no Java argument
 can overflow them. Only the part of a primitive inside the clip is ever
 walked, so a line or circle millions of pixels long costs no more than
-the clip's size, except that outlines wider or taller than 65 536 pixels
+the clip's size, except that outlines wider or taller than 65536 pixels
 are not drawn at all.
 
 ### Coverage of each primitive
@@ -102,7 +102,9 @@ once. Crossings are exact integer fractions. The sides' `drawLine` pixels
 are then added. Nokia's `fillPolygon` uses the same rule with the
 even-odd fill Nokia documents; `drawPolygon` and `drawTriangle` draw only
 the sides. A coverage mask makes each pixel of a polygon or outline draw
-once, so translucent colours do not stack where pieces meet.
+once, so translucent colours do not stack where pieces meet. No limit
+bounds the time one polygon or triangle fill takes: it walks every row
+of the shape inside the clip, and every edge on each row.
 
 **Dotted strokes.** MIDP leaves the pattern to the implementation and
 lets end points and corners go undrawn. FastEmu draws every other pixel,
@@ -186,6 +188,9 @@ A file whose size cannot be read goes to the decoder, which refuses it.
 `Image.createImage(InputStream)` reads at most 16 MiB. A stream that gives
 more ends with `IOException`, and so does one whose `read` returns no
 bytes 1000 times in a row.
+
+[SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists these
+limits with every other limit a game meets.
 
 `getRGB(rgbData, offset, scanlength, x, y, w, h)` stores pixel `(i, j)` at
 `offset + i + j * scanlength`; a negative `scanlength` stores rows
@@ -311,11 +316,16 @@ throws as `IllegalArgumentException` (or `IOException` for
   top-down; run-length compressed files are refused. 32-bit files whose
   alpha mask is set but all zero are shown opaque.
 
-Images wider or taller than 16 384 pixels, or over the pixel limit, fail
-with `OutOfMemoryError` before their pixels are allocated. The wrapper
-checks the declared size against the heap first, as the Images section
-says, so a PNG that declares 2^25 pixels does not make `decode_stream`
-reserve its 128 MiB buffer on a heap of a few MiB.
+Images over the pixel limit, and PNG, GIF and BMP images wider or taller
+than 16384 pixels, fail with `OutOfMemoryError` before their pixels are
+allocated. zune-jpeg refuses a JPEG frame header over 16384 pixels a side
+while it reads the headers, so such a JPEG is a decode error. A GIF's
+first frame is decoded at its own size before it is placed on the logical
+screen: the `gif` crate's memory limit holds it to 2^25 pixels, and the
+heap check sees only the screen. The wrapper checks the declared size
+against the heap first, as the Images section says, so a PNG that declares
+2^25 pixels does not make `decode_stream` reserve its 128 MiB buffer on a
+heap of a few MiB.
 
 A panic inside a decoder (png, gif or zune-jpeg) is caught in
 `Surface::decode`, and so in `decode_range`, and becomes a decode error

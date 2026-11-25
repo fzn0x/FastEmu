@@ -57,9 +57,11 @@ named.
   Repeated keys are found in a set. The manifest is read with
   `read_prefix` at 1 MiB, so a manifest that inflates to more costs 1 MiB.
   The suite's name, vendor, version and MIDlet names in `SuiteInfo` are
-  cut at 100 characters and the description at 500, for the tiles and
-  the launcher; `SuiteInfo::properties` keep every value whole, so
-  `getAppProperty` is unchanged. An icon over 1 MiB is not kept.
+  cut at 100 characters and the description at 500, for the tiles and the
+  launcher; `SuiteInfo::properties` keep every value whole, so
+  `getAppProperty` is unchanged. An icon over 1 MiB is not kept, and the
+  app shows no icon for one over 512 pixels a side (`fastemu-ui`'s
+  `pixels::icon_bgra`).
 - **The JAR of a JAD.** `MIDlet-Jar-URL` as a relative path, then its
   last segment, then the JAD's own name with `.jar`. A JAR picks up a JAD
   of the same name beside it.
@@ -89,23 +91,25 @@ named.
   bytes, or with a bracket or a control character, is no class, so that
   MIDlet is dropped before it reaches the loader and a suite whose list
   comes to nothing shows the error for a suite that lists no MIDlet.
-  With no `MIDlet-<n>` at all, the classes that extend `MIDlet` (found
-  by walking superclasses in the JAR) are offered.
-- **The search for MIDlet classes.** It reads each `.class` entry up to
-  4 MiB, looks at 8192 of them at most, and stops when 32 MiB have been
-  inflated in all. A read that went over its 4 MiB counts the 4 MiB. So
-  a JAR whose entries all point at one compressed bomb costs about 8
+  When no `MIDlet-<n>` gives a MIDlet, the classes that extend `MIDlet`
+  (found by walking superclasses in the JAR) are offered.
+- **The search for MIDlet classes.** It reads each `.class` entry up to 4
+  MiB, looks at 8192 of them at most, and stops when 32 MiB have been
+  inflated in all. A read that went over its 4 MiB counts the 4 MiB. So a
+  JAR whose entries all point at one compressed bomb costs about 8
   inflates, not one for each entry. It also adds up what each entry holds
   in the archive, as the entry says, whether its read gives bytes or not,
   and passes over an entry that holds more than is left of 32 MiB. A
   stream of empty deflate blocks inflates to nothing, so it is the bytes
   it holds that bound the work of entries that share it. The largest JAR
   of the test folder has 1046 classes of 4 MB in all, and its largest
-  class has 200 KB. A MIDlet class past the budget is missed, which only
-  a suite with no `MIDlet-1` can lose. A class file names itself, so the
-  search holds the name of a class and of its superclass to the rule of a
-  `MIDlet-<n>` entry: a class that fails it is no MIDlet and no link of a
-  chain to one.
+  class has 200 KB. A MIDlet class past the budget is missed, which only a
+  suite with no `MIDlet-<n>` that gives a MIDlet can lose. A class file
+  names itself, so the search holds the name of a class and of its
+  superclass to the rule of a `MIDlet-<n>` entry: a class that fails it is
+  no MIDlet and no link of a chain to one. The walk up from a class takes
+  64 steps at most, so a class with more than 63 classes between it and
+  `MIDlet` is not offered.
 - **Resources.** The VM resolves a name relative to the package of the
   class it is called on; `JarSource` then turns `\` into `/`, collapses
   slashes and `.` segments, strips leading slashes, matches exactly and
@@ -125,14 +129,17 @@ named.
   the source for the resource with a limit, which is what `check_alloc`
   would let through at that moment, never more than the heap. The JAR
   source stops inflating there, and a bigger resource is an
-  `OutOfMemoryError` before its bytes exist, as it was after. One
-  resource inflates at a time for each game, so the buffers of its
-  threads never add up: the host holds at most one buffer of the heap's
-  size beyond what the heap counts.
+  `OutOfMemoryError` once the read passes that size. One resource
+  inflates at a time for each game, so the buffers of its threads never
+  add up: the host holds at most one buffer of the heap's size beyond
+  what the heap counts.
 
 Natives that read resources by name use `env(ctx).source` (the same
 `JarSource`) inside `Ctx::without_lock`. `Image.createImage(String)`
 treats every name as absolute.
+
+[SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists the
+limits of a suite with every other limit a game meets.
 
 ## Launching
 
@@ -173,19 +180,19 @@ apps pass one with output, the headless runner and tests pass none.
 - **Lifecycle threads** run the constructor and `startApp` on one thread,
   and each later `startApp`, `pauseApp` or `destroyApp` on a fresh one, so
   a game that loops inside `startApp` still gets paints and keys
-  (`docs/compat/notes/02-events-threads.md`). The calls still run one at
-  a time, in the order the control thread started them, as on a phone's
+  (`docs/compat/notes/02-events-threads.md`). The calls still run one at a
+  time, in the order the control thread started them, as on a phone's
   single lifecycle thread: a later `startApp` or `pauseApp` waits until
   the call before it has returned. Only `destroyApp` runs at once, beside
   a `startApp` that never returns; the calls still waiting then give up.
   Each waiting call is a Java thread, and a game that pauses and resumes
   itself in a loop from a `startApp` that never returns would make one for
-  every request. An instance keeps at most 8 lifecycle threads alive:
-  later pause and resume calls are dropped, with one warning in the log,
-  but `destroyApp` never is. Lifecycle threads count against the machine's
-  limit on threads too (`max_threads`, 64, and 16 more for the host). The
-  bound of 8 keeps room in that limit for `destroyApp`, the event thread
-  and the media thread.
+  every request. An instance keeps at most 8 lifecycle threads alive,
+  besides the one that runs the first `startApp`: later pause and resume
+  calls are dropped, with one warning in the log, but `destroyApp` never
+  is. Lifecycle threads count against the machine's limit on threads too
+  (`max_threads`, 64, and 16 more for the host). The bound of 8 keeps room
+  in that limit for `destroyApp`, the event thread and the media thread.
 - **The control thread** is a host thread that owns the `Vm` and applies
   the app's input, pause, resume and stop, and `notifyDestroyed`,
   `resumeRequest` and crashes, one at a time in the order they came.
@@ -420,7 +427,7 @@ handles a request beside the running MIDlet, so it always returns
   with `Instance::take_link_request`. A newer link replaces one not yet
   taken, so a game cannot pile them up, and the app is notified. The
   scheme goes to the app in lower case. A link must be printable ASCII
-  with no backslash (a browser reads one as a slash, so
+  with no space and no backslash (a browser reads `\` as a slash, so
   `http://good.com\.evil.com/` would open `evil.com`), no user name
   before the host, a port, when it has one, of digits from 1 to 65535,
   and at most 4096 bytes, so the link the user reads is the page that
@@ -446,12 +453,12 @@ system's browser only when the user chooses **Open**
 handed over, as MIDP has the phone handle a request after its suite
 exits.
 
-The prompt ignores clicks on **Open** and **Dismiss** for 500 ms after it
-appears or its link changes (`session::LINK_ARMING`), and shows the
-buttons dimmed until then, so a player who taps fast in a game cannot
-answer a question they have not read. The same link asked for again does
-not restart the wait. The app reads the time from GPUI's clock, so tests
-move it by hand.
+The prompt ignores clicks on **Open** and **Dismiss** for 500 ms after the
+app takes the request or its link changes (`session::LINK_ARMING`), and
+shows the buttons dimmed until then, so a player who taps fast in a game
+cannot answer a question they have not read. The same link asked for again
+does not restart the wait. The app reads the time from GPUI's clock, so
+tests move it by hand.
 
 ## Many instances in one process
 
@@ -716,20 +723,21 @@ sequence, the transform, the reference pixel, the collision rectangle),
   an animated tile showing nothing; pixel by pixel only the opaque pixels
   of the tiles the cells show count. Two sprites sharing an image lock it
   once.
-- **Tiled layers.** `setStaticTileSet` keeps the cells and animated
-  tiles when the new set has at least as many tiles, and otherwise
-  empties every cell and deletes the animated tiles. A grid of more than
-  2^24 cells is the `OutOfMemoryError` a phone would throw, and one wider
-  or taller than an `int` is `IllegalArgumentException`. The grid is 4
-  bytes a cell. The constructor asks the heap for it before it makes the
-  grid and counts it after, so a layer larger than the heap, or one more
-  than the heap holds, is an `OutOfMemoryError` and a game that keeps
-  layers in a list ends in one. A layer holds at most 32767 animated
-  tiles, as the Siemens layer does; `createAnimatedTile` past that throws
-  `OutOfMemoryError`. Each animated tile is counted when it is made, as it
-  makes no Java object. A `Sprite` counts its frame sequence the same way,
-  and a snapshot of a mutable image that a sprite, a screen or an item
-  keeps is checked against the heap before the copy is made.
+- **Tiled layers.** `setStaticTileSet` keeps the cells and animated tiles
+  when the new set has at least as many tiles, and otherwise empties every
+  cell and deletes the animated tiles. A grid of more than 2^24 cells is
+  the `OutOfMemoryError` a phone would throw, and one wider or taller than
+  an `int` is `IllegalArgumentException`. The grid is 4 bytes a cell. The
+  constructor asks the heap for it before it makes the grid and counts it
+  after, so a layer larger than the heap, or one more than the heap holds,
+  is an `OutOfMemoryError` and a game that keeps layers in a list ends in
+  one. A layer holds at most 32767 animated tiles, as the Siemens layer
+  does; `createAnimatedTile` past that throws `OutOfMemoryError`, where
+  the Siemens layer throws `IllegalArgumentException`. Each animated tile
+  is counted when it is made, as it makes no Java object. A `Sprite`
+  counts its frame sequence the same way, and a snapshot of a mutable
+  image that a sprite, a screen or an item keeps is checked against the
+  heap before the copy is made.
 - **LayerManager.** It keeps its layers in a traced payload, index 0 on
   top. `append` and `insert` move a layer already present; `insert`
   checks its index against the other layers' count, as J2ME Loader does.

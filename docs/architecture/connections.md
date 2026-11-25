@@ -49,7 +49,9 @@ With `Deny`, the default, every open of a network scheme throws
 `IOException("network access is off for this game")` from
 `Connector.open` itself, before any name lookup. A VM without an
 `InstanceEnv` has no network either. With `Allow`, connections are real
-`std::net` sockets.
+`std::net` sockets to any address. `Allow` means the whole network: a game
+with it can reach programs on the computer itself, devices on the local
+network and link-local addresses, not only the internet.
 
 Messaging is not network access: `sms://` and `cbs://` open under either
 policy, as a phone without signal still opened them, and their sends
@@ -120,6 +122,7 @@ passes it, with a fixed text, and none of them is a setting.
 | a connection name | 8 KiB | `Connector.open` (`IllegalArgumentException`) |
 | interim `1xx` responses before the final one | 16 | the response getters |
 | the trailer of a chunked body | 16 KiB | `InputStream.read` |
+| the size line of one chunk, extensions included | 1 KiB | `InputStream.read` |
 | a response head | 64 KiB | the response getters |
 
 Each open connection of a game has a place, which `net::acquire` takes
@@ -145,11 +148,14 @@ connection and 8 MiB for all of a game's connections together. Opening
 when the request is written. Names and headers are kept in the host for
 as long as the connection lives, which is why they are limited too.
 
-What stays open on purpose: with `Allow` a game reaches loopback and the
-local network, as a phone on a network did, and a server socket listens
-on every interface. The time zone and the local address
-(`getLocalAddress`) are visible to the game. Allowing the network is
-the user's choice per game.
+What stays open on purpose: what `Allow` reaches (see the policy section),
+as on a phone on a network, and server sockets that listen on every
+interface. The time zone and the local address (`getLocalAddress`) are
+visible to the game. Allowing the network is the user's choice per game.
+
+[SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists these
+limits with every other limit a game meets, and what Allow leaves open
+among its [known limits](../../SECURITY.md#known-limits).
 
 ## HTTP
 

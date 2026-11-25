@@ -228,8 +228,10 @@ the machine has `max_threads` plus 16 threads, so a game that has used up
 its share cannot keep the app from starting the event thread, a lifecycle
 thread or the media thread. A `Timer`'s thread lives until `cancel()`, as
 in Java, so a game that makes a `Timer` for each screen and never cancels
-one gets the error after 64. A thread's stack holds at most 2 MiB (see
-[Limits](#limits)), so 64 threads hold 128 MiB at worst. The OS name of a
+one gets the error once the machine has 64 threads: after about 62
+timers, beside the event thread and a lifecycle thread. A thread's stack
+holds at most 2 MiB (see [Limits](#limits)), so 64 threads hold 128 MiB
+at worst, and the 80 the host may reach hold 160 MiB. The OS name of a
 thread is `java ` and Java's name without control characters, cut to 32
 characters, since `std` panics on a NUL; the Java name stays as given.
 
@@ -343,6 +345,15 @@ few times the heap limit, and the host never holds much more than that.
 count. The `OutOfMemoryError` itself is made without a check, so it can
 always be thrown.
 
+The count follows a phone, not the host. An object counts 8 bytes and 4 or
+8 for each field, while the host gives it a slab entry and 16 bytes a
+field, so a game made of very many tiny objects holds several times its
+heap in real memory, about ten times in a test with many small timer
+tasks. A monitor entry for each locked object and a second copy of each
+interned string also live outside the count. The heap lives as long as the
+machine: a game that has ended keeps its memory until the host lets go of
+its `Vm`, which the apps do when its tile is closed.
+
 ### Limits
 
 `VmConfig::limits` is a `VmLimits`: one struct for every limit on what a
@@ -359,6 +370,10 @@ the fields are only read while the VM runs.
 | `max_log_line_bytes` | 4096 | bytes of one log line | #30 |
 | `max_reported` | 256 | different diagnostics reported | #30 |
 | `max_posted` | 10000 | posted tasks not yet run | #30 |
+
+[SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists these
+with every other limit a game meets, and the
+[known limits](../../SECURITY.md#known-limits) that remain.
 
 `max_stack_slots` limits how far a thread's stack reaches. A frame starts
 at its arguments, which sit on top of its caller's operand stack, and
