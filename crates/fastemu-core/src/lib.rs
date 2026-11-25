@@ -18,6 +18,7 @@ pub mod instance;
 #[cfg(feature = "mock")]
 pub mod mock;
 pub mod suite;
+pub mod text;
 
 pub use device::{DeviceProfile, FontSizes, KeyCodes, builtin_profiles, default_profile};
 pub use frame::Frame;
@@ -27,3 +28,4 @@ pub use instance::{
     LogLevel, LogLine, NetworkPolicy, Notify,
 };
 pub use suite::{MidletInfo, SuiteInfo};
+pub use text::escape_control;
