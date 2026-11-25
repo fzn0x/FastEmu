@@ -14,6 +14,11 @@ use super::{Area, Base, Cells, GameError};
 /// of gigabytes.
 pub const MAX_CELLS: u64 = 1 << 24;
 
+/// The most animated tiles one tiled layer may hold, as many as the
+/// Siemens tiled layer allows. Each takes no Java object, so only a limit
+/// of its own bounds a loop that makes them.
+pub const MAX_ANIMATED_TILES: usize = 32_767;
+
 /// The state of one `TiledLayer`, without its image.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TiledLayer {
@@ -54,7 +59,65 @@ fn extent(cells: i32, cell: i32) -> Result<i32, GameError> {
         .map_err(|_| GameError::IllegalArgument("the layer is too large"))
 }
 
+/// A layer whose arguments were checked and whose grid is not made yet, so
+/// the caller can ask the heap for the grid first.
+#[derive(Clone, Copy, Debug)]
+pub struct Plan {
+    columns: i32,
+    rows: i32,
+    tiles: Cells,
+}
+
+impl Plan {
+    /// The bytes the grid takes, 4 for each cell.
+    pub fn heap_bytes(&self) -> usize {
+        self.columns as usize * self.rows as usize * 4
+    }
+}
+
 impl TiledLayer {
+    /// Checks the arguments of `TiledLayer(columns, rows, image,
+    /// tileWidth, tileHeight)` for an image of the given size, and the
+    /// rule that a layer has at most [`MAX_CELLS`] cells. Nothing is
+    /// allocated.
+    pub fn plan(
+        columns: i32,
+        rows: i32,
+        image_width: u32,
+        image_height: u32,
+        tile_width: i32,
+        tile_height: i32,
+    ) -> Result<Plan, GameError> {
+        if columns < 1 || rows < 1 {
+            return Err(GameError::IllegalArgument(
+                "the number of rows or columns is less than 1",
+            ));
+        }
+        let tiles = Cells::cut(image_width, image_height, tile_width, tile_height)?;
+        extent(columns, tile_width)?;
+        extent(rows, tile_height)?;
+        if columns as u64 * rows as u64 > MAX_CELLS {
+            return Err(GameError::OutOfMemory);
+        }
+        Ok(Plan {
+            columns,
+            rows,
+            tiles,
+        })
+    }
+
+    /// The layer a [`Plan`] describes, every cell empty.
+    pub fn from_plan(plan: Plan) -> Self {
+        Self {
+            base: Base::default(),
+            columns: plan.columns,
+            rows: plan.rows,
+            tiles: plan.tiles,
+            cells: vec![0; plan.columns as usize * plan.rows as usize],
+            animated: Vec::new(),
+        }
+    }
+
     /// `TiledLayer(columns, rows, image, tileWidth, tileHeight)` for an
     /// image of the given size. Every cell starts empty.
     pub fn new(
@@ -65,26 +128,15 @@ impl TiledLayer {
         tile_width: i32,
         tile_height: i32,
     ) -> Result<Self, GameError> {
-        if columns < 1 || rows < 1 {
-            return Err(GameError::IllegalArgument(
-                "the number of rows or columns is less than 1",
-            ));
-        }
-        let tiles = Cells::cut(image_width, image_height, tile_width, tile_height)?;
-        extent(columns, tile_width)?;
-        extent(rows, tile_height)?;
-        let count = columns as u64 * rows as u64;
-        if count > MAX_CELLS {
-            return Err(GameError::OutOfMemory);
-        }
-        Ok(Self {
-            base: Base::default(),
+        let plan = Self::plan(
             columns,
             rows,
-            tiles,
-            cells: vec![0; count as usize],
-            animated: Vec::new(),
-        })
+            image_width,
+            image_height,
+            tile_width,
+            tile_height,
+        )?;
+        Ok(Self::from_plan(plan))
     }
 
     /// `getColumns()`.
@@ -177,10 +229,14 @@ impl TiledLayer {
     }
 
     /// `createAnimatedTile(staticTileIndex)`: returns -1 for the first,
-    /// then -2 and so on.
+    /// then -2 and so on. Past [`MAX_ANIMATED_TILES`] it is the
+    /// `OutOfMemoryError` a phone's layer would end in.
     pub fn create_animated_tile(&mut self, static_tile: i32) -> Result<i32, GameError> {
         if !self.is_static(static_tile) {
             return Err(GameError::IndexOutOfBounds("invalid static tile index"));
+        }
+        if self.animated.len() >= MAX_ANIMATED_TILES {
+            return Err(GameError::OutOfMemory);
         }
         self.animated.push(static_tile);
         Ok(-(self.animated.len() as i32))

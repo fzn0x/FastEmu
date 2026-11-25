@@ -39,10 +39,16 @@ fn construct(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let image = image_arg(ctx, a[3])?;
     let (width, height) = image_size(&image_pixels(ctx, image)?);
     let (tw, th) = (a[4].int(), a[5].int());
-    let layer = TiledLayer::new(columns, rows, width, height, tw, th).map_err(|e| throw(ctx, e))?;
+    let plan = TiledLayer::plan(columns, rows, width, height, tw, th).map_err(|e| throw(ctx, e))?;
+    // The grid is up to 64 MiB and the object holds almost nothing until
+    // the grid is there, so the heap is asked before it is made and told
+    // after.
+    ctx.check_alloc(plan.heap_bytes())?;
+    let layer = TiledLayer::from_plan(plan);
     let data = ctx.payload_mut::<LayerData>(this)?;
     data.image = Some(image);
     data.shape = Shape::Tiled(layer);
+    ctx.recount(this);
     Ok(Value::Void)
 }
 
@@ -56,6 +62,8 @@ fn set_static_tile_set(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
             .map(|()| Value::Void)
     })?;
     ctx.payload_mut::<LayerData>(this)?.image = Some(image);
+    // A smaller tile set empties the cells and deletes the animated tiles.
+    ctx.recount(this);
     Ok(Value::Void)
 }
 
@@ -68,7 +76,12 @@ pub fn class() -> NativeClass {
         .method("<init>", &format!("(II{IMAGE}II)V"), construct)
         .method("createAnimatedTile", "(I)I", |ctx, a| {
             let tile = a[1].int();
-            edit(ctx, a[0], |t| t.create_animated_tile(tile))
+            let index = edit(ctx, a[0], |t| t.create_animated_tile(tile))?;
+            // The tile is 4 bytes and makes no Java object, so only the
+            // count tells the heap that a loop of these grows.
+            let this = ctx.non_null(a[0])?;
+            ctx.recount(this);
+            Ok(index)
         })
         .method("setAnimatedTile", "(II)V", |ctx, a| {
             let (animated, tile) = (a[1].int(), a[2].int());
