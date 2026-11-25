@@ -113,7 +113,7 @@ links to the page that describes the limit.
 | A resource the game reads | what one request of the runtime may take: at most the heap, and at most twice the heap with what the heap counts already | `OutOfMemoryError`, and the read stops at that size | [midp.md][midp-suites] |
 | Resources read at once | one for each game | the game's other threads wait for theirs | [midp.md][midp-suites] |
 | Name of a resource | 1024 bytes or 64 segments | not found | [midp.md][midp-suites] |
-| Missing classes, methods and fields reported, all in one count, and missing resources in another | 256 different names in each count, every name cut to 255 characters | no more are logged, and one line says so | [jvm.md][jvm-limits], [midp.md][midp-suites] |
+| Missing classes, methods and fields reported, all in one count, and missing resources and class files over 4 MiB in another | 256 different names in each count, every name cut to 255 characters | no more are logged, and one line says so | [jvm.md][jvm-limits], [midp.md][midp-suites] |
 
 [jvm-classes]: docs/architecture/jvm.md#class-loading-and-initialization
 [midp-suites]: docs/architecture/midp.md#suites
