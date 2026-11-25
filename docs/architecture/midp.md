@@ -129,10 +129,10 @@ named.
   the source for the resource with a limit, which is what `check_alloc`
   would let through at that moment, never more than the heap. The JAR
   source stops inflating there, and a bigger resource is an
-  `OutOfMemoryError` once the read passes that size. One
-  resource inflates at a time for each game, so the buffers of its
-  threads never add up: the host holds at most one buffer of the heap's
-  size beyond what the heap counts.
+  `OutOfMemoryError` once the read passes that size. One resource
+  inflates at a time for each game, so the buffers of its threads never
+  add up: the host holds at most one buffer of the heap's size beyond
+  what the heap counts.
 
 Natives that read resources by name use `env(ctx).source` (the same
 `JarSource`) inside `Ctx::without_lock`. `Image.createImage(String)`
@@ -427,7 +427,7 @@ handles a request beside the running MIDlet, so it always returns
   with `Instance::take_link_request`. A newer link replaces one not yet
   taken, so a game cannot pile them up, and the app is notified. The
   scheme goes to the app in lower case. A link must be printable ASCII
-  with no backslash (a browser reads one as a slash, so
+  with no space and no backslash (a browser reads `\` as a slash, so
   `http://good.com\.evil.com/` would open `evil.com`), no user name
   before the host, a port, when it has one, of digits from 1 to 65535,
   and at most 4096 bytes, so the link the user reads is the page that
