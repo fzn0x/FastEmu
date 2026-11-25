@@ -55,9 +55,9 @@ a tracker report; it is why every emulator picks a modest constant]
 
 **For FastEmu:** a per-profile RMS quota (1 MiB is a safe default)
 minus the space the suite already uses, never negative; throw
-`RecordStoreFullException` only when the quota is really exceeded.
-Count `getSize()` as the sum of record lengths plus a small fixed
-overhead per record.
+`RecordStoreFullException` only when the quota is really exceeded, or
+when a suite asks for its 65th store. Count `getSize()` as the sum of
+record lengths plus a small fixed overhead per record.
 
 ## Store names and storage
 
