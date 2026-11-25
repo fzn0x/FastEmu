@@ -271,6 +271,18 @@ throws as `IllegalArgumentException` (or `IOException` for
   inflated as far as it goes and padded with zeros, so the rows present
   still show (missing rows are black, or transparent with alpha).
   Gamma and colour profiles are ignored, as phones did.
+  - Only the pairs PNG allows are repaired: grey with 1, 2, 4, 8 or 16
+    bits, RGB with 8 or 16, indexed with 1, 2, 4 or 8, grey with alpha
+    and RGBA with 8 or 16, the standard compression and filter methods
+    and interlace method 0 or 1. Any other IHDR is a decode error, as
+    the `png` crate says.
+  - The repair builds the filtered rows in memory. It refuses rows over
+    64 MiB (an 8-bit RGBA image of 16 million pixels) with
+    `OutOfMemoryError`, and keeps two copies of them at most. A valid
+    file is not repaired and not limited by this.
+  - A PLTE chunk that is not 1 to 256 whole colours is left out, as the
+    `png` crate panics on one that is not. An indexed picture then fails
+    to decode; other pictures do not use the palette.
 - **JPEG**, baseline and progressive, through zune-jpeg.
 - **GIF**: the first frame, placed on the logical screen, transparent
   index clear.
@@ -280,6 +292,15 @@ throws as `IllegalArgumentException` (or `IOException` for
 
 Images wider or taller than 16 384 pixels, or over the pixel limit, fail
 with `OutOfMemoryError` before their pixels are allocated.
+
+A panic inside a decoder (png, gif or zune-jpeg) is caught in
+`Surface::decode`, and so in `decode_range`, and becomes a decode error
+("the image decoder failed"). A panic on a game's thread would stop its
+whole virtual machine. It needs `panic = "unwind"`, which every profile
+of FastEmu sets. The launcher reads a suite's icon with the `png` crate
+itself (`fastemu-ui`, `icon_bgra`), on a background task where a panic
+would abort the app. It has the same guard and gives no icon for a file
+that makes the decoder panic.
 
 ## Nokia DirectGraphics
 
