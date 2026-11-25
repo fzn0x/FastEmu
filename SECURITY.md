@@ -278,11 +278,6 @@ section says is in scope.
   all games together: eight games running at once can hold 256 MiB.
 - Each running game keeps its whole JAR in memory, up to 64 MiB, outside
   its heap.
-- A class waits for its superclass and interfaces to load before the
-  class data is charged for it. A chain of up to 256 classes of up to
-  4 MiB each can be held parsed at once: up to 1 GiB of class files, and
-  a few times that while parsed, far past the 128 MiB of class data, for
-  a moment.
 - While a game makes an image from a file, FastEmu holds the file and
   the decoder's buffers beside the heap until the image is counted. A
   game's image decodes take turns, so this is one file of up to the
@@ -305,14 +300,22 @@ section says is in scope.
   other suites it may open.
 - A class file of up to 4 MiB is parsed before its size is judged. A
   class that is then refused holds a few times its file size meanwhile.
+  The classes below it in a chain, which wait for it to load, are
+  counted in the class data already.
+- The class data is an estimate made from each class before it is
+  built, and it is not exact. A set of classes with 60000 methods each,
+  all with names of their own, held about a fifth more than it. A set of
+  classes with 65535 static fields each kept 3% more than the 128 MiB.
+  Just after the list of static values doubled, classes with instance
+  fields filled the rest and kept 9% more, and 15% more for a moment.
 - A game that has exited keeps its memory until you close its tile.
 
 **Threads and time**
 
 - A thread's stack holds at most 2 MiB. A game's machine has at most 80
   threads, 64 for the game and 16 more that only the host may start, so
-  their stacks can hold 160 MiB at worst. While a stack grows, its buffer
-  may be allocated up to 4 MiB, but only 2 MiB of it is written.
+  their stacks can hold 160 MiB at worst. While a stack grows, it
+  holds its old buffer too, until the copy is done.
 - Each thread also reserves 16 MiB of address space for its system
   stack. The system commits only what the thread uses.
 - A `Timer` keeps its thread until `cancel()`, as in Java. A game that
