@@ -45,7 +45,9 @@
 //! the last of its own threads to end, while the app still holds the
 //! instance. What a tile shows (the last frame, the status, the log, a
 //! link the game asked for) lives in the [`HostLink`], apart from the
-//! machine.
+//! machine. The control thread also lets go of the app's handle on the
+//! sound group as it ends, so the app's thread never closes a group, which
+//! takes the mixer lock.
 //!
 //! [`MidpInstance::ping`] and [`MidpInstance::activity`] are not part of
 //! [`Instance`]: they wait for the VM lock and hold the machine while they
@@ -53,7 +55,7 @@
 //! app's UI thread.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use fastemu_audio::Group;
@@ -174,6 +176,39 @@ fn on_event_thread(
     done.wait(timeout)
 }
 
+/// The sound group as the app's side of the instance reaches it, to set
+/// its volume.
+///
+/// The control thread empties it as it ends and drops the group there:
+/// dropping a group's last clone closes the group, which takes the mixer
+/// lock, and the audio thread holds that lock while it renders, so the
+/// app's thread must never be the one to do it. Setting the volume holds
+/// the slot's own lock, so the group cannot go while the app uses it.
+#[derive(Clone)]
+struct AppGroup(Arc<Mutex<Option<Group>>>);
+
+impl AppGroup {
+    fn new(group: Option<Group>) -> Self {
+        Self(Arc::new(Mutex::new(group)))
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Option<Group>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Sets the group's volume, if the game has not ended.
+    fn set_volume(&self, volume: f32) {
+        if let Some(group) = &*self.lock() {
+            group.set_volume(volume);
+        }
+    }
+
+    /// Takes the group out, for the control thread to drop.
+    fn take(&self) -> Option<Group> {
+        self.lock().take()
+    }
+}
+
 /// The control thread: applies the app's and the MIDlet's lifecycle
 /// requests one at a time.
 struct Controller {
@@ -182,6 +217,8 @@ struct Controller {
     vm: Vm,
     host: HostLink,
     group: Option<Group>,
+    /// The app's handle on the same group, emptied as the controller ends.
+    app_group: AppGroup,
     queue: ControlQueue,
     /// A message taken from the queue while gathering input, handled
     /// next.
@@ -363,8 +400,14 @@ impl Drop for Controller {
     /// Messages that still wait when the control thread ends, by a return
     /// or a panic, are dropped, and so are those that come later, as they
     /// were with a channel whose receiver is gone.
+    ///
+    /// The app's handle on the sound group goes here too, before the
+    /// controller's own clone and its `Vm`: whichever clone of the group
+    /// is the last, it drops on this thread or on one of the machine's, so
+    /// closing a tile never takes the mixer lock on the app's thread.
     fn drop(&mut self) {
         self.queue.close();
+        drop(self.app_group.take());
     }
 }
 
@@ -378,7 +421,8 @@ pub struct MidpInstance {
     /// its threads have ended, while its tile still shows the last frame
     /// and the log.
     vm: WeakVm,
-    group: Option<Group>,
+    /// The sound group, until the game ends.
+    group: AppGroup,
     /// The control thread's queue. Sending on it never blocks.
     control: ControlQueue,
 }
@@ -415,10 +459,12 @@ impl MidpInstance {
             vm.stop();
             return Err(e);
         }
+        let app_group = AppGroup::new(group.clone());
         let controller = Controller {
             vm,
             host: host.clone(),
-            group: group.clone(),
+            group,
+            app_group: app_group.clone(),
             queue: queue.clone(),
             held: None,
             frozen: false,
@@ -442,7 +488,7 @@ impl MidpInstance {
             title,
             host,
             vm: weak,
-            group,
+            group: app_group,
             control: queue,
         }))
     }
@@ -572,9 +618,7 @@ impl Instance for MidpInstance {
     }
 
     fn set_volume(&self, volume: f32) {
-        if let Some(group) = &self.group {
-            group.set_volume(volume.clamp(0.0, 1.0));
-        }
+        self.group.set_volume(volume.clamp(0.0, 1.0));
     }
 
     fn drain_log(&self) -> Vec<LogLine> {
@@ -608,6 +652,7 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Instant;
 
+    use fastemu_audio::{Engine, EngineConfig};
     use fastemu_jvm::{MemorySource, VmConfig};
 
     use super::*;
@@ -706,5 +751,27 @@ mod tests {
         assert_eq!(instance.take_link_request(), None);
         assert!(instance.status().is_finished());
         assert!(instance.vm_freed());
+    }
+
+    #[test]
+    fn a_finished_game_lets_go_of_its_sound_group_on_its_own_thread() {
+        let engine = Engine::new(EngineConfig { sample_rate: 8000 });
+        let group = engine.create_group();
+        let (instance, freed) = crashing(Some(group.clone()));
+        freed
+            .recv_timeout(DEADLINE)
+            .expect("the machine is freed while the app still holds the instance");
+        // The control thread closed the group and took the app's handle on
+        // it before it let go of the machine, so the instance holds no
+        // clone: dropping it can never close a group, which takes the
+        // mixer lock, on the app's thread.
+        assert!(group.is_closed());
+        assert!(
+            instance.group.lock().is_none(),
+            "the instance still holds its sound group"
+        );
+        instance.set_volume(0.5);
+        drop(instance);
+        assert!(group.is_closed());
     }
 }
