@@ -47,12 +47,12 @@ about a millisecond: a caller that has waited that long gets it next, so a
 thread that takes it again and again (a game that seeks a big MIDI file in a
 loop) cannot keep the audio thread or another game's calls out. API calls
 hold it briefly. The audio thread renders a buffer in slices of 128 frames
-and frees the lock between them, so a call waits for the slice under way, or
-about a millisecond while the slices are short. Decoding and parsing happen
-before the lock is taken (when a player is created), so the only work under
-the lock is rendering, which is the work the audio thread must do anyway.
-The lock has no poison: a panic while it was held leaves the mixer as it was
-rather than silencing every game.
+and hands the lock to a waiting call between them, so a call waits for the
+slice under way. Decoding and parsing happen before the lock is taken (when
+a player is created), so the only work under the lock is rendering, which
+is the work the audio thread must do anyway. The lock has no poison: a
+panic while it was held leaves the mixer as it was rather than silencing
+every game.
 
 What one game can make the lock cost is bounded:
 
