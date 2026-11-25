@@ -40,6 +40,18 @@ const QUIET_SPAN: Duration = Duration::from_secs(2);
 const BASELINE: Duration = Duration::from_secs(20);
 /// The heap of MicroEmulator's small-heap rows.
 const SMALL_HEAP: [&str; 3] = ["-Xms16m", "-Xmx128m", "-XX:+UseSerialGC"];
+/// When the scene and each game are sampled, and when they end, in
+/// seconds after the start.
+const ONE: ([f64; 2], f64) = ([10.0, 40.0], 45.0);
+/// The same for every game at once.
+const ALL: ([f64; 2], f64) = ([15.0, 55.0], 60.0);
+
+/// When the runners save their screenshots: a second after the last
+/// sample, so neither the time nor the memory that saving a picture
+/// takes is in a sample.
+fn shot_time(at: [f64; 2]) -> f64 {
+    at[1] + 1.0
+}
 
 /// A process the bench started. Dropping it kills the process by its id
 /// if it still runs, and waits for it.
@@ -482,19 +494,21 @@ impl<'a> Bench<'a> {
                 (vec![proc], 1, Timing::Kernels)
             }
             Work::Scene => {
+                let (at, end) = ONE;
+                let shot = Some(shot_time(at));
                 let proc = if me {
-                    self.microemu(side, &tag, 0, &self.built.scene_jar, 45.0, "", Some(40.0))
+                    self.microemu(side, &tag, 0, &self.built.scene_jar, end, "", shot)
                 } else {
                     self.fastemu(
                         &tag,
                         vec![self.built.scene_jar.clone()],
-                        45.0,
+                        end,
                         None,
                         "",
-                        Some(40.0),
+                        shot,
                     )
                 };
-                (vec![proc], 1, timed([10.0, 40.0], 45.0))
+                (vec![proc], 1, timed(at, end))
             }
             Work::Game(slug) => {
                 let jar = self
@@ -503,26 +517,28 @@ impl<'a> Bench<'a> {
                     .find(|(g, _)| &g.slug == slug)
                     .map(|(_, j)| j.clone())
                     .unwrap_or_default();
+                let (at, end) = ONE;
+                let shot = Some(shot_time(at));
                 let proc = if me {
-                    self.microemu(side, &tag, 0, &jar, 45.0, &self.events, Some(40.0))
+                    self.microemu(side, &tag, 0, &jar, end, &self.events, shot)
                 } else {
-                    self.fastemu(&tag, vec![jar], 45.0, None, BENCH_KEYS, Some(40.0))
+                    self.fastemu(&tag, vec![jar], end, None, BENCH_KEYS, shot)
                 };
-                (vec![proc], 1, timed([10.0, 40.0], 45.0))
+                (vec![proc], 1, timed(at, end))
             }
             Work::Eight => {
                 let jars: Vec<PathBuf> = self.games.iter().map(|(_, j)| j.clone()).collect();
+                let (at, end) = ALL;
+                let shot = Some(shot_time(at));
                 let procs = if me {
                     jars.iter()
                         .enumerate()
-                        .map(|(i, jar)| {
-                            self.microemu(side, &tag, i, jar, 60.0, &self.events, Some(55.0))
-                        })
+                        .map(|(i, jar)| self.microemu(side, &tag, i, jar, end, &self.events, shot))
                         .collect()
                 } else {
-                    vec![self.fastemu(&tag, jars.clone(), 60.0, None, BENCH_KEYS, Some(55.0))]
+                    vec![self.fastemu(&tag, jars.clone(), end, None, BENCH_KEYS, shot)]
                 };
-                (procs, jars.len(), timed([15.0, 55.0], 60.0))
+                (procs, jars.len(), timed(at, end))
             }
             Work::Windowed => {
                 let jars: Vec<PathBuf> = self.games.iter().map(|(_, j)| j.clone()).collect();
@@ -1062,5 +1078,13 @@ mod tests {
         assert_eq!(fps(&frames, (10_000, 40_000)), Some(30.0));
         assert_eq!(fps(&frames, (41_000, 42_000)), None);
         assert_eq!(fps(&[(10_000, 5)], (0, 50_000)), None);
+    }
+
+    #[test]
+    fn screenshots_come_after_the_last_sample() {
+        for (at, end) in [ONE, ALL] {
+            let shot = shot_time(at);
+            assert!(shot > at[1] && shot < end, "{at:?}, shot {shot}, end {end}");
+        }
     }
 }
