@@ -13,11 +13,20 @@
 //!   dropped;
 //! - pause: `hideNotify` on the event thread, `pauseApp` on a lifecycle
 //!   thread once the lifecycle calls before it have returned (each waited
-//!   for up to a second), then the VM and the sound group pause;
+//!   for up to a second), then the VM and the sound group pause. A MIDlet
+//!   that paused itself (`notifyPaused`) gets no `pauseApp`, but freezes
+//!   all the same;
 //! - resume: the VM and the sound group resume, `showNotify` and a full
-//!   repaint, then `startApp` on a lifecycle thread;
+//!   repaint, then `startApp` on a lifecycle thread, in its turn. The
+//!   MIDlet's `resumeRequest` does the same for a MIDlet that paused
+//!   itself, and nothing while the app has it paused;
 //! - stop: `destroyApp(true)` on a lifecycle thread, waited for up to a
 //!   second, then every thread of the VM stops and the sound group closes.
+//!
+//! The MIDlet's own messages (`resumeRequest`, `notifyDestroyed`, a crash)
+//! share the control thread's queue with the app's, merged so that a game
+//! that sends them in a loop cannot grow it (`crate::host::ControlQueue`).
+//! The app's messages are never merged or dropped there.
 //!
 //! A game thread can hold the VM lock for ever, in a native that loops
 //! around calls into Java or in a loop with no safepoint. The control

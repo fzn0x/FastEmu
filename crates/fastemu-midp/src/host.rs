@@ -57,9 +57,10 @@ pub(crate) enum Control {
 /// came. Sending never blocks and never waits for the VM lock.
 ///
 /// The app's messages (input, pause, resume, stop) are all kept, in
-/// order. The game's own messages are merged, so a game that sends them
-/// in a loop adds at most one message behind each of the app's, and one
-/// that ends it:
+/// order. The game's own messages are merged, so however often a game
+/// sends them, at most one `ResumeRequest` waits between two messages of
+/// the app (or before the first, or after the last), and one message
+/// that ends the game:
 ///
 /// - a `ResumeRequest` right behind another that still waits is part of
 ///   it. The control thread reads the instance's status when it takes the
