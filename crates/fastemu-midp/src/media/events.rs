@@ -95,6 +95,10 @@ fn ensure(ctx: &mut Ctx<'_>) -> JResult<()> {
         return Ok(());
     }
     let (notes, receiver) = mpsc::channel();
+    // The thread is the library's, not the game's: it must start even when
+    // the game has as many threads as it may have. It comes first, so a
+    // failure leaves nothing set up; it cannot run before this returns.
+    ctx.spawn_host_thread("media-events", move |ctx| run(ctx, &receiver))?;
     if let Some(group) = group(ctx) {
         let to_thread = notes.clone();
         group.set_listener(Some(Arc::new(move |event| {
@@ -109,7 +113,6 @@ fn ensure(ctx: &mut Ctx<'_>) -> JResult<()> {
         probe: None,
         warnings: 0,
     });
-    ctx.spawn_thread("media-events", move |ctx| run(ctx, &receiver))?;
     Ok(())
 }
 
