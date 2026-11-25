@@ -167,13 +167,17 @@ impl FastEmuView {
             return;
         }
         let launcher = Arc::clone(&self.launcher);
+        let paths = self.paths.clone();
         cx.spawn_in(window, async move |this, cx| {
-            let results = cx
+            let (results, saved) = cx
                 .background_spawn(async move {
-                    suites
+                    let results = suites
                         .into_iter()
                         .map(|path| inspect(&*launcher, path))
-                        .collect::<Vec<_>>()
+                        .collect::<Vec<_>>();
+                    // The saves of games the library does not list stay on
+                    // disk, and a new game must not get their folders.
+                    (results, paths.saved_ids())
                 })
                 .await;
             this.update_in(cx, |this, window, cx| {
@@ -196,7 +200,7 @@ impl FastEmuView {
                                 }
                                 id
                             } else {
-                                let id = this.library.add(found.path, &info);
+                                let id = this.library.add_beside(found.path, &info, &saved);
                                 this.broken.remove(&id);
                                 this.set_icon(id, found.icon, window);
                                 added += 1;

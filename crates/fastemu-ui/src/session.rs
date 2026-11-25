@@ -1,6 +1,7 @@
 //! One running game as the workspace sees it: the instance, how it was
 //! started, and what the app keeps about it between frames.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -32,6 +33,29 @@ impl AppPaths {
             .join("games")
             .join(entry.0.to_string())
             .join(slot.to_string())
+    }
+
+    /// The numbers of the folders under `games`, one for each game that
+    /// ever ran here, whether or not the library still lists it. Nothing
+    /// deletes a game's saves, so a new game must not get one of these
+    /// numbers. A name that is no number is not a game's folder. Folders
+    /// that cannot be listed count as none; the library's own counter then
+    /// serves.
+    pub fn saved_ids(&self) -> HashSet<u64> {
+        let games = self.data_dir.join("games");
+        let listing = match std::fs::read_dir(&games) {
+            Ok(listing) => listing,
+            Err(err) => {
+                if err.kind() != std::io::ErrorKind::NotFound {
+                    log::warn!("could not list the saves in {}: {err}", games.display());
+                }
+                return HashSet::new();
+            }
+        };
+        listing
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().to_str()?.parse().ok())
+            .collect()
     }
 }
 
@@ -407,6 +431,22 @@ mod tests {
         };
         assert_ne!(paths.game_dir(EntryId(1), 0), paths.game_dir(EntryId(1), 1));
         assert!(paths.game_dir(EntryId(7), 2).ends_with("games/7/2"));
+    }
+
+    #[test]
+    fn the_saves_folders_are_found_by_their_numbers() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let paths = AppPaths {
+            config_dir: dir.path().join("config"),
+            data_dir: dir.path().join("data"),
+            screenshot_dir: dir.path().join("shots"),
+        };
+        assert!(paths.saved_ids().is_empty(), "no games folder yet");
+        for name in ["1/0", "7/0/rms", "12", "notes", "3x", "-4"] {
+            std::fs::create_dir_all(paths.data_dir.join("games").join(name)).expect("mkdir");
+        }
+        let found = paths.saved_ids();
+        assert_eq!(found, HashSet::from([1, 7, 12]));
     }
 
     #[test]

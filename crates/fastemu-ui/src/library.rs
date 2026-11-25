@@ -75,11 +75,23 @@ impl Library {
     /// Adds the suite at `path`, described by `info`. Adding a file that is
     /// already in the library returns the existing entry instead of a
     /// duplicate.
+    ///
+    /// The app adds with [`Library::add_beside`], which also knows the
+    /// saves on disk.
     pub fn add(&mut self, path: PathBuf, info: &SuiteInfo) -> EntryId {
+        self.add_beside(path, info, &HashSet::new())
+    }
+
+    /// Like [`Library::add`], for a library whose saves folders are the
+    /// numbers in `saved` (see `AppPaths::saved_ids`): the new entry gets a
+    /// number above all of them. The library file keeps the counter, and a
+    /// lost or damaged file starts it again, which would hand a new game
+    /// the folder of an old one, and with it that game's saves.
+    pub fn add_beside(&mut self, path: PathBuf, info: &SuiteInfo, saved: &HashSet<u64>) -> EntryId {
         if let Some(id) = self.find_path(&path) {
             return id;
         }
-        let id = self.fresh_id();
+        let id = self.fresh_id(saved);
         self.next_id = id.0.saturating_add(1);
         let fallback = path.file_stem().map_or_else(
             || "Untitled".to_owned(),
@@ -98,19 +110,21 @@ impl Library {
         id
     }
 
-    /// An id above every one handed out so far. Only a hand-edited file
-    /// can use up the ids; then the smallest id not in use serves.
-    fn fresh_id(&self) -> EntryId {
-        let highest = self.entries.iter().map(|e| e.id.0).max().unwrap_or(0);
+    /// An id above every one handed out so far and every one in `saved`.
+    /// Only a hand-edited file or folder name can use up the ids; then the
+    /// smallest id not in use serves.
+    fn fresh_id(&self, saved: &HashSet<u64>) -> EntryId {
+        let in_use = || {
+            self.entries
+                .iter()
+                .map(|e| e.id.0)
+                .chain(saved.iter().copied())
+        };
+        let highest = in_use().max().unwrap_or(0);
         if let Some(above) = highest.checked_add(1) {
             return EntryId(self.next_id.max(above));
         }
-        let mut used: Vec<u64> = self
-            .entries
-            .iter()
-            .map(|e| e.id.0)
-            .filter(|&id| id > 0)
-            .collect();
+        let mut used: Vec<u64> = in_use().filter(|&id| id > 0).collect();
         used.sort_unstable();
         used.dedup();
         // Distinct ids from 1 up: the first position that differs is free.
@@ -241,6 +255,44 @@ mod tests {
             "b",
             "falls back to the file name"
         );
+    }
+
+    fn saved(ids: &[u64]) -> HashSet<u64> {
+        ids.iter().copied().collect()
+    }
+
+    #[test]
+    fn a_reset_library_hands_out_numbers_above_the_saves_folders() {
+        // library.json was lost: no entries, no counter, but the saves of
+        // games 1 and 7 are still in the data folder.
+        let mut lib = Library::default();
+        let a = lib.add_beside("a.jar".into(), &info("A"), &saved(&[1, 7]));
+        assert_eq!(a, EntryId(8));
+        let b = lib.add_beside("b.jar".into(), &info("B"), &saved(&[1, 7]));
+        assert_eq!(b, EntryId(9), "the counter goes on from the new game");
+    }
+
+    #[test]
+    fn the_saves_folders_win_only_when_they_are_higher() {
+        let mut lib = Library::default();
+        lib.add("a.jar".into(), &info("A"));
+        lib.add("b.jar".into(), &info("B"));
+        lib.add("c.jar".into(), &info("C"));
+        // Folders 1 and 2 are the library's own games.
+        let d = lib.add_beside("d.jar".into(), &info("D"), &saved(&[1, 2]));
+        assert_eq!(d, EntryId(4));
+        // A folder above the counter, such as an older game's, moves it.
+        let e = lib.add_beside("e.jar".into(), &info("E"), &saved(&[50]));
+        assert_eq!(e, EntryId(51));
+    }
+
+    #[test]
+    fn a_folder_that_uses_up_the_numbers_still_leaves_a_free_one() {
+        let mut lib = Library::default();
+        let id = lib.add_beside("a.jar".into(), &info("A"), &saved(&[1, 2, u64::MAX]));
+        assert_eq!(id, EntryId(3));
+        let id = lib.add_beside("b.jar".into(), &info("B"), &saved(&[1, 2, 3, u64::MAX]));
+        assert_eq!(id, EntryId(4), "not the folder of the game just added");
     }
 
     #[test]

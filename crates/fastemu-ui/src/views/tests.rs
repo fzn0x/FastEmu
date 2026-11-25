@@ -352,6 +352,22 @@ fn a_game_keeps_its_save_folder_across_starts(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_game_added_after_a_library_reset_gets_a_folder_of_its_own(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    // library.json is gone, but the saves of games 1 and 4 are not.
+    let old = dir.path().join("data/games/4/0/rms");
+    std::fs::create_dir_all(&old).expect("mkdir");
+    std::fs::create_dir_all(dir.path().join("data/games/1/0")).expect("mkdir");
+    std::fs::write(old.join("score.rms"), b"an old game's save").expect("writes");
+    let mut h = open_in(cx, dir);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    let request = h.launcher.request(0);
+    assert_eq!(request.data_dir, h.dir.path().join("data/games/5/0"));
+    assert!(!request.data_dir.join("rms/score.rms").exists());
+}
+
+#[gpui::test]
 fn starting_a_game_on_a_narrow_window_hides_the_library(cx: &mut TestAppContext) {
     let mut h = open(cx);
     h.add(&["snake.jar"]);
