@@ -641,6 +641,11 @@ mod tests {
         let took = [100, 100, 5000, 1100, 100];
         assert_eq!(offer_paced(&mut t, &took), 4);
         assert_eq!(t.pace_left(), 2000 - 2300);
+        // Two renders run past their estimates, by 500 and then by 1000:
+        // the one that ran most counts as far as the one before it.
+        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800, SLICE_FRAMES));
+        assert_eq!(offer_paced(&mut t, &[100, 600, 1100, 100]), 4);
+        assert_eq!(t.pace_left(), 2000 - 1300);
         // Two such pauses: the second counts, and the pace is taken.
         let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800, SLICE_FRAMES));
         let took = [100, 5000, 5000, 100, 100];
