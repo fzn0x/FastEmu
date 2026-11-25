@@ -241,11 +241,29 @@ fn rows(picture: &Surface, count: usize) -> Result<Vec<Surface>, GfxError> {
         .collect()
 }
 
+/// The bytes the pixels of `picture` take.
+fn pixel_bytes(picture: &Surface) -> usize {
+    (picture.width() as usize)
+        .saturating_mul(picture.height() as usize)
+        .saturating_mul(4)
+}
+
+/// Counts the pictures `this` was just given against the heap, as the
+/// allocation of an object of their size would be: a game that makes
+/// sprites in a loop makes no other object of size, and no collection
+/// would run.
+fn count_frames(ctx: &mut Ctx<'_>, this: Value) -> JResult<Value> {
+    let this = ctx.non_null(this)?;
+    ctx.recount(this);
+    Ok(Value::Void)
+}
+
 /// Makes `this` a sprite of `picture` cut into `frames` frames.
 fn make_sprite(ctx: &mut Ctx<'_>, this: Value, picture: &Surface, frames: i32) -> JResult<Value> {
     if frames < 1 || !picture.height().is_multiple_of(frames as u32) {
         return illegal(ctx, "wrong number of frames");
     }
+    ctx.check_alloc(pixel_bytes(picture))?;
     let frames = rows(picture, frames as usize).map_err(|e| throw_gfx(ctx, &e))?;
     let (w, h) = (frames[0].width() as i32, frames[0].height() as i32);
     data(ctx, this)?.shape = Shape::Sprite(SpriteData {
@@ -255,7 +273,7 @@ fn make_sprite(ctx: &mut Ctx<'_>, this: Value, picture: &Surface, frames: i32) -
         frame: 0,
         collision: [0, 0, w, h],
     });
-    Ok(Value::Void)
+    count_frames(ctx, this)
 }
 
 fn sprite_from_images(
@@ -337,6 +355,7 @@ fn make_tiles(ctx: &mut Ctx<'_>, a: &[Value], tiles: &Surface) -> JResult<Value>
     if w <= 0 || h <= 0 {
         return illegal(ctx, "the map has no cells");
     }
+    ctx.check_alloc(pixel_bytes(tiles))?;
     let all = tile_set(tiles).map_err(|e| throw_gfx(ctx, &e))?;
     let cells = ctx.array::<i8>(map)?;
     if (cells.len() as i64) < i64::from(w) * i64::from(h) {
@@ -352,7 +371,7 @@ fn make_tiles(ctx: &mut Ctx<'_>, a: &[Value], tiles: &Surface) -> JResult<Value>
         height: h,
         position: (0, 0),
     });
-    Ok(Value::Void)
+    count_frames(ctx, a[0])
 }
 
 fn tiles_from_images(
