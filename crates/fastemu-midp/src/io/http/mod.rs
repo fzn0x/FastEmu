@@ -36,6 +36,10 @@ const HEAD_TIMEOUT: Duration = Duration::from_secs(60);
 /// The request methods MIDP allows, which are case-sensitive.
 const METHODS: [&str; 3] = ["GET", "POST", "HEAD"];
 
+/// The most request body one connection collects. Phones sent small forms
+/// and some photos; nothing legitimate sends more than this from a game.
+const MAX_REQUEST_BODY: usize = 4 << 20;
+
 /// Whether the request has gone out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
@@ -56,7 +60,8 @@ struct State {
     method: String,
     /// The request headers in the order the game set them.
     headers: Vec<(String, String)>,
-    /// The request body the output stream collected.
+    /// The request body the output stream collected, until the request
+    /// goes out.
     body: Vec<u8>,
     phase: Phase,
     /// `close` was called.
@@ -292,7 +297,8 @@ fn ensure_sent(ctx: &mut Ctx<'_>, shared: &Shared, allow_closed: bool) -> JResul
             return Ok(());
         }
         s.phase = Phase::Sent;
-        let request = wire::encode_request(&s.method, &s.url, &s.headers, &s.body, &agent);
+        let body = std::mem::take(&mut s.body);
+        let request = wire::encode_request(&s.method, &s.url, &s.headers, body, &agent);
         (s.url.clone(), request)
     };
     let link = match send(ctx, &url, &request) {
@@ -464,6 +470,10 @@ impl Output for BodyOutput {
         if s.phase == Phase::Sent {
             drop(s);
             return throw_io(ctx, "the request was already sent");
+        }
+        if s.body.len() + bytes.len() > MAX_REQUEST_BODY {
+            drop(s);
+            return throw_io(ctx, "the request body is larger than 4 MiB");
         }
         s.body.extend_from_slice(bytes);
         Ok(())

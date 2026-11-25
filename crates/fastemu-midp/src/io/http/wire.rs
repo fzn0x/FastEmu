@@ -19,7 +19,8 @@ const MAX_CHUNK_LINE: usize = 1024;
 const OWN_HEADERS: [&str; 3] = ["content-length", "connection", "transfer-encoding"];
 
 /// The bytes of a request: `method` for `url` with the game's `headers`
-/// and `body`.
+/// and `body`, which the request takes over as its end, so a large body
+/// is not copied.
 ///
 /// A `Host` header is added unless the game set one (some games reach a
 /// virtual host through an address). `User-Agent` is `user_agent` unless
@@ -29,7 +30,7 @@ pub(crate) fn encode_request(
     method: &str,
     url: &HttpUrl,
     headers: &[(String, String)],
-    body: &[u8],
+    mut body: Vec<u8>,
     user_agent: &str,
 ) -> Vec<u8> {
     let has = |name: &str| headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name));
@@ -49,9 +50,8 @@ pub(crate) fn encode_request(
         let _ = write!(head, "Content-Length: {}\r\n", body.len());
     }
     head.push_str("Connection: close\r\n\r\n");
-    let mut bytes = head.into_bytes();
-    bytes.extend_from_slice(body);
-    bytes
+    body.splice(0..0, head.into_bytes());
+    body
 }
 
 /// The status line and headers of a response.
@@ -445,7 +445,7 @@ mod tests {
             ("content-length".to_owned(), "99".to_owned()),
             ("Connection".to_owned(), "keep-alive".to_owned()),
         ];
-        let bytes = encode_request("POST", &url, &headers, b"hi", "Phone/1.0");
+        let bytes = encode_request("POST", &url, &headers, b"hi".to_vec(), "Phone/1.0");
         let text = String::from_utf8(bytes).unwrap();
         assert_eq!(
             text,
@@ -465,7 +465,8 @@ mod tests {
             ("Host".to_owned(), "games.example".to_owned()),
             ("User-Agent".to_owned(), "Game/2".to_owned()),
         ];
-        let text = String::from_utf8(encode_request("GET", &url, &headers, b"", "x")).unwrap();
+        let text =
+            String::from_utf8(encode_request("GET", &url, &headers, Vec::new(), "x")).unwrap();
         assert_eq!(
             text,
             "GET / HTTP/1.1\r\nHost: games.example\r\nUser-Agent: Game/2\r\nConnection: close\r\n\r\n"
