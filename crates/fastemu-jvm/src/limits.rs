@@ -13,7 +13,9 @@
 pub struct VmLimits {
     /// Java threads a game may have alive at once, counting its main
     /// thread. `Thread.start` and `Timer` throw `OutOfMemoryError` past
-    /// it. Enforced by #36.
+    /// it. The host's own threads (the event and lifecycle threads) count
+    /// too, and may go 16 past it, so a game cannot keep the host from
+    /// starting them. Enforced by #36.
     pub max_threads: usize,
     /// Slots (locals and operand stack entries) one thread's stack may
     /// hold, so deep recursion ends in `StackOverflowError` before it
