@@ -45,7 +45,9 @@ code must follow, and how to define a Java class in Rust.
   virtual dispatch.
 - **`ClassSource`**: where class files and resources come from. This
   crate has `DirSource` (a directory, as `javac -d` writes it) and
-  `MemorySource` (tests); the MIDP crate provides the JAR source.
+  `MemorySource` (tests); the MIDP crate provides the JAR source. A
+  source answers `resource_within(path, max)`, which says `TooLarge`
+  without building a resource over `max` bytes.
 
 ## Modules
 
@@ -309,7 +311,11 @@ the collector cannot see, so it cannot collect in the middle:
    `new_array`, `new_object_array`, `new_byte_array`, `new_string` and
    `new_string_utf16` call it. A native that builds a big host buffer
    (`String.concat`, a growing `StringBuffer`) calls it before it builds
-   the buffer. The bound is twice the heap, not the heap, because the
+   the buffer. A native that reads a resource of the game's JAR calls
+   `Ctx::read_resource`, which asks the source to stop at what
+   `check_alloc` would let through, so a resource that expands a
+   thousand times is never built whole; it throws `OutOfMemoryError` for
+   one over that. The bound is twice the heap, not the heap, because the
    count includes garbage that waits for a collection and a native cannot
    collect.
 3. *Judged after the native returns.* The invoke instruction collects
@@ -830,12 +836,18 @@ load.
 What the loader builds before it knows the size stays within a small
 multiple of the class file and of the classes already loaded, so a class
 that is then refused costs little. A method keeps two numbers of its descriptor and not its parse, since a descriptor can name
-tens of thousands of parameters and every method can share it. A text
+tens of thousands of parameters and every method can share it. A
+descriptor is walked once for each text that names it, in the class file
+parser (by the index of its pool entry) and in `define` (by its `Arc`),
+and `descriptor::method_shape` walks it without making a `String` for
+each parameter, so a class of 65535 methods that share one descriptor of
+65532 parameters costs a few milliseconds, not six minutes. A text
 constant is copied to UTF-16 once for each text of the pool, however many
 string entries and fields name it. An interface a class names more than
-once is added once. The file itself, which the zip reader caps at 64 MiB
-for an entry, is parsed before any of this, and a refused class holds a
-few times its size while it is.
+once is added once. The file itself, which the JAR source caps at 4 MiB
+(`MAX_CLASS_BYTES`; the largest class of the test folder has 200 KB), is
+parsed before any of this, and a refused class holds a few times its size
+while it is.
 
 **Diagnostics.** Something a game needs that FastEmu lacks throws the
 usual error and is reported once to the diagnostics hook and the log, by
