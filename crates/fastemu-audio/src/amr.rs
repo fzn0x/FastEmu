@@ -131,9 +131,7 @@ mod tests {
     /// `#!AMR` and then `frames` frames of type 15 (NO_DATA), one byte
     /// each, which decode to 160 samples apiece.
     fn no_data_file(frames: usize) -> Vec<u8> {
-        let mut file = b"#!AMR
-"
-        .to_vec();
+        let mut file = b"#!AMR\n".to_vec();
         file.resize(file.len() + frames, 0x7C);
         file
     }
