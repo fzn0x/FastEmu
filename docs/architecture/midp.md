@@ -414,7 +414,10 @@ an instance the app paused. A game with a thread that spins, or with
 threads that block each other on locks, never looks idle. `ping` waits
 for the VM lock for a second at most, as `Vm::post` does, and
 `activity` for 100 ms, so they are for tools such as
-`cargo xtask compat`, not for an app's UI thread.
+`cargo xtask compat`, not for an app's UI thread. Both hold the machine
+while they run. Once the machine of a game that ended is freed, `ping`
+never answers and `activity` returns `None`, as for a locked machine:
+the compat probe asks `MidpInstance::vm_freed` to tell them apart.
 `tests/still_screens.rs` checks each case with a MIDlet of its own.
 
 `getAppProperty` reads the settings' properties, then the JAD, then the
