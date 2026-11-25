@@ -100,16 +100,20 @@ links to the page that describes the limit.
 | JAD file | 1 MiB | the same; a JAD found beside a JAR is left out | [midp.md][midp-suites] |
 | Manifest and JAD text | the first 1 MiB, 4096 attributes | the rest is not read | [midp.md][midp-suites] |
 | Entries of a JAR | 65535, and 4 MiB of names | later entries are not seen | [midp.md][midp-suites] |
-| One class file | 4 MiB | `NoClassDefFoundError` | [midp.md][midp-suites] |
+| One class file | 4 MiB | `NoClassDefFoundError`, or `ClassNotFoundException` from `Class.forName`; the log says so once | [midp.md][midp-suites] |
+| JAR a JAD names in `MIDlet-Jar-URL` | a file in the JAD's folder or a folder below it; every part a plain name of at most 255 bytes, with no `..`, drive, share, stream or device name | that name is not tried; the JAD's own name with `.jar` is, and without it the game does not start | [midp.md][midp-suites] |
+| Classes of the runtime | a JAR cannot replace them, and no class under `java/` or `javax/` loads from it | the runtime's own class is used; a missing one is `NoClassDefFoundError` | [midp.md][midp-suites] |
 | Class data | 128 MiB | `OutOfMemoryError`: "class memory limit reached" | [jvm.md][jvm-classes] |
-| Class name | 255 bytes | `NoClassDefFoundError`, or `ClassNotFoundException` from `Class.forName` | [jvm.md][jvm-classes] |
+| Class name | 255 bytes, 512 for an array class | `NoClassDefFoundError`, or `ClassNotFoundException` from `Class.forName` | [jvm.md][jvm-classes] |
 | Array dimensions | 255 | `ClassFormatError` | [jvm.md][jvm-classes] |
 | Classes on one path up a hierarchy | 256 | `ClassFormatError` | [jvm.md][jvm-classes] |
-| MIDlet class a manifest names | 255 bytes, no brackets, no control characters | that MIDlet is left out | [midp.md][midp-suites] |
-| Search for MIDlet classes in a JAR without `MIDlet-1` | 8192 classes, 32 MiB inflated and 32 MiB compressed | the classes past it are not offered | [midp.md][midp-suites] |
-| A resource the game reads | the room left in the heap | `OutOfMemoryError` before it is read | [midp.md][midp-suites] |
+| MIDlet class a manifest or JAD names | 255 bytes, no brackets, no control characters | that MIDlet is left out | [midp.md][midp-suites] |
+| Search for MIDlet classes, when no `MIDlet-<n>` gives a MIDlet | 8192 classes, 32 MiB inflated and 32 MiB compressed | the classes past it are not offered | [midp.md][midp-suites] |
+| Search for MIDlet classes: classes between a class and `MIDlet` | 64 | that class is not offered | [midp.md][midp-suites] |
+| A resource the game reads | what one request of the runtime may take: at most the heap, and at most twice the heap with what the heap counts already | `OutOfMemoryError`, and the read stops at that size | [midp.md][midp-suites] |
+| Resources read at once | one for each game | the game's other threads wait for theirs | [midp.md][midp-suites] |
 | Name of a resource | 1024 bytes or 64 segments | not found | [midp.md][midp-suites] |
-| Missing classes, methods and fields reported, and missing resources apart | 256 of each, every name cut to 255 characters | no more are logged | [jvm.md][jvm-limits] |
+| Missing classes, methods and fields reported, all in one count, and missing resources in another | 256 different names in each count, every name cut to 255 characters | no more are logged, and one line says so | [jvm.md][jvm-limits], [midp.md][midp-suites] |
 
 [jvm-classes]: docs/architecture/jvm.md#class-loading-and-initialization
 [midp-suites]: docs/architecture/midp.md#suites
