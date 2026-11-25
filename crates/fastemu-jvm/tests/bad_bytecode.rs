@@ -275,18 +275,44 @@ fn a_return_leaves_the_slots_the_method_declares() {
 }
 
 #[test]
-fn a_thread_that_throws_an_object_that_is_not_a_throwable_ends() {
-    // new Object; dup; invokespecial Object.<init>; athrow. Reporting the
-    // uncaught exception reads fields that the object does not have.
-    let mut c = ClassBuilder::new("Thr", "java/lang/Object", 49, 0);
+fn athrow_of_an_object_that_is_not_a_throwable_is_refused() {
+    // new Object; dup; invokespecial Object.<init>; athrow
+    let mut c = ClassBuilder::new("Bad", "java/lang/Object", 49, 0);
     let [oh, ol] = idx(c.class("java/lang/Object"));
     let [ih, il] = idx(c.method_ref("java/lang/Object", "<init>", "()V"));
     let code = [0xbb, oh, ol, 0x59, 0xb7, ih, il, 0xbf];
+    c.method(PUBLIC | STATIC, "f", "()V", 2, 0, &code, &[]);
+    assert_verify_error(&run_classes(&[("Bad", c.build())]), "not a Throwable");
+    // iconst_1; newarray int; athrow: an array is no Throwable either.
+    assert_verify_error(&run(1, 0, &[0x04, 0xbc, 10, 0xbf], &[]), "not a Throwable");
+}
+
+#[test]
+fn a_thread_whose_uncaught_exception_cannot_be_reported_ends() {
+    // new RuntimeException; dup; invokespecial <init>; dup; new Object;
+    // dup; invokespecial Object.<init>; invokevirtual initCause; pop;
+    // athrow. Nothing checks the type of an argument, so the cause is a
+    // plain Object, and the report of the uncaught exception panics when
+    // it reads the cause's own cause from fields the object does not have.
+    let mut c = ClassBuilder::new("Thr", "java/lang/Object", 49, 0);
+    let [rh, rl] = idx(c.class("java/lang/RuntimeException"));
+    let [ch, cl] = idx(c.method_ref("java/lang/RuntimeException", "<init>", "()V"));
+    let [oh, ol] = idx(c.class("java/lang/Object"));
+    let [ih, il] = idx(c.method_ref("java/lang/Object", "<init>", "()V"));
+    let [xh, xl] = idx(c.method_ref(
+        "java/lang/Throwable",
+        "initCause",
+        "(Ljava/lang/Throwable;)Ljava/lang/Throwable;",
+    ));
+    let code = [
+        0xbb, rh, rl, 0x59, 0xb7, ch, cl, 0x59, 0xbb, oh, ol, 0x59, 0xb7, ih, il, 0xb6, xh, xl,
+        0x57, 0xbf,
+    ];
     c.method(
         PUBLIC | STATIC,
         "main",
         "([Ljava/lang/String;)V",
-        2,
+        4,
         1,
         &code,
         &[],
