@@ -122,13 +122,9 @@ impl ClassTable {
 
     /// The most bytes the class `def` holds once linked, given the
     /// classes it extends and implements (`all_interfaces`, sorted) and
-    /// the number of its superclasses with itself (`supers`).
-    ///
-    /// The method table is counted at its longest: the superclass's, a
-    /// slot for every method of the class that a subclass could override,
-    /// and every method of the interfaces the superclass does not
-    /// implement already. A method that overrides one shares its slot, so
-    /// the number is a little over.
+    /// the number of its superclasses with itself (`supers`): what it
+    /// holds on its own and what it copies from them.
+    #[cfg(test)]
     pub(super) fn class_file_bytes(
         &self,
         def: &ClassDef,
@@ -136,6 +132,19 @@ impl ClassTable {
         all_interfaces: &[ClassId],
         supers: usize,
     ) -> usize {
+        Self::own_class_bytes(def).saturating_add(self.inherited_class_bytes(
+            def,
+            superclass,
+            all_interfaces,
+            supers,
+        ))
+    }
+
+    /// The bytes of the class `def` that do not depend on the classes
+    /// above it: its name, pool, fields, methods and code, the interfaces
+    /// it names, and a method table slot for each of its methods that a
+    /// subclass could override.
+    pub(super) fn own_class_bytes(def: &ClassDef) -> usize {
         let mut sum = Sum::default();
         sum.add(1, CLASS + def.name.len());
         if let Some((pool, _)) = &def.pool {
@@ -161,9 +170,7 @@ impl ClassTable {
             }
         }
         sum.add(def.fields.len(), FIELD);
-        sum.add(statics, SLOT);
-        // A subclass copies the instance fields of its superclass.
-        sum.add(superclass.map_or(0, |s| s.template.len()) + instance, SLOT);
+        sum.add(statics + instance, SLOT);
 
         let mut overridable = 0;
         for m in &def.methods {
@@ -179,10 +186,33 @@ impl ClassTable {
             }
         }
 
-        sum.add(
-            supers + all_interfaces.len() + def.interfaces.len(),
-            CLASS_ID,
-        );
+        sum.add(def.interfaces.len(), CLASS_ID);
+        if def.access & access::INTERFACE == 0 {
+            sum.add(overridable, VTABLE_ENTRY);
+        }
+        sum.0
+    }
+
+    /// The bytes the class `def` copies from the classes above it, once
+    /// they have loaded: the instance slots of its superclass, its lists
+    /// of superclasses (`supers`, itself included) and of all its
+    /// interfaces (`all_interfaces`, sorted), and the method table of its
+    /// superclass with the methods of the interfaces the superclass does
+    /// not implement already.
+    ///
+    /// The method table is counted at its longest. A method that
+    /// overrides one shares its slot, so the number is a little over.
+    pub(super) fn inherited_class_bytes(
+        &self,
+        def: &ClassDef,
+        superclass: Option<&Class>,
+        all_interfaces: &[ClassId],
+        supers: usize,
+    ) -> usize {
+        let mut sum = Sum::default();
+        // A subclass copies the instance fields of its superclass.
+        sum.add(superclass.map_or(0, |s| s.template.len()), SLOT);
+        sum.add(supers.saturating_add(all_interfaces.len()), CLASS_ID);
         if def.access & access::INTERFACE == 0 {
             let inherited = |iface: &ClassId| {
                 superclass.is_some_and(|s| s.all_interfaces.binary_search(iface).is_ok())
@@ -193,7 +223,6 @@ impl ClassTable {
                 .map(|&iface| self.get(iface).methods.len())
                 .fold(0, usize::saturating_add);
             sum.add(superclass.map_or(0, |s| s.vtable.len()), VTABLE_ENTRY);
-            sum.add(overridable, VTABLE_ENTRY);
             sum.add(from_interfaces, VTABLE_ENTRY);
         }
         sum.0
@@ -243,6 +272,9 @@ mod tests {
                 .abstract_method("two", "()V")
                 .abstract_method("three", "()V"),
             NativeClass::new("a/Impl").implements("a/I"),
+            NativeClass::new("a/Holder")
+                .implements("a/I")
+                .field("x", "I"),
         ];
         ClassTable::new(Arc::new(MemorySource::new()), natives, usize::MAX)
     }
@@ -415,6 +447,30 @@ mod tests {
         let many = t.class_file_bytes(&def, Some(&object), &[iface; 11], 2);
         assert_eq!(few, none + CLASS_ID);
         assert_eq!(many - few, 10 * CLASS_ID);
+    }
+
+    #[test]
+    fn what_a_class_holds_on_its_own_does_not_depend_on_its_superclass() {
+        let mut t = table();
+        let sup = t.load("a/Holder").unwrap();
+        let sup = Arc::clone(t.get(sup));
+        let mut with_field = def();
+        with_field.fields.push(FieldDef {
+            name: "f".into(),
+            desc: "I".into(),
+            access: 0,
+            constant: None,
+        });
+        let own = ClassTable::own_class_bytes(&with_field);
+        let total = t.class_file_bytes(&with_field, Some(&sup), &sup.all_interfaces, 3);
+        // The superclass's instance slot and three method table entries,
+        // its list of one interface, and the three superclasses with the
+        // class itself. The class's own field is in its own part.
+        assert_eq!(total - own, SLOT + 3 * VTABLE_ENTRY + 4 * CLASS_ID);
+        let object = t.load("java/lang/Object").unwrap();
+        let object = Arc::clone(t.get(object));
+        let under_object = t.class_file_bytes(&with_field, Some(&object), &[], 2);
+        assert_eq!(under_object - own, 2 * CLASS_ID);
     }
 
     #[test]

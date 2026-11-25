@@ -299,8 +299,13 @@ impl ClassTable {
         // The classes a game can make count against its class memory; the
         // library's, which are fixed, do not.
         if def.pool.is_some() {
-            let bytes =
-                self.class_file_bytes(&def, superclass.as_deref(), &all_interfaces, supers.len());
+            let inherited = self.inherited_class_bytes(
+                &def,
+                superclass.as_deref(),
+                &all_interfaces,
+                supers.len(),
+            );
+            let bytes = Self::own_class_bytes(&def).saturating_add(inherited);
             self.budget.charge(bytes)?;
         }
 
