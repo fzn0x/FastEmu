@@ -1,8 +1,10 @@
 //! What a game's bytecode can make the interpreter do without bound: a
-//! handler that throws again forms a loop with no branch and no call.
+//! handler that throws again forms a loop with no branch and no call, and
+//! a frame declares as many slots as it likes.
 //!
 //! The classes are assembled by hand, because each needs code that no
-//! compiler writes: a loop that is only exception transfers.
+//! compiler writes: a loop that is only exception transfers, a method of
+//! 4,000 slots that uses one.
 
 mod support;
 
@@ -82,6 +84,69 @@ fn loops() -> Vec<u8> {
     c.build()
 }
 
+/// The recursion: `n == 0 ? 0 : callee(n - 1) + 1`.
+#[rustfmt::skip]
+fn recursion(callee: [u8; 2]) -> [u8; 15] {
+    [
+        0x1a,                       // 0: iload_0
+        0x9a, 0x00, 0x05,           // 1: ifne 6
+        0x03, 0xac,                 // 4: iconst_0 ireturn
+        0x1a, 0x04, 0x64,           // 6: iload_0 iconst_1 isub
+        0xb8, callee[0], callee[1], // 9: invokestatic callee
+        0x04, 0x60, 0xac,           // 12: iconst_1 iadd ireturn
+    ]
+}
+
+/// `try { return callee(n); } catch (StackOverflowError e) { return -1; }`
+#[rustfmt::skip]
+fn probe_overflow(callee: [u8; 2]) -> [u8; 8] {
+    [
+        0x1a,                       // 0: iload_0
+        0xb8, callee[0], callee[1], // 1: invokestatic callee
+        0xac,                       // 4: ireturn
+        0x4c, 0x02, 0xac,           // 5: astore_1 iconst_m1 ireturn
+    ]
+}
+
+/// `class Deep`: recursions with frames of different sizes.
+///
+/// - `big(n)` and `small(n)`: `n` calls of themselves that return `n`.
+///   A frame of `big` declares 2,000 locals and 2,000 stack slots, one of
+///   `small` the 1 local and 3 slots it needs.
+/// - `probeBig(n)` and `probeSmall(n)`: the same, `-1` when a
+///   `StackOverflowError` came out.
+/// - `wide(JJ)V`: takes four argument slots and returns.
+fn deep() -> Vec<u8> {
+    let mut c = ClassBuilder::new("Deep", "java/lang/Object", 49, 0);
+    let big = c.method_ref("Deep", "big", "(I)I");
+    let small = c.method_ref("Deep", "small", "(I)I");
+    let overflow = c.class("java/lang/StackOverflowError");
+    let [bh, bl] = idx(big);
+    let [sh, sl] = idx(small);
+    c.method(STATIC, "big", "(I)I", 2000, 2000, &recursion([bh, bl]), &[]);
+    c.method(STATIC, "small", "(I)I", 3, 1, &recursion([sh, sl]), &[]);
+    c.method(
+        STATIC,
+        "probeBig",
+        "(I)I",
+        1,
+        2,
+        &probe_overflow([bh, bl]),
+        &[(0, 5, 5, overflow)],
+    );
+    c.method(
+        STATIC,
+        "probeSmall",
+        "(I)I",
+        1,
+        2,
+        &probe_overflow([sh, sl]),
+        &[(0, 5, 5, overflow)],
+    );
+    c.method(STATIC, "wide", "(JJ)V", 0, 4, &[0xb1], &[]);
+    c.build()
+}
+
 /// `demo/Probe.entered()`: tells the test, without the VM lock, that the
 /// thread is about to start its loop.
 fn probe(entered: Arc<AtomicBool>) -> NativeClass {
@@ -92,7 +157,7 @@ fn probe(entered: Arc<AtomicBool>) -> NativeClass {
 }
 
 fn vm_with(heap: usize, limits: VmLimits, natives: Vec<NativeClass>) -> Vm {
-    let source = support::source(&[("Loops", loops())]);
+    let source = support::source(&[("Loops", loops()), ("Deep", deep())]);
     let config = VmConfig {
         heap_bytes: heap,
         limits,
@@ -138,8 +203,8 @@ fn stops(vm: &Vm) -> bool {
     stopped == Some(true)
 }
 
-/// Calls `Loops.<method>` of `vm` from the calling thread, as an attached
-/// Java thread.
+/// Calls `Loops.count` and `Deep.<method>` of `vm` from the calling
+/// thread, as an attached Java thread.
 fn call_int(vm: &Vm, class: &'static str, method: &str, arg: Option<i32>) -> i32 {
     vm.attach("test", |ctx| {
         let (desc, args) = match arg {
@@ -239,4 +304,51 @@ fn a_handler_loop_that_keeps_arrays_stops_at_the_heap_limit() {
         stats.used_bytes
     );
     assert!(stops(&vm), "the loop ends when the VM stops");
+}
+
+#[test]
+fn a_frame_past_the_slot_limit_throws_stack_overflow_error() {
+    let limits = VmLimits {
+        max_stack_slots: 4096,
+        ..VmLimits::default()
+    };
+    let vm = vm_with(HEAP, limits, Vec::new());
+    // One frame of 4,002 slots fits; a second does not.
+    assert_eq!(call_int(&vm, "Deep", "probeBig", Some(0)), 0);
+    assert_eq!(call_int(&vm, "Deep", "probeBig", Some(1)), -1);
+    // The thread goes on: frames that need little still recurse deep.
+    assert_eq!(call_int(&vm, "Deep", "probeSmall", Some(500)), 500);
+    assert_eq!(call_int(&vm, "Deep", "probeBig", Some(1)), -1);
+}
+
+#[test]
+fn the_default_slot_limit_allows_frames_of_a_real_game_and_not_gigabytes() {
+    let vm = vm_with(HEAP, VmLimits::default(), Vec::new());
+    // 131,072 slots hold 32 frames of 4,002, and a recursion of small
+    // frames reaches the limit on frames (4,096) first.
+    assert_eq!(call_int(&vm, "Deep", "probeBig", Some(20)), 20);
+    assert_eq!(call_int(&vm, "Deep", "probeBig", Some(100)), -1);
+    assert_eq!(call_int(&vm, "Deep", "probeSmall", Some(3000)), 3000);
+    assert_eq!(call_int(&vm, "Deep", "probeSmall", Some(100_000)), -1);
+}
+
+#[test]
+fn a_native_that_calls_into_java_past_the_slot_limit_gets_stack_overflow_error() {
+    let limits = VmLimits {
+        max_stack_slots: 3,
+        ..VmLimits::default()
+    };
+    let vm = vm_with(HEAP, limits, Vec::new());
+    let text = vm.attach("test", |ctx| {
+        // Four argument slots do not fit in three.
+        match ctx.call_static("Deep", "wide", "(JJ)V", &[Value::Long(1), Value::Long(2)]) {
+            Err(Throw::Exception(e)) => ctx.describe_exception(e),
+            Err(Throw::Stop) => panic!("stopped"),
+            Ok(_) => String::new(),
+        }
+    });
+    assert!(
+        text.contains("StackOverflowError"),
+        "the call threw {text:?}"
+    );
 }
