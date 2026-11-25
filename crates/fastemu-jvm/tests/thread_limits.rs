@@ -3,7 +3,9 @@
 //! throw `OutOfMemoryError`, as they would on a phone with no thread to
 //! spare. The host's own threads have 16 more, so a game that has used up
 //! its share cannot keep the host from starting its event and lifecycle
-//! threads.
+//! threads. The thread of a timer the game dropped ends once no task is
+//! left, as on Java SE: at the limit, the machine collects once and waits
+//! for such threads before it refuses.
 //!
 //! The cases are Java programs in `tests/thread_java/`, compiled once with
 //! `javac --release 8`; the JDK comes from `JAVA_HOME` or the `PATH`.
@@ -207,6 +209,69 @@ fn a_new_timer_throws_out_of_memory_error_at_the_limit() {
     // threads back: the main thread is the only one left.
     assert_eq!(out[2], "settled 1", "{out:?}");
     assert_eq!(out[3], "again ok", "{out:?}");
+    stop(&vm);
+}
+
+#[test]
+fn dropped_timers_do_not_use_up_the_games_threads() {
+    let Some((vm, lines)) = machine() else { return };
+    let out = run(&vm, &lines, "dropped");
+    // Four times the limit, each dropped at once.
+    assert_eq!(out[0], "dropped 32", "{out:?}");
+    stop(&vm);
+}
+
+#[test]
+fn timers_dropped_after_their_task_ran_do_not_use_up_the_games_threads() {
+    let Some((vm, lines)) = machine() else { return };
+    let out = run(&vm, &lines, "used");
+    assert_eq!(out[0], "used 32", "{out:?}");
+    stop(&vm);
+}
+
+#[test]
+fn thread_start_gets_the_thread_of_a_dropped_timer() {
+    let Some((vm, lines)) = machine() else { return };
+    let out = run(&vm, &lines, "start");
+    assert_eq!(out[0], "started true", "{out:?}");
+    stop(&vm);
+}
+
+#[test]
+fn a_dropped_timers_thread_ends_at_the_next_collection() {
+    let Some((vm, lines)) = machine() else { return };
+    let out = run(&vm, &lines, "collected");
+    assert_eq!(out[0], "ended true", "{out:?}");
+    stop(&vm);
+}
+
+#[test]
+fn a_dropped_timer_runs_its_repeating_task_until_it_is_cancelled() {
+    let Some((vm, lines)) = machine() else { return };
+    let out = run(&vm, &lines, "repeating");
+    assert_eq!(out[0], "still runs true", "{out:?}");
+    assert_eq!(out[1], "ended true", "{out:?}");
+    stop(&vm);
+}
+
+#[test]
+fn timers_the_game_keeps_work_across_collections() {
+    let Some((vm, lines)) = machine() else { return };
+    let out = run(&vm, &lines, "kept");
+    assert_eq!(out[0], "kept ok", "{out:?}");
+    assert_eq!(out[1], "task ok", "{out:?}");
+    let errors = support::lines_at(&lines, LogLevel::Err);
+    assert!(errors.is_empty(), "{errors:?}");
+    stop(&vm);
+}
+
+#[test]
+fn a_start_at_the_limit_never_waits_for_a_timer_thread_that_runs_game_code() {
+    let Some((vm, lines)) = machine() else { return };
+    let out = run(&vm, &lines, "reporting");
+    let refused = format!("unable to create a thread: too many threads (limit {MAX_THREADS})");
+    assert_eq!(out[0], format!("refused {refused}"), "{out:?}");
+    assert_eq!(out[1], format!("refused after gc {refused}"), "{out:?}");
     stop(&vm);
 }
 
