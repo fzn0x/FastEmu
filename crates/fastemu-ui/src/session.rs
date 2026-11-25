@@ -526,6 +526,9 @@ mod tests {
         ] {
             assert!(!is_web_link(hidden), "{hidden:?}");
         }
+        // The prompt shows the whole link, so a link has its length limit.
+        let long = format!("http://example.com/{}", "a".repeat(4096));
+        assert!(!is_web_link(&long), "4097 bytes");
         // A port that no server listens on is no page either.
         assert!(is_web_link("http://example.com:8080/"));
         for port in ["99999", "0", "abc", ""] {

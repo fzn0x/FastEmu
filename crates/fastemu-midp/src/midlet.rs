@@ -34,9 +34,6 @@ const CLASS: &str = "javax/microedition/midlet/MIDlet";
 const STATE_CHANGE: &str = "javax/microedition/midlet/MIDletStateChangeException";
 const NOT_FOUND: &str = "javax/microedition/io/ConnectionNotFoundException";
 
-/// The longest link, in bytes, a game may ask the app to open.
-const MAX_LINK: usize = 4096;
-
 /// Which lifecycle method a lifecycle thread calls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lifecycle {
@@ -264,11 +261,11 @@ fn permission(ctx: &mut Ctx<'_>, name: &str) -> i32 {
 /// one. A web link has the scheme `http` or `https`, in any case, and a
 /// host after `//`. It holds only printable ASCII and no backslash, no
 /// user name before the host, a port (when it has one) from 1 to 65535
-/// and at most [`MAX_LINK`] bytes, so the link the user reads is the page
-/// that opens (see [`is_web_link`]). A link to a `.jad` or `.jar` asks
-/// the phone to install a suite, which FastEmu does not do.
+/// and at most 4096 bytes, so the link the user reads is the page that
+/// opens (see [`is_web_link`]). A link to a `.jad` or `.jar` asks the
+/// phone to install a suite, which FastEmu does not do.
 fn web_link(url: &str) -> Option<String> {
-    if url.len() > MAX_LINK || !is_web_link(url) {
+    if !is_web_link(url) {
         return None;
     }
     let (scheme, rest) = split_scheme(url).ok()?;
@@ -416,6 +413,8 @@ pub fn classes() -> Vec<NativeClass> {
 
 #[cfg(test)]
 mod tests {
+    use fastemu_core::link::MAX_LINK_BYTES;
+
     use super::*;
 
     #[test]
@@ -474,7 +473,7 @@ mod tests {
         ] {
             assert_eq!(web_link(refused), None, "{refused:?}");
         }
-        let long = format!("http://example.com/{}", "a".repeat(MAX_LINK));
+        let long = format!("http://example.com/{}", "a".repeat(MAX_LINK_BYTES));
         assert_eq!(web_link(&long), None, "too long");
     }
 }

@@ -1,16 +1,23 @@
 //! Which links a game may ask the app to open.
 
+/// The longest link, in bytes, a game may ask the app to open.
+pub const MAX_LINK_BYTES: usize = 4096;
+
 /// Whether `url` is a web link: an `http` or `https` link, scheme in any
 /// case, with a host after `//`. It holds only printable ASCII and no
 /// backslash (a browser reads `http://good.com\.evil.com/` as a link to
-/// `evil.com`), no user name before the host, and a port, when it names
-/// one, of digits that make a number from 1 to 65535. So the link the
-/// user reads is the page that opens.
+/// `evil.com`), no user name before the host, a port, when it names one,
+/// of digits that make a number from 1 to 65535, and at most
+/// [`MAX_LINK_BYTES`] bytes. So the link the user reads is the page that
+/// opens, and it fits the prompt that shows it.
 ///
 /// The runtime hands the app nothing else, and the app checks again
 /// with this same function, so neither relies on the other.
 pub fn is_web_link(url: &str) -> bool {
-    if !url.bytes().all(|b| b.is_ascii_graphic()) || url.contains('\\') {
+    if url.len() > MAX_LINK_BYTES
+        || !url.bytes().all(|b| b.is_ascii_graphic())
+        || url.contains('\\')
+    {
         return false;
     }
     let Some((scheme, rest)) = url.split_once(':') else {
@@ -114,6 +121,14 @@ mod tests {
         ] {
             assert!(!is_web_link(bad), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_link_is_at_most_4096_bytes() {
+        let link = |bytes: usize| format!("http://example.com/{}", "a".repeat(bytes - 19));
+        assert!(is_web_link(&link(MAX_LINK_BYTES)));
+        assert!(!is_web_link(&link(MAX_LINK_BYTES + 1)));
+        assert!(!is_web_link(&link(1 << 20)));
     }
 
     #[test]
