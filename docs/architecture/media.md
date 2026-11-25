@@ -74,11 +74,15 @@ starts UNREALIZED and keeps the bytes until `realize`.
 The bytes count on the Java heap while the player keeps them
 (`PlayerData::heap_bytes`, counted when the player is made, recounted
 when `realize` or `close` drops them), as they did in the game's own
-stream. A stream is read into a host buffer, so the read asks the heap
-before every chunk (`Ctx::check_alloc`): a stream that never ends, or
-that is longer than the heap could hold, ends in `OutOfMemoryError` at
-the size of the heap, and never reads more than 32 MiB. A sound of a
-format nothing plays keeps no bytes at all.
+stream. A stream read through its `read` grows in an object the heap
+counts at the room of its vector (`StreamBytes`), and the heap is asked
+before it grows (`Ctx::check_alloc`): a stream that never ends, or that
+is longer than the heap could hold, ends in `OutOfMemoryError` at the
+size of the heap, and never reads more than 32 MiB. The game's `read`
+runs between the reads, and so do its other threads, so streams read at
+once share the heap's room. Once read, the bytes go to the player before
+any other thread runs. A sound of a format nothing plays keeps no bytes
+at all.
 
 `realize` decodes with the VM lock released (`Ctx::without_lock`), so
 other Java threads of the game keep running while a long MP3 or MIDI
