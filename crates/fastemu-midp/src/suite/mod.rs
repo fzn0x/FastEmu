@@ -13,7 +13,9 @@
 //! over [`MAX_JAR_BYTES`] or a JAD over [`MAX_JAD_BYTES`] is refused
 //! before it is read. So are the JAR and its manifest: the manifest and
 //! the JAD are read to [`attributes::MAX_ATTRIBUTE_BYTES`] and
-//! [`attributes::MAX_ATTRIBUTES`] attributes.
+//! [`attributes::MAX_ATTRIBUTES`] attributes, and a suite that lists no
+//! MIDlet is searched for one within a budget of classes and inflated
+//! bytes (see `find_midlet_classes`).
 
 pub mod attributes;
 pub mod source;
@@ -44,6 +46,24 @@ const MAX_NAME_BYTES: usize = 255;
 
 /// The longest suite icon read, inflated. Icons are a few KB.
 const MAX_ICON_BYTES: usize = 1024 * 1024;
+/// What a search for MIDlet classes may spend: how many class files it
+/// opens, how large one may be, and how many bytes all of them inflate to
+/// in all. Entries that share one compressed stream, which a ZIP file
+/// allows, are charged for each time they are read, so the search costs
+/// the same however the entries overlap.
+struct ScanLimits {
+    classes: usize,
+    class_bytes: usize,
+    total_bytes: usize,
+}
+
+/// The limits [`find_midlet_classes`] runs under. The largest JAR of the
+/// test folder, a desktop library, has 1046 classes of 4 MB in all.
+const SCAN: ScanLimits = ScanLimits {
+    classes: 8192,
+    class_bytes: source::MAX_CLASS_BYTES,
+    total_bytes: 32 * 1024 * 1024,
+};
 
 /// An opened suite: its attributes and its JAR.
 #[derive(Clone, Debug)]
@@ -318,18 +338,52 @@ fn read_info(
 }
 
 /// The classes in `jar` that extend `MIDlet`, directly or through other
-/// classes of the JAR, for suites whose descriptor names none.
+/// classes of the JAR, for suites whose descriptor names none. The search
+/// is bounded by [`SCAN`].
 fn find_midlet_classes(jar: &ZipArchive, suite_name: &str) -> Vec<MidletInfo> {
+    find_midlet_classes_within(jar, suite_name, &SCAN)
+}
+
+/// [`find_midlet_classes`] under `limits`. A class file is read up to
+/// `limits.class_bytes`, and the search stops after `limits.classes` class
+/// entries or when `limits.total_bytes` have been inflated, a read that
+/// went over its limit counting the limit. The suite may then list MIDlets
+/// that the search did not reach, which no suite without a `MIDlet-1` has
+/// shown to do.
+fn find_midlet_classes_within(
+    jar: &ZipArchive,
+    suite_name: &str,
+    limits: &ScanLimits,
+) -> Vec<MidletInfo> {
     use fastemu_jvm::classfile::ClassFile;
     use std::collections::HashMap;
+    use zip::ZipError;
 
     let mut supers: HashMap<String, (String, bool)> = HashMap::new();
+    let mut examined = 0;
+    let mut left = limits.total_bytes;
     for entry in jar.entries() {
-        let name = entry.display_name();
-        if !name.to_ascii_lowercase().ends_with(".class") {
+        let name = &entry.name;
+        if name.len() < 6 || !name[name.len() - 6..].eq_ignore_ascii_case(b".class") {
             continue;
         }
-        let Some(class) = jar.read(entry).ok().and_then(|b| ClassFile::parse(&b).ok()) else {
+        if examined >= limits.classes || left == 0 {
+            break;
+        }
+        examined += 1;
+        let cap = limits.class_bytes.min(left);
+        let bytes = match jar.read_limited(entry, cap) {
+            Ok(bytes) => {
+                left -= bytes.len();
+                bytes
+            }
+            Err(ZipError::TooLarge(_)) => {
+                left -= cap;
+                continue;
+            }
+            Err(_) => continue,
+        };
+        let Ok(class) = ClassFile::parse(&bytes) else {
             continue;
         };
         if let Some(parent) = &class.super_name {
@@ -363,7 +417,7 @@ fn find_midlet_classes(jar: &ZipArchive, suite_name: &str) -> Vec<MidletInfo> {
 
 #[cfg(test)]
 mod tests {
-    use super::zip::testing::{TestEntry, take_inflated, write};
+    use super::zip::testing::{TestEntry, take_inflated, write, write_overlapping};
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -408,6 +462,20 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A class file `name` whose superclass is `super_name`, with no
+    /// members.
+    fn class_file(name: &str, super_name: &str) -> Vec<u8> {
+        let mut b = vec![0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 49, 0, 5];
+        for text in [name, super_name] {
+            b.push(1);
+            b.extend((text.len() as u16).to_be_bytes());
+            b.extend(text.as_bytes());
+            b.extend([7, 0, if text == name { 1 } else { 3 }]);
+        }
+        b.extend([0x00, 0x21, 0, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0]);
+        b
+    }
+
     fn open_jar(name: &str, bytes: &[u8]) -> Suite {
         let dir = temp_dir(name);
         let path = dir.join("game.jar");
@@ -448,6 +516,89 @@ mod tests {
         let suite = open_jar("mfbomb", &bytes);
         assert_eq!(take_inflated(), attributes::MAX_ATTRIBUTE_BYTES as u64);
         assert_eq!(suite.info.midlets[0].class_name, "com.a.A");
+    }
+
+    #[test]
+    fn a_midlet_class_with_brackets_is_dropped_and_the_suite_lists_none() {
+        let manifest = b"MIDlet-Name: S\nMIDlet-1: A, , [[I\n";
+        let suite = open_jar("brackets", &jar("META-INF/MANIFEST.MF", manifest));
+        assert!(suite.info.midlets.is_empty());
+    }
+
+    #[test]
+    fn a_suite_that_lists_no_midlet_is_searched_for_one() {
+        let jar_bytes = write(
+            &[
+                TestEntry::stored("a/Util.class", &class_file("a/Util", "java/lang/Object")),
+                TestEntry::stored("a/Base.class", &class_file("a/Base", MIDLET_CLASS)),
+                TestEntry::stored("a/Game.class", &class_file("a/Game", "a/Base")),
+            ],
+            true,
+        );
+        let suite = open_jar("search", &jar_bytes);
+        let classes: Vec<_> = suite
+            .info
+            .midlets
+            .iter()
+            .map(|m| &m.class_name[..])
+            .collect();
+        assert_eq!(classes, ["a.Base", "a.Game"]);
+    }
+
+    #[test]
+    fn entries_that_share_one_bomb_cost_the_search_for_midlets_one_budget() {
+        // 5 MiB of zeros from 5 KB of deflate, listed as 100 class files.
+        // Each read stops at the 4 MiB a class may have, and the search
+        // stops at 32 MiB in all: 8 reads, not 100.
+        let bomb = vec![0u8; 5 << 20];
+        let names: Vec<String> = (0..100).map(|i| format!("a{i}.class")).collect();
+        let bytes = write_overlapping(&names, &bomb);
+        take_inflated();
+        let suite = open_jar("overlap", &bytes);
+        assert!(suite.info.midlets.is_empty());
+        assert_eq!(take_inflated(), SCAN.total_bytes as u64);
+    }
+
+    #[test]
+    fn the_search_for_midlets_stops_at_its_class_and_byte_limits() {
+        let jar_bytes = write(
+            &[
+                TestEntry::stored("readme.txt", &[b'x'; 100]),
+                TestEntry::stored("a/Pad.class", b"not a class"),
+                TestEntry::stored("a/Game.class", &class_file("a/Game", MIDLET_CLASS)),
+            ],
+            true,
+        );
+        let archive = ZipArchive::new(jar_bytes).unwrap();
+        let limits = |classes, class_bytes, total_bytes| ScanLimits {
+            classes,
+            class_bytes,
+            total_bytes,
+        };
+        let found = |limits: &ScanLimits| find_midlet_classes_within(&archive, "S", limits).len();
+        assert_eq!(
+            found(&limits(2, 1 << 20, 1 << 30)),
+            1,
+            "the class is second"
+        );
+        assert_eq!(
+            found(&limits(1, 1 << 20, 1 << 30)),
+            0,
+            "a class limit of one"
+        );
+        // The pad takes 11 bytes of the 20, and the game class is longer
+        // than the 9 left.
+        assert_eq!(found(&limits(9, 1 << 20, 20)), 0, "a byte limit of 20");
+        assert_eq!(found(&limits(9, 1 << 20, 1 << 20)), 1);
+        // A class longer than its limit is skipped, and charged.
+        assert_eq!(
+            found(&limits(9, 20, 1 << 20)),
+            0,
+            "a class limit of 20 bytes"
+        );
+        assert_eq!(SCAN.classes, 8192);
+        assert_eq!(SCAN.class_bytes, 4 << 20);
+        assert_eq!(SCAN.total_bytes, 32 << 20);
     }
 
     #[test]
