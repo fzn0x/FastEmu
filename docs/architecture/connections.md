@@ -148,11 +148,10 @@ connection and 8 MiB for all of a game's connections together. Opening
 when the request is written. Names and headers are kept in the host for
 as long as the connection lives, which is why they are limited too.
 
-What stays open on purpose: what `Allow` reaches, as the policy section
-says, as a phone on a network did, and a server socket listens on every
-interface. The time zone and the local address
-(`getLocalAddress`) are visible to the game. Allowing the network is
-the user's choice per game.
+What stays open on purpose: what `Allow` reaches (see the policy section),
+as on a phone on a network, and server sockets that listen on every
+interface. The time zone and the local address (`getLocalAddress`) are
+visible to the game. Allowing the network is the user's choice per game.
 
 [SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists these
 limits with every other limit a game meets, and what Allow leaves open
