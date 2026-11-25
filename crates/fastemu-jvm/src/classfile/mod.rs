@@ -184,8 +184,10 @@ impl ClassFile {
         for _ in 0..attr_count {
             let (attr_name, body) = attribute(&mut r, &cp)?;
             if attr_name == "SourceFile" && body.len() == 2 {
+                // The pool's own `Arc`, which the class memory counts: a
+                // copy of a name of up to 65535 bytes would not be.
                 let index = u16::from_be_bytes([body[0], body[1]]);
-                source_file = cp.utf8(index).ok().map(Arc::from);
+                source_file = cp.utf8_arc(index).ok();
             }
         }
         // Trailing bytes after the last attribute are tolerated: some
@@ -448,6 +450,15 @@ mod tests {
         let code = method.code.as_ref().unwrap();
         assert_eq!(code.code, [0x10, 7, 0xAC]);
         assert_eq!(code.line_at(2), Some(3));
+    }
+
+    #[test]
+    fn the_source_file_name_is_the_text_of_the_pool() {
+        // The class memory counts the text of the pool once. A name of
+        // 65535 bytes copied for the class would not be counted.
+        let class = ClassFile::parse(&tiny_class(49, 0)).unwrap();
+        let name = class.source_file.as_ref().unwrap();
+        assert!(Arc::ptr_eq(name, &class.constant_pool.utf8_arc(1).unwrap()));
     }
 
     #[test]
