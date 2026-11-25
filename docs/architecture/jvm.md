@@ -369,6 +369,10 @@ the fields are only read while the VM runs.
 | `max_reported` | 256 | different diagnostics reported | #30 |
 | `max_posted` | 10000 | posted tasks not yet run | #30 |
 
+[SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists these
+with every other limit a game meets, and the
+[known limits](../../SECURITY.md#known-limits) that remain.
+
 `max_stack_slots` limits how far a thread's stack reaches. A frame starts
 at its arguments, which sit on top of its caller's operand stack, and
 reserves the `max_locals` and `max_stack` that the class file declares,
