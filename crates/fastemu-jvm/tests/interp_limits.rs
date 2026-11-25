@@ -34,11 +34,17 @@ const HEAP: usize = 256 * 1024;
 ///   a new `NullPointerException` on every pass.
 /// - `hoard()`: a handler that keeps every pass's array in a chain, until
 ///   the heap is full, and then goes on throwing `OutOfMemoryError`.
+/// - `keep()`: like `spin()`, but its handler catches only
+///   `NullPointerException`, so a thread that lost the exception to a
+///   collection, or found another object in its place, ends.
+/// - `churn()`: a loop of `new Object[10]` that fills the heap with garbage
+///   for ever. It is no throw and catch loop, and it does not tell the probe.
 /// - `count(n)`: a loop that throws and catches `n` times and returns `n`.
 fn loops() -> Vec<u8> {
     let mut c = ClassBuilder::new("Loops", "java/lang/Object", 49, 0);
     let entered = c.method_ref("demo/Probe", "entered", "()V");
     let object = c.class("java/lang/Object");
+    let null_pointer = c.class("java/lang/NullPointerException");
     let [eh, el] = idx(entered);
     let [oh, ol] = idx(object);
     #[rustfmt::skip]
@@ -47,6 +53,13 @@ fn loops() -> Vec<u8> {
         0x01,               // 3: aconst_null
         0xbf,               // 4: athrow
         0xbf,               // 5: athrow (the handler)
+    ];
+    #[rustfmt::skip]
+    let churn = [
+        0x10, 0x0a,         // 0: bipush 10
+        0xbd, oh, ol,       // 2: anewarray Object
+        0x57,               // 5: pop
+        0xa7, 0xff, 0xfa,   // 6: goto 0
     ];
     #[rustfmt::skip]
     let fresh = [
@@ -79,6 +92,16 @@ fn loops() -> Vec<u8> {
         0x1b, 0xac,                 // 16: iload_1 ireturn
     ];
     c.method(STATIC, "spin", "()V", 1, 0, &spin, &[(3, 6, 5, 0)]);
+    c.method(
+        STATIC,
+        "keep",
+        "()V",
+        1,
+        0,
+        &spin,
+        &[(3, 6, 5, null_pointer)],
+    );
+    c.method(STATIC, "churn", "()V", 1, 0, &churn, &[]);
     c.method(STATIC, "fresh", "()V", 1, 0, &fresh, &[(3, 8, 5, 0)]);
     c.method(STATIC, "hoard", "()V", 4, 1, &hoard, &[(5, 19, 7, 0)]);
     c.method(STATIC, "count", "(I)I", 2, 3, &count, &[(7, 9, 9, 0)]);
@@ -345,6 +368,33 @@ fn a_handler_loop_that_keeps_arrays_stops_at_the_heap_limit() {
     // The chain fills the heap, and the heap does not grow past it.
     watch_heap(&vm, |stats| stats.used_bytes > HEAP / 2);
     assert!(stops(&vm), "the loop ends when the VM stops");
+}
+
+#[test]
+fn a_collection_by_another_thread_keeps_the_exception_of_a_handler_loop() {
+    let entered = Arc::new(AtomicBool::new(false));
+    let vm = vm_with(HEAP, VmLimits::default(), vec![probe(Arc::clone(&entered))]);
+    start_loop(&vm, &entered, "keep");
+    // The loop waits at its safepoint with nothing but its operand stack
+    // to hold the exception, while this thread fills the heap and
+    // collects it again and again.
+    vm.spawn("churn", |ctx| {
+        ctx.call_static("Loops", "churn", "()V", &[]).map(|_| ())
+    })
+    .expect("the thread starts");
+    let start = Instant::now();
+    loop {
+        let host = vm.clone();
+        let (threads, stats) = within_long(move || (host.thread_count(), host.heap_stats()))
+            .expect("host calls return");
+        assert_eq!(threads, 2, "the handler loop kept running");
+        if stats.collections >= 100 {
+            break;
+        }
+        assert!(start.elapsed() < LONG, "the heap was collected: {stats:?}");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(stops(&vm), "both threads end when the VM stops");
 }
 
 #[test]
