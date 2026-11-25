@@ -153,6 +153,10 @@ on every interface. The time zone and the local address
 (`getLocalAddress`) are visible to the game. Allowing the network is
 the user's choice per game.
 
+[SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists these
+limits with every other limit a game meets, and what Allow leaves open
+among its [known limits](../../SECURITY.md#known-limits).
+
 ## HTTP
 
 `io::http` speaks HTTP/1.1 with the three states of the MIDP javadoc.
