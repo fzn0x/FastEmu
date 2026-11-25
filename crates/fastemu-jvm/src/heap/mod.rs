@@ -338,9 +338,10 @@ impl Heap {
 
     /// Frees every object the roots do not reach.
     ///
-    /// `roots` marks the roots. `weak` maps each `WeakReference` object to
-    /// its referent: entries for dead references are dropped and referents
-    /// that died are cleared. Returns how many objects were freed.
+    /// `roots` marks the roots. `weak` maps each key to the object it holds
+    /// weakly: a `WeakReference` to its referent, a `Timer`'s queue to its
+    /// timer. Entries whose key died are dropped and referents that died
+    /// are cleared. Returns how many objects were freed.
     pub(crate) fn collect(
         &mut self,
         roots: impl FnOnce(&mut Tracer<'_>),

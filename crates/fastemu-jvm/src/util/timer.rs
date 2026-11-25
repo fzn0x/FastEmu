@@ -17,6 +17,11 @@
 //! and every other task, a task that throws is reported as uncaught and
 //! cancelled, and the timer goes on with the rest (rule 16 of
 //! `docs/compat/emulator-notes.md`, as J2ME Loader does).
+//!
+//! As on Java SE, a timer's thread holds its queue, not the timer. The
+//! queue holds its timer weakly, in the machine's weak table, so the
+//! collection that finds a timer dropped marks its queue ([`reap`]), and
+//! the thread ends once no task is left.
 
 use std::time::{Duration, Instant};
 
@@ -28,6 +33,7 @@ use crate::lang::throwable::report_uncaught;
 use crate::lang::{this, throw};
 use crate::native::NativeClass;
 use crate::value::{ObjRef, Value};
+use crate::vm::VmState;
 
 const TIMER: &str = "java/util/Timer";
 const TASK: &str = "java/util/TimerTask";
@@ -74,6 +80,9 @@ struct Queue {
     next_order: u64,
     /// False once the timer is cancelled.
     open: bool,
+    /// Set by the collection that finds the timer dropped. Nothing can
+    /// schedule on it again, so its thread ends once no task is left.
+    reaped: bool,
 }
 
 impl Default for Queue {
@@ -82,6 +91,7 @@ impl Default for Queue {
             slots: Vec::new(),
             next_order: 0,
             open: true,
+            reaped: false,
         }
     }
 }
@@ -149,14 +159,15 @@ fn wait(ctx: &mut Ctx<'_>, deadline: Option<Instant>) -> JResult<()> {
 }
 
 /// One turn of a timer thread: runs the first task if it is due, or
-/// waits. Returns false when the timer is cancelled and empty, which
-/// ends the thread.
+/// waits. Returns false when the queue is empty and nothing can schedule
+/// on it again, because the timer is cancelled or a collection found it
+/// dropped, which ends the thread.
 fn turn(ctx: &mut Ctx<'_>, queue_ref: &GlobalRef) -> JResult<bool> {
     let q_obj = queue_ref.get(ctx);
     let q = queue(ctx, q_obj)?;
-    let (first, open) = (q.slots.first().map(|s| s.task), q.open);
+    let (first, open, reaped) = (q.slots.first().map(|s| s.task), q.open, q.reaped);
     let Some(t_obj) = first else {
-        if !open {
+        if !open || reaped {
             return Ok(false);
         }
         wait(ctx, None)?;
@@ -308,7 +319,33 @@ fn init(ctx: &mut Ctx<'_>, timer: ObjRef) -> JResult<Value> {
     // got no thread has changed nothing.
     ctx.set_static(serial, Value::Int(n.wrapping_add(1)))?;
     ctx.payload_mut::<TimerData>(timer)?.queue = Some(q_obj);
+    // The thread holds the queue, not the timer. The queue holds its
+    // timer as a `WeakReference` holds its referent, so a collection
+    // finds out when the game drops it.
+    ctx.state.weak.insert(q_obj, Some(timer));
     Ok(Value::Void)
+}
+
+/// Marks the queue of each timer this collection found dropped, and
+/// returns whether it marked any. `Ctx::collect` calls it right after the
+/// sweep, when every key of the weak table is alive, and wakes the
+/// threads when it returns true: each ends once no task is left.
+pub(crate) fn reap(state: &mut VmState) -> bool {
+    let VmState { weak, heap, .. } = state;
+    let mut any = false;
+    for (&key, timer) in weak.iter() {
+        if timer.is_some() {
+            continue;
+        }
+        if let Some(q) = heap.get_mut(key).payload_mut::<Queue>()
+            && q.open
+            && !q.reaped
+        {
+            q.reaped = true;
+            any = true;
+        }
+    }
+    any
 }
 
 pub(crate) fn classes() -> Vec<NativeClass> {
@@ -668,6 +705,55 @@ mod tests {
             let timer = timer.get(ctx);
             ctx.call_virtual(timer, "cancel", "()V", &[]).unwrap();
         });
+        assert!(vm.wait_finished(Some(Duration::from_secs(10))));
+    }
+
+    /// A timer that nothing references and that has no task ends its
+    /// thread once a collection finds it: the machine then has no thread
+    /// left, which `wait_finished` waits for without a fixed sleep.
+    #[test]
+    fn a_dropped_timer_ends_its_thread_at_the_next_collection() {
+        let vm = Vm::new(
+            VmConfig::default(),
+            Arc::new(MemorySource::new()),
+            Vec::new(),
+        );
+        vm.attach("test", |ctx| {
+            ctx.local_frame(|ctx| {
+                ctx.construct(TIMER, "()V", &[]).unwrap();
+            });
+            ctx.gc();
+        });
+        let ended = vm.wait_finished(Some(Duration::from_secs(10)));
+        let left = vm.thread_count();
+        vm.stop();
+        assert!(ended, "{left} threads left");
+    }
+
+    /// A timer the game holds survives collections and runs what it is
+    /// given afterwards.
+    #[test]
+    fn a_collection_keeps_a_timer_the_game_holds() {
+        let source = Arc::new(MemorySource::new());
+        let vm = Vm::new(VmConfig::default(), source, vec![count()]);
+        let ran = vm.attach("test", |ctx| {
+            let timer = ctx.construct(TIMER, "()V", &[]).unwrap();
+            ctx.gc();
+            ctx.gc();
+            // A turn for the timer's thread with its queue empty, where a
+            // collection that took the timer for dropped would end it.
+            // However late the thread gets it, a kept timer still runs
+            // the task below.
+            ctx.sleep(Duration::from_millis(20)).unwrap();
+            let task = ctx.construct("test/Count", "()V", &[]).unwrap();
+            let once = "(Ljava/util/TimerTask;J)V";
+            ctx.call_virtual(timer, "schedule", once, &[task.into(), Value::Long(0)])
+                .unwrap();
+            wait_for(ctx, |ctx| runs(ctx) >= 1);
+            ctx.call_virtual(timer, "cancel", "()V", &[]).unwrap();
+            runs(ctx)
+        });
+        assert_eq!(ran, 1);
         assert!(vm.wait_finished(Some(Duration::from_secs(10))));
     }
 }

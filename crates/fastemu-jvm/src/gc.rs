@@ -9,6 +9,9 @@
 //!   its native locals and the monitors its synchronized frames hold;
 //! - static fields, interned strings and `Class` objects;
 //! - global roots, thread objects and objects whose monitor is in use.
+//!
+//! After the sweep, `util::timer::reap` marks the queues of the timers the
+//! collection found dropped and wakes their threads.
 
 use crate::ctx::Ctx;
 use crate::heap::Tracer;
@@ -36,7 +39,12 @@ impl Ctx<'_> {
     /// frame is written back, so its slots up to the top are exact.
     pub(crate) fn collect(&mut self) {
         self.release_dropped_globals();
-        let Ctx { state, thread, .. } = self;
+        let Ctx {
+            state,
+            thread,
+            shared,
+            ..
+        } = self;
         let VmState {
             heap,
             weak,
@@ -72,6 +80,10 @@ impl Ctx<'_> {
             },
             weak,
         );
+        // The threads of dropped timers end once no task is left.
+        if crate::util::timer::reap(state) {
+            shared.cond.notify_all();
+        }
     }
 
     /// Collects now, at a native's request (`System.gc`). The calling
