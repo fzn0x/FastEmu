@@ -163,23 +163,30 @@ links to the page that describes the limit.
 
 ### Sound
 
+The table gives what MMAPI does. The vendor sound APIs throw no
+`MediaException`: a sound the engine refuses leaves a Nokia `Sound`
+uninitialized and a Samsung `AudioClip` or Siemens melody silent, with a
+warning, and a start past the cap of started players plays nothing.
+
 | Limit | Bound | When a game reaches it | Described in |
 | --- | --- | --- | --- |
-| One sound, decoded, in any format | 16 MiB | `MediaException`; a Nokia `Sound` stays uninitialized | [audio.md][audio-players] |
-| Sound of a game, every API together | 32 MiB and 128 players | `OutOfMemoryError`, after one collection | [audio.md][audio-players] |
-| Players started at once | 32 for a game, 128 for all games | `MediaException` from `start` | [audio.md][audio-players] |
+| One sound in any format: decoded samples, the file of an MP3, the events of a MIDI file or a list of tones | 16 MiB | `MediaException`; a Nokia `Sound` stays uninitialized, and a Samsung or Siemens sound stays silent, with a warning | [audio.md][audio-players] |
+| Sound of a game, every API together | 32 MiB and 128 players | `OutOfMemoryError`, after one collection; `ToneControl.setSequence` throws it without one | [audio.md][audio-players] |
+| Players started at once | 32 for a game, 128 for all games | `MediaException` from `Player.start`; a Nokia, Samsung or Siemens sound stays silent | [audio.md][audio-players] |
 | `playTone` tones playing | 16 | the oldest stops | [audio.md][audio-players] |
 | Loop events of a player | one every 20 ms of sound | the loops between are not reported | [audio.md][audio-players] |
 | Events of a MIDI file | 65536 | `MediaException` | [audio.md][audio-formats] |
 | Length of a MIDI file that loops | 20 ms | a shorter file plays once | [audio.md][audio-formats] |
-| MIDI messages sent in one render call | 512 | the rest go out in the next blocks | [audio.md][audio-formats] |
+| MIDI messages a MIDI player sends in one render call, a block of at most 256 frames | 512 | the rest go out in the next blocks | [audio.md][audio-formats] |
+| Sample rate of a WAV file | 384000 Hz | the sound plays as silence, with a warning; a Nokia `Sound` stays uninitialized | [audio.md][audio-formats] |
+| Notes of a Siemens `MelodyComposer` | 32767 | `appendNote` throws `Exception`; the constructor keeps the first 32767 | [vendors.md][vendors-siemens] |
 | Tones of a Nokia ringing tone | 65536 | `MediaException`; a Nokia `Sound` stays uninitialized | [audio.md][audio-formats] |
-| Tones of a tone sequence | 65536 | `IllegalArgumentException` from `setSequence`; a player of such data is silent | [audio.md][audio-formats] |
+| Tones of a tone sequence | 65536 in the sequence or in one block, 262144 in all its lists together | `IllegalArgumentException` from `setSequence`; a player of such data is silent | [audio.md][audio-formats] |
 | AMR file | 30000 frames, ten minutes | `MediaException` | [audio.md][audio-formats] |
-| Sound read from a stream | the room left in the heap | `OutOfMemoryError` | [media.md][media-players] |
+| Sound read from a stream | what one request of the runtime may take, never more than the heap or 32 MiB | `OutOfMemoryError` | [media.md][media-players] |
 | Sound events waiting | 1024 for a game, 4096 in the engine for all games; twice that for the events that end a run | the repeats are dropped first; `CLOSED` never is | [media.md][media-events] |
 | An MP3 seek the reader cannot do | 8 s of sound caught up in each render call | silence until the place is reached | [audio.md][audio-gaps] |
-| Hold of the audio thread on the shared mixer | one slice of 128 frames | another game's call waits for one slice at most | [audio.md][audio-locking] |
+| Hold of the audio thread on the shared mixer | one slice of 128 frames, with the lock free between slices | another game's call waits for the slice under way, or about a millisecond while the slices are short | [audio.md][audio-locking] |
 
 [audio-players]: docs/architecture/audio.md#players
 [audio-formats]: docs/architecture/audio.md#formats
