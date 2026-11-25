@@ -147,12 +147,15 @@ fn run(vm: &Vm, lines: &Mutex<Vec<LogLine>>, mode: &str) -> Vec<String> {
         .expect("starting the main thread");
     let start = std::time::Instant::now();
     loop {
+        // The count is read before the log: a program that prints end and
+        // ends between the two reads still shows its end in this log.
+        let running = vm.thread_count() > 0;
         let out = support::lines_at(lines, LogLevel::Out);
         if out.last().is_some_and(|l| l == "end") {
             return out;
         }
         assert!(
-            start.elapsed() < LONG && vm.thread_count() > 0,
+            start.elapsed() < LONG && running,
             "{mode} did not reach its end:\n{}",
             log(lines).join("\n")
         );
