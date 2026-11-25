@@ -6,7 +6,7 @@ mod app;
 mod picker;
 mod text_entry;
 
-use fastemu_audio::{AudioOutput, Engine, NullOutput};
+use fastemu_audio::{AudioOutput, Engine, NullOutput, RenderBudget};
 use futures::channel::mpsc;
 use gpui_android::android_activity::AndroidApp;
 use log::LevelFilter;
@@ -89,6 +89,8 @@ extern "Rust" fn android_main(android_app: AndroidApp) {
     // `run` returns when the Activity is destroyed, so the sound plays for
     // as long as the app does.
     let engine = Engine::default();
+    // One game's sound may not take the time the others need to play.
+    engine.set_render_budget(Some(RenderBudget::DEFAULT));
     let _sound = start_sound(&engine);
 
     // Games other apps open arrive before or after the window exists; the app
