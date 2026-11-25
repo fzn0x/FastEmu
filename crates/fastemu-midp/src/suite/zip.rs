@@ -95,6 +95,13 @@ impl Entry {
     pub fn display_name(&self) -> String {
         decode_name(&self.name)
     }
+
+    /// The bytes of the entry's data in the archive, which a read of the
+    /// entry goes through at most. Entries may share them, so the sizes of
+    /// all the entries of an archive can add up to many times its size.
+    pub fn compressed_len(&self) -> usize {
+        self.compressed
+    }
 }
 
 /// An open archive: the whole file in memory and an index of its entries.
@@ -263,7 +270,7 @@ fn inflate(raw: &[u8], expected: usize, max: usize) -> Result<(Vec<u8>, bool), Z
         }
     }
     #[cfg(test)]
-    testing::count_inflated(written);
+    testing::count_inflated(written, raw.len() - input.len());
     out.truncate(written);
     out.shrink_to_fit();
     Ok((out, more))
@@ -467,17 +474,25 @@ pub(crate) mod testing {
 
     thread_local! {
         static INFLATED: Cell<u64> = const { Cell::new(0) };
+        static CONSUMED: Cell<u64> = const { Cell::new(0) };
     }
 
-    /// Adds `bytes` to what this thread's inflates have produced.
-    pub(super) fn count_inflated(bytes: usize) {
-        INFLATED.with(|c| c.set(c.get() + bytes as u64));
+    /// Adds to what this thread's inflates have produced and consumed.
+    pub(super) fn count_inflated(produced: usize, consumed: usize) {
+        INFLATED.with(|c| c.set(c.get() + produced as u64));
+        CONSUMED.with(|c| c.set(c.get() + consumed as u64));
     }
 
     /// The bytes every inflate on this thread has produced since the last
     /// call, and starts the count again.
     pub fn take_inflated() -> u64 {
         INFLATED.with(|c| c.replace(0))
+    }
+
+    /// The compressed bytes every inflate on this thread has read since
+    /// the last call, and starts the count again.
+    pub fn take_consumed() -> u64 {
+        CONSUMED.with(|c| c.replace(0))
     }
 
     /// One file to write.
@@ -512,7 +527,25 @@ pub(crate) mod testing {
     /// each of `names`: every entry points at the same local header and
     /// the same compressed bytes, as in a crafted archive.
     pub fn write_overlapping(names: &[String], data: &[u8]) -> Vec<u8> {
-        let one = write(&[TestEntry::deflated("x", data)], true);
+        overlapping(names, write(&[TestEntry::deflated("x", data)], true))
+    }
+
+    /// Like [`write_overlapping`], for a raw deflate `stream` that the
+    /// caller made, such as one of empty blocks that inflates to nothing.
+    pub fn write_overlapping_stream(names: &[String], stream: &[u8]) -> Vec<u8> {
+        let mut one = write(&[TestEntry::stored("x", stream)], true);
+        // Stored, with the method at 8 in the local header and at 10 in the
+        // central one; both say deflated now.
+        one[8..10].copy_from_slice(&8u16.to_le_bytes());
+        let central_at = one.len() - 22 - 46 - 1;
+        one[central_at + 10..central_at + 12].copy_from_slice(&8u16.to_le_bytes());
+        overlapping(names, one)
+    }
+
+    /// The archive `one`, which holds a file `x` named by a central
+    /// directory of one entry, with a central directory that lists the
+    /// file once for each of `names`.
+    fn overlapping(names: &[String], one: Vec<u8>) -> Vec<u8> {
         let central_at = one.len() - 22 - 46 - 1;
         let mut out = one[..central_at].to_vec();
         let template = one[central_at..central_at + 46].to_vec();

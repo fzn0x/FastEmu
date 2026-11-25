@@ -65,6 +65,10 @@ struct ScanLimits {
     classes: usize,
     class_bytes: usize,
     total_bytes: usize,
+    /// The bytes the entries it reads hold in the archive, counted as the
+    /// entries say, whether the read gives bytes or not: a stream of empty
+    /// blocks inflates to nothing and takes as long to read as any.
+    input_bytes: usize,
 }
 
 /// The limits [`find_midlet_classes`] runs under. The largest JAR of the
@@ -73,6 +77,7 @@ const SCAN: ScanLimits = ScanLimits {
     classes: 8192,
     class_bytes: source::MAX_CLASS_BYTES,
     total_bytes: 32 * 1024 * 1024,
+    input_bytes: 32 * 1024 * 1024,
 };
 
 /// An opened suite: its attributes and its JAR.
@@ -376,10 +381,12 @@ fn find_midlet_classes(jar: &ZipArchive, suite_name: &str) -> Vec<MidletInfo> {
 
 /// [`find_midlet_classes`] under `limits`. A class file is read up to
 /// `limits.class_bytes`, and the search stops after `limits.classes` class
-/// entries or when `limits.total_bytes` have been inflated, a read that
-/// went over its limit counting the limit. The suite may then list MIDlets
-/// that the search did not reach, which no suite without a `MIDlet-1` has
-/// shown to do.
+/// entries, when `limits.total_bytes` have been inflated, a read that went
+/// over its limit counting the limit, or when the entries it read hold
+/// `limits.input_bytes` in the archive. An entry that holds more than is
+/// left of that is passed over. The suite may then list MIDlets that the
+/// search did not reach, which no suite without a `MIDlet-1` has shown to
+/// do.
 fn find_midlet_classes_within(
     jar: &ZipArchive,
     suite_name: &str,
@@ -392,14 +399,22 @@ fn find_midlet_classes_within(
     let mut supers: HashMap<String, (String, bool)> = HashMap::new();
     let mut examined = 0;
     let mut left = limits.total_bytes;
+    let mut input_left = limits.input_bytes;
     for entry in jar.entries() {
         let name = &entry.name;
         if name.len() < 6 || !name[name.len() - 6..].eq_ignore_ascii_case(b".class") {
             continue;
         }
-        if examined >= limits.classes || left == 0 {
+        if examined >= limits.classes || left == 0 || input_left == 0 {
             break;
         }
+        // Entries may share the data they hold, so the sum of their sizes
+        // is what the search reads, not the size of the archive.
+        let held = entry.compressed_len();
+        if held > input_left {
+            continue;
+        }
+        input_left -= held;
         examined += 1;
         let cap = limits.class_bytes.min(left);
         let bytes = match jar.read_limited(entry, cap) {
@@ -447,7 +462,9 @@ fn find_midlet_classes_within(
 
 #[cfg(test)]
 mod tests {
-    use super::zip::testing::{TestEntry, take_inflated, write, write_overlapping};
+    use super::zip::testing::{
+        TestEntry, take_consumed, take_inflated, write, write_overlapping, write_overlapping_stream,
+    };
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -639,6 +656,7 @@ mod tests {
             classes,
             class_bytes,
             total_bytes,
+            input_bytes: usize::MAX,
         };
         let found = |limits: &ScanLimits| find_midlet_classes_within(&archive, "S", limits).len();
         assert_eq!(
@@ -664,6 +682,34 @@ mod tests {
         assert_eq!(SCAN.classes, 8192);
         assert_eq!(SCAN.class_bytes, 4 << 20);
         assert_eq!(SCAN.total_bytes, 32 << 20);
+        assert_eq!(SCAN.input_bytes, 32 << 20);
+    }
+
+    #[test]
+    fn entries_that_share_a_stream_of_empty_blocks_cost_the_search_one_budget() {
+        // 40000 empty stored blocks and an end: 200 KB that inflate to
+        // nothing, listed as 100 class files. No byte is inflated, so only
+        // what the entries hold bounds the search: 5 reads of the 200 KB
+        // for 1 MiB, not 100.
+        let mut stream = Vec::new();
+        for _ in 0..40_000 {
+            stream.extend([0, 0, 0, 0xff, 0xff]);
+        }
+        stream.extend([1, 0, 0, 0xff, 0xff]);
+        let names: Vec<String> = (0..100).map(|i| format!("a{i}.class")).collect();
+        let archive = ZipArchive::new(write_overlapping_stream(&names, &stream)).unwrap();
+        assert_eq!(archive.read(&archive.entries()[0]).unwrap(), b"");
+        take_inflated();
+        take_consumed();
+        let limits = ScanLimits {
+            classes: 8192,
+            class_bytes: 4 << 20,
+            total_bytes: 32 << 20,
+            input_bytes: 1 << 20,
+        };
+        assert!(find_midlet_classes_within(&archive, "S", &limits).is_empty());
+        assert_eq!(take_inflated(), 0);
+        assert_eq!(take_consumed(), 5 * stream.len() as u64);
     }
 
     #[test]
