@@ -13,6 +13,12 @@ use crate::graphics::Graphics;
 use crate::raster::blit::{BlitMode, Source, blit};
 use crate::surface::Surface;
 
+/// The most pixels one `drawPixels` call converts, 4M: a 360 by 640 screen
+/// is 0.23M. A byte array packs up to eight pixels to an element, so a
+/// call could otherwise ask for 32 times the array's size in `0xAARRGGBB`
+/// words, and a block that large is no picture a phone draws.
+const MAX_DRAW_PIXELS: i64 = 1 << 22;
+
 /// A Nokia pixel format and the Java array type it travels in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Format {
@@ -363,6 +369,9 @@ impl Graphics {
         };
         let transform = manipulation_transform(manipulation)?;
         region.check(format, len)?;
+        if region.width * region.height > MAX_DRAW_PIXELS {
+            return Err(GfxError::IllegalArgument("too many pixels to draw"));
+        }
         let mut argb = Vec::with_capacity((region.width * region.height) as usize);
         for row in 0..region.height {
             for col in 0..region.width {
@@ -751,6 +760,67 @@ mod tests {
         assert_eq!(
             g.draw_pixels_int(&mut s, &px, false, 9, 2, 0, 0, 0, 2, 0, TYPE_INT_888_RGB),
             Ok(())
+        );
+    }
+
+    #[test]
+    fn draw_pixels_refuses_more_than_four_million_pixels() {
+        let (mut s, g) = canvas(4, 4);
+        let iae = |r| matches!(r, Err(GfxError::IllegalArgument(_)));
+        // The audit's call: 4 MiB of 1-bit pixels as a block of 8192 by
+        // 4096 would have made a 134 MB Vec of words.
+        let bits = vec![0_i8; 1 << 22];
+        assert!(iae(g.draw_pixels_byte(
+            &mut s,
+            &bits,
+            None,
+            0,
+            8192,
+            0,
+            0,
+            8192,
+            4096,
+            0,
+            TYPE_BYTE_1_GRAY
+        )));
+        // So would a mask, and so the vertical format, eight to a byte.
+        assert!(iae(g.draw_pixels_byte(
+            &mut s,
+            &bits,
+            Some(&bits),
+            0,
+            8192,
+            0,
+            0,
+            8192,
+            4096,
+            0,
+            TYPE_BYTE_1_GRAY_VERTICAL
+        )));
+        // The limit is on the block: 2048 by 2048 is the most that draws,
+        // and a column more is refused. A short array is still the
+        // array's fault first.
+        let packed = vec![0_i8; (1 << 22) / 8 + 256];
+        let draw = |s: &mut Surface, width: i32, array: &[i8]| {
+            g.draw_pixels_byte(
+                s,
+                array,
+                None,
+                0,
+                width,
+                0,
+                0,
+                width,
+                2048,
+                0,
+                TYPE_BYTE_1_GRAY,
+            )
+        };
+        assert_eq!(draw(&mut s, 2048, &packed), Ok(()));
+        assert!(iae(draw(&mut s, 2049, &packed)));
+        assert_eq!(
+            draw(&mut s, 4096, &packed[..1024]),
+            Err(GfxError::ArrayIndexOutOfBounds)
         );
     }
 
