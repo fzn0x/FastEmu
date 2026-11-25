@@ -257,17 +257,37 @@ section says is in scope.
 **Memory**
 
 - The heap counts memory the way a phone does. A game made of very many
-  tiny objects can use up to about ten times its heap limit in real
-  memory.
+  tiny objects uses several times its heap limit in real memory, about
+  ten times in a test with many small timer tasks.
 - A call into the runtime is judged after it returns. It can take the
   heap past its limit for a moment, and its change stays: a
   `List.append` past the heap adds the element, then throws
   `OutOfMemoryError`.
 - The back buffer of a shown screen is made on the event thread, so it
   is counted but never refused. A canvas keeps its buffer for as long as
-  it lives, while a hidden screen gives its buffer back.
-- Each game has its own 32 MiB of sound, so eight games can hold
-  256 MiB of sound in all.
+  it lives, while a menu or a form that is hidden gives its buffer back.
+- Each game has its own 32 MiB of sound, and nothing limits the sound of
+  all games together: eight games running at once can hold 256 MiB.
+- Each running game keeps its whole JAR in memory, up to 64 MiB, outside
+  its heap.
+- A class waits for its superclass and interfaces to load before the
+  class data is charged for it. A chain of up to 256 classes of up to
+  4 MiB each can be held parsed at once, which can pass the 128 MiB of
+  class data for a moment.
+- A GIF is checked against the heap by its logical screen. Its first
+  frame can be larger: it is decoded whole, up to 2^25 pixels and
+  128 MiB that the heap does not count, before it is cut to the screen. A
+  larger frame does not decode.
+- `Image.createImage(InputStream)` holds the data it reads, up to
+  16 MiB, outside the heap until the image is made. Each thread that
+  calls it holds its own.
+- Image decoding runs without the VM lock, and the heap check before it
+  reserves nothing. Threads that decode at once each pass the check
+  against the same free room, so each can hold an image of up to the
+  whole heap until its call returns.
+- The record stores a game holds open are kept in memory outside its heap
+  count: at most about 1 MiB for its own suite and for each of the 16
+  other suites it may open.
 - A class file of up to 4 MiB is parsed before its size is judged. A
   class that is then refused holds a few times its file size meanwhile.
 - A game that has exited keeps its memory until you close its tile.
@@ -275,27 +295,39 @@ section says is in scope.
 **Threads and time**
 
 - A thread's stack holds at most 2 MiB. A game's machine has at most 80
-  threads, the 16 that only the host may add included, so their stacks
-  can hold 160 MiB at worst.
+  threads, 64 for the game and 16 more that only the host may start, so
+  their stacks can hold 160 MiB at worst. While a stack grows, its buffer
+  may be allocated up to 4 MiB, but only 2 MiB of it is written.
 - Each thread also reserves 16 MiB of address space for its system
   stack. The system commits only what the thread uses.
 - A `Timer` keeps its thread until `cancel()`, as in Java. A game that
   never cancels its timers gets `OutOfMemoryError` after about 62 of
   them.
-- Pause and resume requests past 8 waiting lifecycle threads are
-  dropped. Only a `startApp` that does not return, or a very slow one,
-  lets 8 of them wait.
+- Past 8 pause and resume calls waiting or running, besides the first
+  `startApp`, later `pauseApp` and `startApp` calls are dropped; the game
+  still pauses and resumes. Only a lifecycle call that does not return,
+  such as a `startApp` that runs the game's loop, or a very slow one,
+  lets that many pile up.
+- A game that calls `notifyPaused` and `resumeRequest` in a tight loop
+  queues requests for the app faster than the app handles them, and
+  nothing bounds that queue, so the memory of the app grows while the
+  loop runs.
+- While a game's thread keeps the VM lock, the app waits a second at
+  most. Then it drops the input it was posting and skips `pauseApp` or
+  `destroyApp`, and a closed game shows as ended a few seconds later.
 - FastEmu does not limit the CPU a game uses on its own threads. A game
   can keep the processor busy with drawing, decoding or computing for as
   long as it runs. Close its tile to stop it.
 - A call into the runtime that does not call back into the game, such
   as a very large fill or the decoding of a sound, cannot be stopped. It
-  runs on after you close the tile, and FastEmu reports the game as
-  ended before it finishes. The limits above keep such calls short: a
-  sound decodes to 16 MiB at most.
-- A write on a secure connection checks for a stop only when it ends. A
-  server that takes the data a little at a time keeps the game's thread
-  in that write after the game is closed.
+  runs on after you close the tile, and one that takes longer than the
+  few seconds FastEmu waits for a closed game goes on after the game
+  shows as ended. The limits above keep such calls short: a sound
+  decodes to 16 MiB at most.
+- A write on a secure connection checks for a stop only between its
+  pieces of up to 64 KiB. A server that takes the data a little at a
+  time keeps the game's thread inside one piece after the game is
+  closed.
 
 **Sound**
 
@@ -303,7 +335,8 @@ section says is in scope.
   in a MIDI file replays up to 65536 events with the mixer held. One
   game that starts 32 MIDI players, or that seeks in a long MIDI file in
   a loop, can make the sound of every game stutter. It cannot stop their
-  sound.
+  sound. This is one way a runaway game reaches the others, beside the
+  processor time above.
 
 **Class files and suites**
 
@@ -334,20 +367,26 @@ section says is in scope.
 
 **Network**
 
-- Allow means the whole network. A game with Allow can reach programs
-  on your own computer, devices on your local network and link local
-  addresses, not only the internet. Leave the network off for games that
-  do not need it.
+- **Allow network access** means the whole network. A game with network
+  access can reach programs on your own computer, devices on your local
+  network and link-local addresses, not only the internet. Leave the
+  network off for games that do not need it.
 - A game you allow network access can also accept connections on every
   network interface of your computer, and can learn the address of your
   computer on the local network.
+- A name lookup or a connect runs on a helper thread. When the game
+  stops waiting for it, at its 30 s deadline, on an interrupt or because
+  the game was closed, the helper runs on until the system ends it: 30 s
+  for each address of the name, or as long as the lookup takes. Nothing
+  counts these helpers, so a game you allow network access can keep many
+  of them and their sockets alive by interrupting its own connects.
 - Every game can read your time zone, with or without network access.
 
 **Links and the apps**
 
-- Links to `localhost`, private addresses and downloads are still
-  offered. You read the whole link before you choose **Open**.
-- The half second in which a link prompt ignores clicks starts when the
+- Links to `localhost`, private addresses and downloads other than a
+  `.jad` or `.jar` are still offered. You read the whole link before you choose **Open**.
+- The 500 ms in which a link prompt ignores clicks starts when the
   app takes the request, not when a tile in the focus layout comes
   forward.
 - The Android app checks no free space before it copies a game, and its
