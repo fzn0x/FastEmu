@@ -376,6 +376,22 @@ that holds the lock for ever can still be paused and closed: its
 `pauseApp` and `destroyApp` do not run, and the status changes after about
 two seconds.
 
+**Waiting or stuck.** `MidpInstance::ping` posts a task that answers when
+the event thread runs it between callbacks and gets the callback lock
+within a second, as it would to deliver a key. `MidpInstance::activity`
+is the VM's `Vm::activity`. A game that waits on a still screen answers,
+and soon every thread of it waits. A thread that waits for the callback
+lock, such as a game thread in `serviceRepaints`, counts as waiting, not
+blocked: the ping takes that lock too, so it does not answer while
+another thread keeps it. A game whose event thread is stuck in a
+callback never answers, even when every thread sleeps, and neither does
+an instance the app paused. A game with a thread that spins, or with
+threads that block each other on locks, never looks idle. `ping` waits
+for the VM lock for a second at most, as `Vm::post` does, and
+`activity` for 100 ms, so they are for tools such as
+`cargo xtask compat`, not for an app's UI thread.
+`tests/still_screens.rs` checks each case with a MIDlet of its own.
+
 `getAppProperty` reads the settings' properties, then the JAD, then the
 manifest, an exact name before one that differs in case.
 `checkPermission` answers network permissions from the network policy

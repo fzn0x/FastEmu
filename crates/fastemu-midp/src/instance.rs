@@ -30,6 +30,10 @@
 //! A crash (the MIDlet class missing, its constructor or `startApp`
 //! throwing, an internal error of the VM) calls `destroyApp(true)` if
 //! there is a MIDlet, then ends it as [`InstanceStatus::Crashed`].
+//!
+//! [`MidpInstance::ping`] and [`MidpInstance::activity`] are not part of
+//! [`Instance`]: they wait for the VM lock, so they are for tools such as
+//! `cargo xtask compat`, not for an app's UI thread.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
@@ -37,7 +41,7 @@ use std::time::Duration;
 
 use fastemu_audio::Group;
 use fastemu_core::{Frame, InputEvent, Instance, InstanceId, InstanceStatus, LogLevel, LogLine};
-use fastemu_jvm::{Ctx, HeapStats, JResult, Vm};
+use fastemu_jvm::{Activity, Ctx, HeapStats, JResult, Vm};
 
 use crate::host::{Control, HostLink};
 use crate::lcdui;
@@ -392,6 +396,52 @@ impl MidpInstance {
     /// What the instance's heap holds now.
     pub fn heap_stats(&self) -> HeapStats {
         self.vm.heap_stats()
+    }
+}
+
+/// The answer to [`MidpInstance::ping`]. Only `ping` makes one.
+#[derive(Clone, Debug)]
+pub struct Ping(Arc<std::sync::atomic::AtomicBool>);
+
+impl Ping {
+    /// Whether the event thread took the question between two callbacks
+    /// and got the callback lock, as it does to deliver a key.
+    pub fn answered(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+/// How long the event thread waits for the callback lock to answer a ping.
+const PING_LOCK_WAIT: Duration = Duration::from_secs(1);
+
+/// For tools that tell a game waiting on a still screen from a stuck one,
+/// such as `cargo xtask compat`. Unlike the methods of [`Instance`], these
+/// wait for the VM lock.
+impl MidpInstance {
+    /// Asks the event thread whether it would take a key now: posts a task
+    /// that answers when the event thread runs it between callbacks and
+    /// gets the callback lock within a second. An instance the app paused
+    /// does not answer, nor does one whose event thread is stuck in a
+    /// callback.
+    /// Waits for the VM lock for a second at most, as [`Vm::post`] does;
+    /// a task it cannot post in that time never answers.
+    pub fn ping(&self) -> Ping {
+        let answer = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ping = Ping(Arc::clone(&answer));
+        self.vm.post(move |ctx| {
+            if lcdui::event::acquire(ctx, Some(PING_LOCK_WAIT))? {
+                lcdui::event::release(ctx);
+                answer.store(true, Ordering::Release);
+            }
+            Ok(())
+        });
+        ping
+    }
+
+    /// What the game's threads are doing now; see [`Vm::activity`]. Waits
+    /// for the VM lock for 100 ms at most, then returns `None`.
+    pub fn activity(&self) -> Option<Activity> {
+        self.vm.activity()
     }
 }
 
