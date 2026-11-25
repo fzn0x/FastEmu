@@ -20,14 +20,14 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
 use fastemu_audio::{Engine, EngineConfig, Group, PlayerId};
 use fastemu_core::LogLevel;
 use fastemu_jvm::{Ctx, GlobalRef, JResult, ObjRef, Throw, Value};
 
-use super::event::{Event, Note};
+use super::event::{self, Event, Note, NoteReceiver, Notes};
 use super::player;
 use super::track::Track;
 use crate::nokia::sound;
@@ -36,7 +36,8 @@ use crate::nokia::sound;
 /// flag.
 const IDLE: Duration = Duration::from_millis(200);
 
-/// How many unsupported sounds an instance logs before it goes quiet.
+/// How many unsupported sounds, and how many sounds that stopped on an
+/// error, an instance logs before it goes quiet.
 const MAX_WARNINGS: u32 = 16;
 
 /// The Java class a registry entry belongs to.
@@ -58,7 +59,7 @@ struct Entry {
 
 /// The media state of one instance, a VM extension.
 struct MediaState {
-    notes: Sender<Note>,
+    notes: Notes,
     next_serial: u64,
     entries: HashMap<u64, Entry>,
     /// Which entry each engine player belongs to.
@@ -67,6 +68,8 @@ struct MediaState {
     /// sounds when the instance has no audio engine.
     probe: Option<Group>,
     warnings: u32,
+    /// Sounds that stopped on an error and were logged.
+    errors: u32,
 }
 
 fn media<'c>(ctx: &'c mut Ctx<'_>) -> Option<&'c mut MediaState> {
@@ -94,16 +97,14 @@ fn ensure(ctx: &mut Ctx<'_>) -> JResult<()> {
     if ctx.extension::<MediaState>().is_some() {
         return Ok(());
     }
-    let (notes, receiver) = mpsc::channel();
+    let (notes, receiver) = event::channel();
     // The thread is the library's, not the game's: it must start even when
     // the game has as many threads as it may have. It comes first, so a
     // failure leaves nothing set up; it cannot run before this returns.
     ctx.spawn_host_thread("media-events", move |ctx| run(ctx, &receiver))?;
     if let Some(group) = group(ctx) {
         let to_thread = notes.clone();
-        group.set_listener(Some(Arc::new(move |event| {
-            let _ = to_thread.send(Note::Engine(event));
-        })));
+        group.set_listener(Some(Arc::new(move |event| to_thread.engine(event))));
     }
     ctx.set_extension(MediaState {
         notes,
@@ -112,6 +113,7 @@ fn ensure(ctx: &mut Ctx<'_>) -> JResult<()> {
         links: HashMap::new(),
         probe: None,
         warnings: 0,
+        errors: 0,
     });
     Ok(())
 }
@@ -172,7 +174,7 @@ pub(crate) fn link(ctx: &mut Ctx<'_>, id: PlayerId, serial: u64) {
 /// Tells the event thread a timer changed.
 pub(crate) fn wake(ctx: &mut Ctx<'_>) {
     if let Some(state) = media(ctx) {
-        let _ = state.notes.send(Note::Wake);
+        state.notes.wake();
     }
 }
 
@@ -207,7 +209,7 @@ pub(crate) fn warn_silent(ctx: &mut Ctx<'_>, what: &str, data: &[u8]) {
 }
 
 /// The event thread's body.
-fn run(ctx: &mut Ctx<'_>, receiver: &Receiver<Note>) -> JResult<()> {
+fn run(ctx: &mut Ctx<'_>, receiver: &NoteReceiver) -> JResult<()> {
     loop {
         let next = carry_on(ctx, |ctx| timers(ctx, Instant::now()))?.flatten();
         let wait = next.map_or(IDLE, |at| {
@@ -225,10 +227,8 @@ fn run(ctx: &mut Ctx<'_>, receiver: &Receiver<Note>) -> JResult<()> {
             // The registry holds a sender for the VM's whole life.
             Err(RecvTimeoutError::Disconnected) => return Ok(()),
         };
-        for note in first
-            .into_iter()
-            .chain(receiver.try_iter().collect::<Vec<_>>())
-        {
+        for note in first.into_iter().chain(receiver.take_waiting()) {
+            receiver.settle(&note);
             carry_on(ctx, |ctx| handle(ctx, note))?;
         }
     }
@@ -319,7 +319,34 @@ fn handle(ctx: &mut Ctx<'_>, note: Note) -> JResult<()> {
         }
         Note::Wake => return Ok(()),
     };
+    if let Event::Error(message) = &event {
+        log_error(ctx, message);
+    }
     deliver(ctx, serial, event)
+}
+
+/// Logs a sound that stopped on an error, such as a decoder that gave up
+/// partway or a synthesizer that failed, so the cause can be found. Quiet
+/// after a few.
+fn log_error(ctx: &mut Ctx<'_>, message: &str) {
+    let Some(state) = media(ctx) else {
+        return;
+    };
+    state.errors += 1;
+    let count = state.errors;
+    if count > MAX_WARNINGS {
+        return;
+    }
+    ctx.log(
+        LogLevel::Warn,
+        format!("media: a sound stopped on an error: {message}"),
+    );
+    if count == MAX_WARNINGS {
+        ctx.log(
+            LogLevel::Warn,
+            "media: more sounds stop on errors; not logging them",
+        );
+    }
 }
 
 /// Hands `event` to the listeners of entry `serial`, after releasing the

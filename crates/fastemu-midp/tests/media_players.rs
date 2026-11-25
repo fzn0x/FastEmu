@@ -378,3 +378,37 @@ fn a_game_with_all_its_threads_still_gets_its_sound() {
         ",
     );
 }
+
+#[test]
+fn a_game_may_start_32_players_at_once() {
+    let (_engine, group) = audio();
+    check(
+        "MediaStarted",
+        Some(group),
+        r"
+        the 32nd is started: 400
+        the 33rd start: javax.microedition.media.MediaException
+        the 33rd stays: 300
+        after a stop: 400
+        the 34th start: javax.microedition.media.MediaException
+        after the end: 300
+        started after the end: 400
+        one refused: true
+        and collected: true
+        ",
+    );
+}
+
+#[test]
+fn a_listener_that_sticks_leaves_a_bounded_number_of_events_behind() {
+    let (_engine, group) = audio();
+    check(
+        "MediaFlood",
+        Some(group),
+        r"
+        events heard are bounded: true
+        some were heard: true
+        last event: closed
+        ",
+    );
+}

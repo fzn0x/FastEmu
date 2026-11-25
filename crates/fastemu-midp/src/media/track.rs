@@ -2,12 +2,11 @@
 //! player of the instance's audio engine or a [`Silent`] one, with the
 //! state the MIDP layer keeps beside it.
 
-use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use fastemu_audio::{AudioError, Format, PlayerState};
 
-use super::event::{Event, Note};
+use super::event::{Event, Notes};
 use super::silent::Silent;
 
 /// Where a track's sound comes from.
@@ -36,7 +35,7 @@ pub(crate) struct Track {
     serial: u64,
     /// Where silent events and the drop notice go; `None` for a track that
     /// was never registered.
-    notes: Option<Sender<Note>>,
+    notes: Option<Notes>,
     /// `None` until the player is realized (or the sound initialized).
     backend: Option<Backend>,
     /// The format being played, when known: it decides which controls a
@@ -64,7 +63,7 @@ impl Default for Track {
 
 impl Track {
     /// A track with no sound yet.
-    pub fn new(serial: u64, notes: Option<Sender<Note>>) -> Self {
+    pub fn new(serial: u64, notes: Option<Notes>) -> Self {
         Self {
             serial,
             notes,
@@ -150,8 +149,7 @@ impl Track {
     fn send(&self, events: Vec<Event>) {
         if let Some(notes) = &self.notes {
             for event in events {
-                // The event thread is gone only when the VM stops.
-                let _ = notes.send(Note::Midp(self.serial, event));
+                notes.midp(self.serial, event);
             }
         }
     }
@@ -401,7 +399,7 @@ impl Track {
 impl Drop for Track {
     fn drop(&mut self) {
         if let Some(notes) = &self.notes {
-            let _ = notes.send(Note::Gone(self.serial));
+            notes.gone(self.serial);
         }
     }
 }
