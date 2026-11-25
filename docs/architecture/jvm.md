@@ -421,7 +421,7 @@ neither. A change that adds a payload adds a row.
 | `PlayerData` | the sound bytes kept until `realize` | `heap_bytes`; recounted when `realize` or `close` drops them; `check_alloc` before the copy; a stream read asks the heap per chunk |
 | `PlayerData`, `SoundData`, `Clip` (decoded audio in the engine) | decoded samples, MP3 files, MIDI events | not on the heap: the instance's sound group allows 32 MiB and 128 players, 16 MiB for one sound ([audio.md](audio.md)) |
 | `HttpPayload`, `SocketPayload`, `ServerPayload`, `UdpPayload`, `InputPayload`, `OutputPayload` | sockets, a request body, request headers, a connection name | not on the heap: 4 MiB of body a connection and 8 MiB a game, 64 headers and 16 KiB of them, 8 KiB of name, and 64 connections, 8 server sockets and 16 datagram sockets a game ([connections.md](connections.md)) |
-| `StoreHandle`, `EnumState` | listeners and the ids of an enumeration | `heap_bytes`; the size of a record store by #40 |
+| `StoreHandle`, `EnumState` | listeners and the ids of an enumeration | `heap_bytes`; the contents of a record store are not on the heap and are bounded by the suite's quota of 1 MiB in at most 64 stores, and the disk writes by a budget ([rms.md](rms.md)) |
 | `GraphicData` (Siemens sprites and backgrounds) | frames and tiles | `heap_bytes`; the constructors call `check_alloc` before cutting the pictures and recount |
 | `UiImage`, `ExtendedData`, `LayerData` (Siemens) | pictures, tile grids and sprite sequences | bitmaps, copies, tile layers and sprite sequences: `check_alloc` before building, `recount` on change (#32) |
 | `Composer`, `MelodyData` (Siemens) | notes and MIDI bytes | `heap_bytes`; a `Composer` counts the room of its notes and is recounted when notes are added, set or reset |
