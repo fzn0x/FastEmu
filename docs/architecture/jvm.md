@@ -797,16 +797,18 @@ descriptor) is the one the call names. A receiver that does not have the
 method throws `IncompatibleClassChangeError`. A call takes its arguments
 off the stack with a checked subtraction.
 
-Values are not typed. Bytecode can hand a native an object or an array
-of another class than it reads, or throw an object that is not a
-`Throwable`. Hundreds of natives read their arguments with accessors
-that panic on the wrong type, so this stays a known limit: a crafted
-class can stop its own game with an internal error. The panic ends the
-thread that ran it, logs `internal error in the virtual machine` and
-stops that game, which the host shows as crashed. No other game is
-affected. The report of an uncaught exception has its own guard, so a
-thread that threw a plain `Object` still ends, releases its monitors and
-wakes the threads that join it.
+`athrow` throws `VerifyError` when its object is not a `Throwable`, so
+a handler and the report of an uncaught exception always get one. Values
+are not typed otherwise. Bytecode can hand a native an object or an
+array of another class than it reads, and hundreds of natives read their
+arguments with accessors that panic on the wrong type, so this stays a
+known limit: a crafted class can stop its own game with an internal
+error. The panic ends the thread that ran it, logs `internal error in
+the virtual machine` and stops that game, which the host shows as
+crashed. No other game is affected. The report of an uncaught exception
+has its own guard, so a thread whose exception has a plain `Object` as
+its cause still ends, releases its monitors and wakes the threads that
+join it.
 
 ## The class library
 
