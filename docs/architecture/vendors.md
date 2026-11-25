@@ -94,7 +94,8 @@ fails. `fastemu-core` has no notification for them, so each request is
 logged at `LogLevel::Info`, as MIDP's `Display.vibrate` is. Games set the
 backlight every frame to keep the screen lit, so a light is logged only
 when its level changes, and stopping the motor only when it ran without an
-end.
+end. The state keeps the level of at most 16 lights; a change of any
+other is logged each time.
 
 ## Siemens
 
@@ -141,7 +142,10 @@ end.
   `Graphics` its translation and clip back. Sprites have no reference
   pixel or transforms, as Siemens' javadoc lists none. This package does
   not share code with `javax.microedition.lcdui.game`, which was not there
-  when it was written; the two could share it later.
+  when it was written; the two could share it later. A `TiledLayer` takes
+  at most 32767 static and 32767 animated tiles, more is
+  `IllegalArgumentException`, and at most 2^25 cells, more is
+  `OutOfMemoryError`; the heap is asked for the grid first.
 
 ## Samsung, Motorola, LG
 
