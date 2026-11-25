@@ -52,6 +52,21 @@ pub fn surface_of(ctx: &Ctx<'_>, image: ObjRef) -> JResult<SharedSurface> {
     Ok(Arc::clone(&ctx.payload::<ImageData>(image)?.surface))
 }
 
+/// Asks the heap for the pixels of a `width` by `height` image before any
+/// of them is made, so one that the heap could never hold is an
+/// `OutOfMemoryError` and not a host allocation of up to 128 MiB. A size
+/// that is not positive passes: the surface refuses it with the
+/// `IllegalArgumentException` MIDP names.
+pub(crate) fn reserve_pixels(ctx: &mut Ctx<'_>, width: i64, height: i64) -> JResult<()> {
+    if width <= 0 || height <= 0 {
+        return Ok(());
+    }
+    let bytes = (width as u64)
+        .saturating_mul(height as u64)
+        .saturating_mul(4);
+    ctx.check_alloc(usize::try_from(bytes).unwrap_or(usize::MAX))
+}
+
 /// Turns a decode or size error of `createImage(String)` and
 /// `createImage(InputStream)` into the `IOException` MIDP names, keeping
 /// `OutOfMemoryError` as it is.
@@ -132,20 +147,37 @@ fn create_from_bytes(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
 fn create_copy(ctx: &mut Ctx<'_>, source: Value) -> JResult<Value> {
     let source = ctx.non_null(source)?;
     let pixels = surface_of(ctx, source)?;
-    let copy = {
+    let (width, height, mutable) = {
         let surface = pixels.lock();
-        if !surface.is_mutable() {
-            // MIDP allows handing back an immutable source itself.
-            return Ok(source.into());
-        }
-        surface.to_immutable()
+        (surface.width(), surface.height(), surface.is_mutable())
     };
+    if !mutable {
+        // MIDP allows handing back an immutable source itself.
+        return Ok(source.into());
+    }
+    reserve_pixels(ctx, width.into(), height.into())?;
+    let copy = pixels.lock().to_immutable();
     Ok(new_image(ctx, copy)?.into())
 }
 
 fn create_region(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let source = ctx.non_null(a[0])?;
     let pixels = surface_of(ctx, source)?;
+    let (x, y, width, height) = (a[1].int(), a[2].int(), a[3].int(), a[4].int());
+    let (source_width, source_height) = {
+        let surface = pixels.lock();
+        (i64::from(surface.width()), i64::from(surface.height()))
+    };
+    // A region that is not inside the source is refused by `from_region`
+    // with the exception MIDP names; one that is can be no larger than the
+    // source.
+    let inside = x >= 0
+        && y >= 0
+        && i64::from(x) + i64::from(width) <= source_width
+        && i64::from(y) + i64::from(height) <= source_height;
+    if inside {
+        reserve_pixels(ctx, width.into(), height.into())?;
+    }
     let result = Surface::from_region(
         &pixels.lock(),
         a[1].int(),
@@ -162,6 +194,12 @@ fn create_region(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
 
 fn create_rgb(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let rgb = ctx.non_null(a[0])?;
+    // A size the array cannot fill is refused by `from_rgb` with the
+    // exception MIDP names.
+    let (width, height) = (i64::from(a[1].int()), i64::from(a[2].int()));
+    if width * height <= ctx.array::<i32>(rgb)?.len() as i64 {
+        reserve_pixels(ctx, width, height)?;
+    }
     let result = Surface::from_rgb(
         ctx.array::<i32>(rgb)?,
         a[1].int(),
@@ -175,6 +213,7 @@ fn create_rgb(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
 }
 
 fn create_mutable(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
+    reserve_pixels(ctx, a[0].int().into(), a[1].int().into())?;
     match Surface::new_mutable(a[0].int(), a[1].int()) {
         Ok(surface) => Ok(new_image(ctx, surface)?.into()),
         Err(e) => Err(throw_gfx(ctx, &e)),
