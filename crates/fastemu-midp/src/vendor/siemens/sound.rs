@@ -242,7 +242,7 @@ fn play(ctx: &mut Ctx<'_>, this: Value) -> JResult<Value> {
     let this = ctx.non_null(this)?;
     let bytes = ctx.payload::<MelodyData>(this)?.midi.clone();
     stop(ctx);
-    let Some(player) = clip::open(ctx, bytes, Some(Format::Midi)) else {
+    let Some(player) = clip::open(ctx, bytes, Some(Format::Midi))? else {
         return Ok(Value::Void);
     };
     // A refused start (the instance closing its sound) is silence.

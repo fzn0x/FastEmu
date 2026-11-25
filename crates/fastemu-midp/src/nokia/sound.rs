@@ -5,17 +5,18 @@
 //! It plays Smart Messaging ringing tones (`FORMAT_TONE`), WAV
 //! (`FORMAT_WAV`, though any format FastEmu plays is accepted) and beeps.
 //! Following the emulators games were tested on, data that does not
-//! decode leaves the sound `SOUND_UNINITIALIZED` instead of throwing, and
-//! playing it does nothing.
+//! decode, or is too large, leaves the sound `SOUND_UNINITIALIZED` instead
+//! of throwing, and playing it does nothing. A game whose sound group is
+//! full gets `OutOfMemoryError`, as MMAPI players do.
 
 use std::time::Instant;
 
 use fastemu_audio::{AudioError, Format, Group, PlayerState};
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Payload, Tracer, Value};
 
-use crate::media::Event;
 use crate::media::events::{self, Owner};
 use crate::media::track::{Backend, Track};
+use crate::media::{Event, make_sound, throw_audio};
 
 const SOUND: &str = "com/nokia/mid/sound/Sound";
 const SOUND_LISTENER: &str = "com/nokia/mid/sound/SoundListener";
@@ -110,7 +111,7 @@ fn init(ctx: &mut Ctx<'_>, this: ObjRef, sounding: Sounding) -> JResult<()> {
         Some(_) => None,
         None => Some(events::probe(ctx)?),
     };
-    let opened = ctx.without_lock(|| open(&sounding, group.as_ref(), probe.as_ref()));
+    let opened = make_sound(ctx, || open(&sounding, group.as_ref(), probe.as_ref()));
     let sound = data(ctx, this)?;
     sound.told_playing = false;
     match opened {
@@ -130,6 +131,8 @@ fn init(ctx: &mut Ctx<'_>, this: ObjRef, sounding: Sounding) -> JResult<()> {
         Err(error @ AudioError::InvalidArgument(_)) => {
             ctx.throw(ILLEGAL_ARGUMENT, &error.to_string())
         }
+        // The old sound stays as it was.
+        Err(error @ AudioError::OutOfMemory(_)) => throw_audio(ctx, error),
         Err(error) => {
             drop(sound.track.uninstall());
             if let Sounding::Data { bytes, .. } = &sounding {

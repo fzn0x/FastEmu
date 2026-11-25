@@ -53,7 +53,7 @@ fn open(ctx: &mut Ctx<'_>, this: ObjRef, kind: i32, bytes: Vec<u8>) -> JResult<(
         ctx.log(LogLevel::Warn, "an MMF sound clip stays silent");
         None
     } else {
-        clip::open(ctx, bytes, None)
+        clip::open(ctx, bytes, None)?
     };
     *ctx.payload_mut::<Clip>(this)? = Clip { player, mmf };
     Ok(())
