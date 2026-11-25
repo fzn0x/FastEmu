@@ -400,6 +400,15 @@ print only what comes out of it. The link:
 The app's own buffer of a game's log (`fastemu-ui`'s `LogBuffer`) keeps
 2000 lines and 1 MiB of text, whichever is reached first.
 
+The escaping is `fastemu_core::escape_control`, which every other place
+that prints text a game or a file name chooses uses too. `fastemu run`
+passes a suite's name, version, file name and its launch and crash errors
+through it, and so do its complaints about the command line. The desktop
+app's terminal logger passes every record through it, since records hold
+a game's name and launch errors. The suite's name, vendor and version are
+cut at 100 characters at the source (`suite::MAX_DISPLAY_CHARS`), but not
+escaped there: the text is only escaped where it reaches a terminal.
+
 ## Links
 
 `platformRequest` lives in `midlet` (`platform_request`). FastEmu
@@ -411,8 +420,15 @@ handles a request beside the running MIDlet, so it always returns
   with `Instance::take_link_request`. A newer link replaces one not yet
   taken, so a game cannot pile them up, and the app is notified. The
   scheme goes to the app in lower case. A link must be printable ASCII
-  with no user name before the host and at most 4096 bytes, so the link
-  the user reads is the page that opens.
+  with no backslash (a browser reads one as a slash, so
+  `http://good.com\.evil.com/` would open `evil.com`), no user name
+  before the host, a port, when it has one, of digits from 1 to 65535,
+  and at most 4096 bytes, so the link the user reads is the page that
+  opens. `fastemu_core::is_web_link` holds these checks, and the app
+  runs the same function again on what the runtime hands over, so
+  neither relies on the other. Links to `localhost`, private addresses
+  and downloads are still allowed: the user reads the whole link before
+  choosing **Open**.
 - **An empty string** takes back a link the app has not taken yet.
 - **Anything else** throws `ConnectionNotFoundException`, which MIDP
   allows for requests the phone cannot handle, and logs a `Warn` line
@@ -429,6 +445,13 @@ system's browser only when the user chooses **Open**
 (`docs/playing.md`). A link asked for just before the game ends is still
 handed over, as MIDP has the phone handle a request after its suite
 exits.
+
+The prompt ignores clicks on **Open** and **Dismiss** for 500 ms after it
+appears or its link changes (`session::LINK_ARMING`), and shows the
+buttons dimmed until then, so a player who taps fast in a game cannot
+answer a question they have not read. The same link asked for again does
+not restart the wait. The app reads the time from GPUI's clock, so tests
+move it by hand.
 
 ## Many instances in one process
 
