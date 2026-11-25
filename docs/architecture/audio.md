@@ -42,18 +42,17 @@ why, and how the MIDP layer should map each MMAPI call onto it.
 
 ## Threads and locking
 
-All mixer state sits behind one lock, a `parking_lot` mutex. It is fair
-over about a millisecond: a caller that has waited that long gets it
-next, so a thread that takes it
-again and again (a game that seeks a big MIDI file in a loop) cannot keep
-the audio thread or another game's calls out. API calls hold it briefly.
-The audio thread renders a buffer in slices of 128 frames and frees the
-lock between them, so a call waits for the slice under way, or about a
-millisecond while the slices are short. Decoding and
-parsing happen before the lock is taken (when a player is created), so
-the only work under the lock is rendering, which is the work the audio
-thread must do anyway. The lock has no poison: a panic while it was held
-leaves the mixer as it was rather than silencing every game.
+All mixer state sits behind one lock, a `parking_lot` mutex. It is fair over
+about a millisecond: a caller that has waited that long gets it next, so a
+thread that takes it again and again (a game that seeks a big MIDI file in a
+loop) cannot keep the audio thread or another game's calls out. API calls
+hold it briefly. The audio thread renders a buffer in slices of 128 frames
+and frees the lock between them, so a call waits for the slice under way, or
+about a millisecond while the slices are short. Decoding and parsing happen
+before the lock is taken (when a player is created), so the only work under
+the lock is rendering, which is the work the audio thread must do anyway.
+The lock has no poison: a panic while it was held leaves the mixer as it was
+rather than silencing every game.
 
 What one game can make the lock cost is bounded:
 
@@ -199,17 +198,16 @@ declared type second, because games often pass the wrong type:
 should report.
 
 - **WAV**: PCM 8 (unsigned), 16, 24 and 32-bit, IEEE float (32 and 64-bit),
-  IMA ADPCM, Microsoft ADPCM (with listed or standard coefficients),
-  mu-law, A-law, and the extensible format. Wrong sizes are tolerated: a
-  data size of zero or past the end runs to the end of the file, a RIFF
-  size is ignored, a missing pad byte after an odd chunk is noticed, a
-  torn last frame is dropped, and a lost chunk walk searches for `data`.
-  Wider than stereo keeps the front left and right. A rate of 0 or above
-  384 kHz is `Malformed`: the mixer reads a source at its rate over the
-  output rate, so a garbage rate would read billions of frames for each
-  frame played. A file decodes up
-  front, to at most four times its size (ADPCM) and twice for mu-law,
-  A-law and 8-bit PCM. What it will decode to is worked out from the
+  IMA ADPCM, Microsoft ADPCM (with listed or standard coefficients), mu-law,
+  A-law, and the extensible format. Wrong sizes are tolerated: a data size
+  of zero or past the end runs to the end of the file, a RIFF size is
+  ignored, a missing pad byte after an odd chunk is noticed, a torn last
+  frame is dropped, and a lost chunk walk searches for `data`. Wider than
+  stereo keeps the front left and right. A rate of 0 or above 384 kHz is
+  `Malformed`: the mixer reads a source at its rate over the output rate, so
+  a garbage rate would read billions of frames for each frame played. A file
+  decodes up front, to at most four times its size (ADPCM) and twice for
+  mu-law, A-law and 8-bit PCM. What it will decode to is worked out from the
   bytes there are, never from a size the header claims, and a file that
   would decode to more than 16 MiB (`MAX_DECODED_BYTES`) is `TooLarge`
   before anything is allocated.
