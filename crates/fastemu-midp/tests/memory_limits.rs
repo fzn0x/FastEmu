@@ -129,7 +129,8 @@ MIDlet-8: Customs, , m.Customs\r\n\
 MIDlet-9: SiemensBitmaps, , m.SiemensBitmaps\r\n\
 MIDlet-10: SiemensLayers, , m.SiemensLayers\r\n\
 MIDlet-11: SiemensSprites, , m.SiemensSprites\r\n\
-MIDlet-12: Returns, , m.Returns\r\n";
+MIDlet-12: Returns, , m.Returns\r\n\
+MIDlet-13: DecodeThreads, , m.DecodeThreads\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 mod midlet {
@@ -145,6 +146,7 @@ mod midlet {
     pub const SIEMENS_LAYERS: usize = 9;
     pub const SIEMENS_SPRITES: usize = 10;
     pub const RETURNS: usize = 11;
+    pub const DECODE_THREADS: usize = 12;
 }
 
 /// What the back buffer of a shown canvas takes of the heap on the default
@@ -291,6 +293,31 @@ fn declared_bmp(width: i32, height: i32) -> Vec<u8> {
     bmp.extend_from_slice(&24_u16.to_le_bytes());
     bmp.extend_from_slice(&[0; 24]);
     bmp
+}
+
+/// A PNG of `width` by `height` transparent black pixels, which deflate to
+/// a few kilobytes.
+fn blank_png(width: u32, height: u32) -> Vec<u8> {
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut chunk = |kind: &[u8], data: &[u8]| {
+        png.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        let mut body = kind.to_vec();
+        body.extend_from_slice(data);
+        png.extend_from_slice(&body);
+        png.extend_from_slice(&crc32fast::hash(&body).to_be_bytes());
+    };
+    let mut header = Vec::new();
+    header.extend_from_slice(&width.to_be_bytes());
+    header.extend_from_slice(&height.to_be_bytes());
+    header.extend_from_slice(&[8, 6, 0, 0, 0]);
+    chunk(b"IHDR", &header);
+    let rows = vec![0; (1 + 4 * width as usize) * height as usize];
+    chunk(
+        b"IDAT",
+        &miniz_oxide::deflate::compress_to_vec_zlib(&rows, 6),
+    );
+    chunk(b"IEND", &[]);
+    png
 }
 
 /// The numbers after `prefix` in `line`, which starts with it.
@@ -629,4 +656,37 @@ fn a_screen_that_was_hidden_paints_all_of_its_content_when_it_is_shown_again() {
         same_pixels(&first, &again),
         "the menu looks different; {log}"
     );
+}
+
+/// The line each of the eight threads of an `AtOnce` MIDlet printed once
+/// they all finished: `name id outcome count`.
+fn thread_lines(run: &mut Running, name: &str) -> Vec<String> {
+    run.wait_log("done");
+    (0..8)
+        .map(|id| run.wait_log(&format!("{name} {id} ")))
+        .collect()
+}
+
+#[test]
+fn threads_that_decode_images_at_once_take_turns() {
+    let alone = Alone::new();
+    let Some(jar) = suite("decode-threads", &[("big.png", blank_png(1024, 1024))]) else {
+        return;
+    };
+    // A heap of 16 MiB holds an image of 4 MiB and the next one's decode;
+    // eight threads each make it three times and drop it.
+    let mut run = launch(&jar, midlet::DECODE_THREADS, 16 << 20);
+    let lines = thread_lines(&mut run, "decode");
+    let log = run.dump();
+    // Each thread made its three images, unless the images the others held
+    // at that moment left no room: a phone's error.
+    for (id, line) in lines.iter().enumerate() {
+        assert!(
+            *line == format!("decode {id} made 3") || line.contains(" OutOfMemoryError "),
+            "{log}"
+        );
+    }
+    // One decode holds the PNG's rows and the image's pixels, 8 MiB, beside
+    // the heap. Eight at once held 66 MiB and more.
+    assert!(alone.peak_mib() < 40, "{} MiB", alone.peak_mib());
 }
