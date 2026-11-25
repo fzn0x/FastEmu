@@ -39,6 +39,8 @@ it as untrusted.
   crafted archive, class file or manifest must produce an error message,
   not a crash, a hang or unbounded memory use.
 
+[Known limits](#known-limits) says where these promises stop.
+
 ## In scope
 
 - A game escaping its sandbox: reading or writing outside its allowed files,
@@ -60,14 +62,15 @@ it as untrusted.
 
 FastEmu holds each game to the limits below, so that a hostile game ends
 in an error of its own and the other games run on. A game that gets past
-one of them, or that makes FastEmu hold memory outside them, is in scope.
+one of them, or that makes FastEmu hold memory that none of them counts,
+is in scope.
 Each limit is per game unless its row says otherwise. No setting changes
 them, except the phone profile, which sets the heap. The last column
 links to the page that describes the limit.
 
 ### Memory and threads
 
-| Limit | Number | When a game reaches it | Described in |
+| Limit | Bound | When a game reaches it | Described in |
 | --- | --- | --- | --- |
 | Java heap | 2, 4, 8 or 16 MiB, set by the phone profile | `OutOfMemoryError` | [jvm.md][jvm-heap] |
 | Memory the runtime makes for the game: strings, buffers, images, screens, sound bytes | counted on the heap | `OutOfMemoryError` | [jvm.md][jvm-heap] |
@@ -91,7 +94,7 @@ links to the page that describes the limit.
 
 ### Class files and suites
 
-| Limit | Number | When a game reaches it | Described in |
+| Limit | Bound | When a game reaches it | Described in |
 | --- | --- | --- | --- |
 | JAR file | 64 MiB | the game does not start, and the app says why | [midp.md][midp-suites] |
 | JAD file | 1 MiB | the same; a JAD found beside a JAR is left out | [midp.md][midp-suites] |
@@ -113,7 +116,7 @@ links to the page that describes the limit.
 
 ### The log
 
-| Limit | Number | When a game reaches it | Described in |
+| Limit | Bound | When a game reaches it | Described in |
 | --- | --- | --- | --- |
 | Log line | 4096 bytes | printed text is split into lines of that size; other lines are cut, with a note of how much went | [jvm.md][jvm-limits] |
 | Log kept between two reads of the app | 10000 lines and 1 MiB | the oldest lines go first | [midp.md][midp-log] |
@@ -124,7 +127,7 @@ links to the page that describes the limit.
 
 ### Images and screens
 
-| Limit | Number | When a game reaches it | Described in |
+| Limit | Bound | When a game reaches it | Described in |
 | --- | --- | --- | --- |
 | Pixels of an image | counted on the heap, 4 bytes a pixel | `OutOfMemoryError` before the pixels exist | [graphics.md][gfx-images] |
 | One image | 2^25 pixels | `OutOfMemoryError` | [graphics.md][gfx-images] |
@@ -150,7 +153,7 @@ links to the page that describes the limit.
 
 ### Sound
 
-| Limit | Number | When a game reaches it | Described in |
+| Limit | Bound | When a game reaches it | Described in |
 | --- | --- | --- | --- |
 | One sound, decoded, in any format | 16 MiB | `MediaException`; a Nokia `Sound` stays uninitialized | [audio.md][audio-players] |
 | Sound of a game, every API together | 32 MiB and 128 players | `OutOfMemoryError`, after one collection | [audio.md][audio-players] |
@@ -177,7 +180,7 @@ links to the page that describes the limit.
 
 ### Network and links
 
-| Limit | Number | When a game reaches it | Described in |
+| Limit | Bound | When a game reaches it | Described in |
 | --- | --- | --- | --- |
 | Open connections: sockets, secure sockets, accepted sockets and HTTP | 64 | `IOException`, after one collection | [connections.md][net-hold] |
 | Open server sockets | 8 | `IOException`, after one collection | [connections.md][net-hold] |
@@ -198,7 +201,7 @@ links to the page that describes the limit.
 
 ### Record stores
 
-| Limit | Number | When a game reaches it | Described in |
+| Limit | Bound | When a game reaches it | Described in |
 | --- | --- | --- | --- |
 | Space of a suite's stores | 1 MiB | `RecordStoreFullException` | [rms.md][rms-quota] |
 | Stores of a suite | 64 | `RecordStoreFullException` from the 65th `openRecordStore` | [rms.md][rms-quota] |
@@ -211,7 +214,7 @@ links to the page that describes the limit.
 
 ### The apps
 
-| Limit | Number | When a game reaches it | Described in |
+| Limit | Bound | When a game reaches it | Described in |
 | --- | --- | --- | --- |
 | Name, vendor and version in the library | 100 characters | cut | [midp.md][midp-log] |
 | Log a game's tile keeps | 2000 lines and 1 MiB | the oldest lines go first | [midp.md][midp-log] |
