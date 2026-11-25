@@ -25,6 +25,12 @@ use crate::vm::VmState;
 /// Backward branches and calls between safepoints.
 const YIELD_INTERVAL: u32 = 4096;
 
+/// What one exception transfer to a handler costs of that budget, so that
+/// a safepoint comes every 256 of them. A loop of nothing but throws and
+/// handlers has no backward branch and no call to count, and each pass
+/// may make an exception with a stack trace of up to 4 KiB.
+const HANDLER_COST: u32 = 16;
+
 enum Flow {
     /// A callee frame was pushed.
     Call,
@@ -1237,6 +1243,18 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                     Throw::Exception(exc) => {
                         if !catch(ctx, base, exc) {
                             return Err(Throw::Exception(exc));
+                        }
+                        // A handler has the exception on its stack, and
+                        // the frame is written back, so a collection here
+                        // sees it. Without this a handler that throws
+                        // again is a loop with no safepoint.
+                        budget = budget.saturating_sub(HANDLER_COST);
+                        if budget == 0 {
+                            budget = YIELD_INTERVAL;
+                            if let Err(stop) = ctx.safepoint() {
+                                ctx.thread.frames.truncate(base);
+                                return Err(stop);
+                            }
                         }
                     }
                 }
