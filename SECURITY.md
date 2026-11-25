@@ -83,6 +83,7 @@ links to the page that describes the limit.
 | Stack trace of an exception | 256 frames | the rest is left out | [jvm.md][jvm-heap] |
 | Name of a thread | 255 characters | cut | [jvm.md][jvm-heap] |
 | Pause and resume calls waiting or running, besides the first `startApp` | 8 | later `pauseApp` and `startApp` calls are dropped, with one warning; the game still pauses and resumes | [midp.md][midp-threads] |
+| Messages of the game waiting for its control thread (`resumeRequest`, `notifyDestroyed`, a crash) | one `resumeRequest` between two messages of the app, and one `notifyDestroyed` or crash | a `resumeRequest` right behind another that still waits is merged into it, and a message of the game after `notifyDestroyed` or a crash is dropped; the app's own messages, such as input, pause and stop, are never merged or dropped | [midp.md][midp-threads] |
 | `callSerially` calls waiting, and posted tasks waiting | 10000 of each | `OutOfMemoryError` from `callSerially`; a posted task is dropped, with one warning | [midp.md][midp-events] |
 
 [jvm-heap]: docs/architecture/jvm.md#the-heap-and-the-collector
@@ -319,10 +320,11 @@ section says is in scope.
 - Only a lifecycle call that does not return, such as a `startApp` that
   runs the game's loop, or a very slow one, lets 8 pause and resume
   calls pile up; the ones after are dropped, as the table says.
-- A game that calls `notifyPaused` and `resumeRequest` in a tight loop
-  queues requests for the app faster than the app handles them, and
-  nothing bounds that queue, so the memory of the app grows while the
-  loop runs.
+- A game that pauses itself and asks to be resumed in a loop from a
+  thread of its own gets a `startApp` for each request the control
+  thread takes, as MIDP has it. Each runs on a new host thread, and
+  nothing bounds how many start in a second: a debug build started
+  about 400. They end at once, so only the processor pays.
 - While a game's thread keeps the VM lock, the app waits a second at
   most. Then it drops the input it was posting and skips `pauseApp` or
   `destroyApp`, and a closed game shows as ended a few seconds later.
