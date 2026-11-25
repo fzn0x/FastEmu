@@ -74,8 +74,22 @@ pub fn repaint(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<()> {
 /// (its commands, title, ticker or full-screen mode). Only the shown
 /// displayable needs it: the others are laid out when they are shown. A
 /// screen's timer runs again at once, as a new ticker needs it.
+///
+/// The request is idempotent, so one that the event thread has not taken
+/// yet stands for the next: a game that sets a title or adds a command in
+/// a loop while the event thread is busy queues one request, not one for
+/// each call. Only the shown displayable asks, and it does not change
+/// while the event thread is busy, so the queue holds one request at most.
 pub fn relayout(ctx: &mut Ctx<'_>, obj: ObjRef) {
     if current(ctx) != Some(obj) {
+        return;
+    }
+    let last = state(ctx)
+        .internal
+        .back()
+        .map(|Internal::Relayout(global)| Arc::clone(global));
+    if last.is_some_and(|global| global.get(ctx) == obj) {
+        state(ctx).tick_at = Some(std::time::Instant::now());
         return;
     }
     let global = Arc::new(ctx.new_global(obj));
@@ -330,4 +344,45 @@ pub fn class() -> NativeClass {
         .method("getBestImageHeight", "(I)I", |ctx, a| {
             best_image_size(ctx, a[1].int(), false)
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use fastemu_jvm::{MemorySource, Vm, VmConfig};
+
+    use super::*;
+    use crate::env::InstanceEnv;
+
+    #[test]
+    fn relayout_requests_for_the_shown_displayable_do_not_pile_up() {
+        let env = InstanceEnv::for_tests("unused");
+        let config = VmConfig {
+            log: Arc::new(|_| {}),
+            ..VmConfig::default()
+        };
+        let classes = crate::classes(&fastemu_core::default_profile());
+        let vm = Vm::new(config, Arc::new(MemorySource::new()), classes);
+        vm.attach("test", move |ctx| {
+            ctx.set_extension(env);
+            let object = ctx.find_class("java/lang/Object").expect("Object");
+            let shown = ctx.new_object(object).expect("an object");
+            let hidden = ctx.new_object(object).expect("an object");
+            let global = Arc::new(ctx.new_global(shown));
+            state(ctx).current = Some(global);
+            // A game that sets titles in a loop while the event thread is
+            // busy: one request waits, whoever asks, and one that is not
+            // shown never queues.
+            for _ in 0..100_000 {
+                relayout(ctx, shown);
+                relayout(ctx, hidden);
+            }
+            assert_eq!(state(ctx).internal.len(), 1);
+            // Once the event thread has taken it, the next request queues.
+            state(ctx).internal.clear();
+            relayout(ctx, shown);
+            relayout(ctx, shown);
+            assert_eq!(state(ctx).internal.len(), 1);
+            assert!(state(ctx).tick_at.is_some());
+        });
+    }
 }
