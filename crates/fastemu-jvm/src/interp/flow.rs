@@ -308,6 +308,33 @@ pub(crate) fn stack_heights(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::classfile::{Constant, Utf8};
+    use crate::descriptor::take_shapes;
+
+    /// A pool whose entry 1 is a method reference with `desc`.
+    fn pool_calling(desc: &str) -> ConstantPool {
+        let utf8 = |text: &str| {
+            Constant::Utf8(Utf8 {
+                text: text.into(),
+                exact: None,
+            })
+        };
+        ConstantPool::from_entries(vec![
+            Constant::Unused,
+            Constant::MethodRef {
+                class: 2,
+                name_and_type: 3,
+            },
+            Constant::Class(4),
+            Constant::NameAndType {
+                name: 5,
+                descriptor: 6,
+            },
+            utf8("C"),
+            utf8("m"),
+            utf8(desc),
+        ])
+    }
 
     /// The heights of code of a `void` method.
     fn heights(insns: &[Insn], max_stack: u16) -> Result<Vec<u32>, String> {
@@ -410,6 +437,19 @@ mod tests {
         assert!(e.contains("different kind"), "{e}");
         // Without the handler the ireturn is dead code.
         assert!(stack_heights(&insns, &pcs, &[], &[], &cp, 1, 0).is_ok());
+    }
+
+    #[test]
+    fn a_call_is_sized_in_one_walk_of_its_descriptor() {
+        let wide = format!("({}I)J", "J".repeat(30_000));
+        let cp = pool_calling(&wide);
+        take_shapes();
+        assert_eq!(method_slots(&cp, 1, false), Ok((60_001, 2)));
+        assert_eq!(method_slots(&cp, 1, true), Ok((60_002, 2)));
+        assert_eq!(take_shapes(), 2);
+        let bad = pool_calling("(I");
+        let e = method_slots(&bad, 1, false).unwrap_err();
+        assert!(e.contains("bad descriptor"), "{e}");
     }
 
     #[test]
