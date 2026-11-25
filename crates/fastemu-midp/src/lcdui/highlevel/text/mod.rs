@@ -6,13 +6,13 @@ pub mod editor;
 use std::ops::Range;
 use std::time::Instant;
 
+use fastemu_core::KeyCodes;
 use fastemu_gfx::Font;
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Throw, Value};
 
 pub use editor::{EditError, InputMode, TextEditor};
 
 use super::draw::{self, Painter, wrap};
-use crate::env::env;
 use crate::lcdui::Rect;
 use crate::lcdui::screen::{KeyEvent, KeyPhase};
 
@@ -180,12 +180,12 @@ pub(crate) enum KeyUse {
 
 /// A key on an editor: the keypad's digits, `*` and `#` type by
 /// multi-tap, clear deletes, and left and right (the arrow keys only, so
-/// `4` and `6` still type) move the caret.
-pub(crate) fn key(ctx: &Ctx<'_>, editor: &mut TextEditor, event: KeyEvent) -> KeyUse {
+/// `4` and `6` still type) move the caret. `codes` are the key codes of
+/// the device.
+pub(crate) fn key(codes: KeyCodes, editor: &mut TextEditor, event: KeyEvent) -> KeyUse {
     if event.phase == KeyPhase::Released {
         return KeyUse::Ignored;
     }
-    let codes = env(ctx).profile.key_codes;
     let code = event.code;
     if code == codes.clear {
         return if editor.backspace() {
@@ -217,12 +217,12 @@ pub(crate) fn key(ctx: &Ctx<'_>, editor: &mut TextEditor, event: KeyEvent) -> Ke
         // A held key types once; its repeats are not traversal either.
         return KeyUse::Moved;
     }
-    let before = editor.text().to_vec();
+    let before = editor.edits();
     if !editor.key(unit, Instant::now()) {
         // A refused key still belongs to the editor.
         return KeyUse::Moved;
     }
-    if editor.text() == before.as_slice() {
+    if editor.edits() == before {
         KeyUse::Moved
     } else {
         KeyUse::Edited

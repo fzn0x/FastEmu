@@ -71,18 +71,23 @@ fn is_phone(unit: u16) -> bool {
 /// `PHONENUMBER` digits and `+*#pw ()-`; the others take any text. A lone
 /// minus or point passes, since the user may be part way through typing.
 pub fn allowed(text: &[u16], constraints: i32) -> bool {
-    let body = |text: &[u16]| match text.first() {
-        Some(&MINUS) => text[1..].to_vec(),
-        _ => text.to_vec(),
+    allowed_units(text.iter().copied(), constraints)
+}
+
+/// [`allowed`] for a text given as its units, so that an edit is checked
+/// before it is made, on the text it would give, without building that
+/// text.
+fn allowed_units(units: impl Iterator<Item = u16> + Clone, constraints: i32) -> bool {
+    let body = || {
+        let minus = units.clone().next() == Some(MINUS);
+        units.clone().skip(usize::from(minus))
     };
     match constraints & CONSTRAINT_MASK {
-        NUMERIC => body(text).into_iter().all(is_digit),
+        NUMERIC => body().all(is_digit),
         DECIMAL => {
-            let body = body(text);
-            body.iter().all(|&u| is_digit(u) || u == DOT)
-                && body.iter().filter(|&&u| u == DOT).count() <= 1
+            body().all(|u| is_digit(u) || u == DOT) && body().filter(|&u| u == DOT).count() <= 1
         }
-        PHONENUMBER => text.iter().all(|&u| is_phone(u)),
+        PHONENUMBER => units.clone().all(is_phone),
         _ => true,
     }
 }
@@ -147,6 +152,8 @@ fn letters(key: u16, kind: i32) -> &'static str {
 #[derive(Clone, Debug)]
 pub struct TextEditor {
     text: Vec<u16>,
+    /// How many times the text changed, for telling whether a key did.
+    edits: u64,
     caret: usize,
     max_size: usize,
     constraints: i32,
@@ -166,6 +173,7 @@ impl TextEditor {
         }
         let mut editor = Self {
             text: Vec::new(),
+            edits: 0,
             caret: 0,
             max_size: max_size as usize,
             constraints,
@@ -194,6 +202,11 @@ impl TextEditor {
     /// The text.
     pub fn text(&self) -> &[u16] {
         &self.text
+    }
+
+    /// How many times the text changed.
+    pub fn edits(&self) -> u64 {
+        self.edits
     }
 
     /// The caret, from 0 (before the first character) to the length.
@@ -270,19 +283,40 @@ impl TextEditor {
     pub fn set_text(&mut self, text: &[u16]) -> Result<(), EditError> {
         self.check(text)?;
         self.text = text.to_vec();
+        self.edits += 1;
         self.caret = self.text.len();
         self.pending = None;
         Ok(())
     }
 
+    /// Whether `src` may take the place of `text[start..end]`: the result
+    /// must fit `maxSize` and the constraints. The result is not built.
+    fn check_edit(&self, start: usize, end: usize, src: &[u16]) -> Result<(), EditError> {
+        let len = (self.text.len() - (end - start)).saturating_add(src.len());
+        if len > self.max_size {
+            return Err(EditError::IllegalArgument(
+                "the text is longer than maxSize",
+            ));
+        }
+        let (before, after) = (&self.text[..start], &self.text[end..]);
+        let next = before.iter().chain(src).chain(after).copied();
+        if !allowed_units(next, self.constraints) {
+            return Err(EditError::IllegalArgument(
+                "the text breaks the input constraints",
+            ));
+        }
+        Ok(())
+    }
+
     /// `insert(src, position)`: `position` is clamped into the text; the
-    /// caret moves along when the text goes in at or before it.
+    /// caret moves along when the text goes in at or before it. The edit
+    /// is checked on the text it would give and then made in place, so
+    /// an insert costs what it inserts, not the length of the text.
     pub fn insert(&mut self, src: &[u16], position: i32) -> Result<(), EditError> {
-        let at = position.clamp(0, self.text.len() as i32) as usize;
-        let mut next = self.text.clone();
-        next.splice(at..at, src.iter().copied());
-        self.check(&next)?;
-        self.text = next;
+        let at = usize::try_from(position).map_or(0, |p| p.min(self.text.len()));
+        self.check_edit(at, at, src)?;
+        self.text.splice(at..at, src.iter().copied());
+        self.edits += 1;
         if at <= self.caret {
             self.caret += src.len();
         }
@@ -298,14 +332,14 @@ impl TextEditor {
             return Err(EditError::StringIndex);
         }
         let range = offset as usize..(offset + length) as usize;
-        let mut next = self.text.clone();
-        next.drain(range.clone());
-        if !allowed(&next, self.constraints) {
+        let (before, after) = (&self.text[..range.start], &self.text[range.end..]);
+        if !allowed_units(before.iter().chain(after).copied(), self.constraints) {
             return Err(EditError::IllegalArgument(
                 "the text would break the input constraints",
             ));
         }
-        self.text = next;
+        self.text.drain(range.clone());
+        self.edits += 1;
         if self.caret >= range.end {
             self.caret -= range.len();
         } else if self.caret > range.start {
@@ -345,6 +379,7 @@ impl TextEditor {
         self.constraints = constraints;
         if !allowed(&self.text, constraints) {
             self.text.clear();
+            self.edits += 1;
             self.caret = 0;
         }
         if kind_changed {
@@ -386,9 +421,13 @@ impl TextEditor {
         if self.text.len() >= self.max_size || unit < 0x20 && unit != u16::from(b'\n') {
             return false;
         }
-        let mut next = self.text.clone();
-        next.insert(self.caret, unit);
-        allowed(&next, self.constraints)
+        let (before, after) = self.text.split_at(self.caret);
+        let next = before
+            .iter()
+            .copied()
+            .chain([unit])
+            .chain(after.iter().copied());
+        allowed_units(next, self.constraints)
     }
 
     /// Types `text` from a host keyboard at the caret: characters the
@@ -408,6 +447,7 @@ impl TextEditor {
             };
             if self.fits(unit) {
                 self.text.insert(self.caret, unit);
+                self.edits += 1;
                 self.caret += 1;
                 changed = true;
             }
@@ -424,6 +464,7 @@ impl TextEditor {
         self.pending = None;
         self.caret -= 1;
         self.text.remove(self.caret);
+        self.edits += 1;
         true
     }
 
@@ -509,6 +550,7 @@ impl TextEditor {
             return false;
         }
         self.text.insert(self.caret, unit);
+        self.edits += 1;
         self.caret += 1;
         true
     }
@@ -534,10 +576,14 @@ impl TextEditor {
             // The same key again: the next letter the constraints allow.
             for step in 1..=units.len() {
                 let index = (p.index + step) % units.len();
-                let mut next = self.text.clone();
-                next[p.at] = shape_like(self.text[p.at], units[index]);
-                if allowed(&next, self.constraints) {
-                    self.text = next;
+                let unit = shape_like(self.text[p.at], units[index]);
+                let next =
+                    (self.text.iter().enumerate()).map(|(i, &u)| if i == p.at { unit } else { u });
+                if allowed_units(next, self.constraints) {
+                    if self.text[p.at] != unit {
+                        self.text[p.at] = unit;
+                        self.edits += 1;
+                    }
                     self.pending = Some(Pending {
                         index,
                         until: now + MULTI_TAP,
@@ -554,6 +600,7 @@ impl TextEditor {
             if self.fits(unit) {
                 let at = self.caret;
                 self.text.insert(at, unit);
+                self.edits += 1;
                 self.caret += 1;
                 self.pending = Some(Pending {
                     key,
@@ -648,6 +695,72 @@ mod tests {
         let mut n = editor("-5", 4, NUMERIC);
         assert!(n.delete(1, 1).is_ok());
         assert!(n.insert(&units("x"), 0).is_err());
+    }
+
+    /// Every text of up to `len` units over a few that the constraints
+    /// treat differently.
+    fn small_texts(len: usize) -> Vec<Vec<u16>> {
+        let mut all = vec![Vec::new()];
+        let mut last = vec![Vec::new()];
+        for _ in 0..len {
+            last = last
+                .iter()
+                .flat_map(|t: &Vec<u16>| {
+                    "1-.x+".encode_utf16().map(move |u| {
+                        let mut longer = t.clone();
+                        longer.push(u);
+                        longer
+                    })
+                })
+                .collect();
+            all.extend(last.iter().cloned());
+        }
+        all
+    }
+
+    #[test]
+    fn edits_made_in_place_are_allowed_when_the_text_they_give_is() {
+        for constraints in [ANY, NUMERIC, DECIMAL, PHONENUMBER, NUMERIC | PASSWORD] {
+            for before in small_texts(3).iter().filter(|t| allowed(t, constraints)) {
+                for src in small_texts(2) {
+                    for at in 0..=before.len() {
+                        let mut want = before.clone();
+                        want.splice(at..at, src.iter().copied());
+                        let mut e = TextEditor::new(before, 5, constraints).unwrap();
+                        let done = e.insert(&src, at as i32);
+                        let fits = want.len() <= 5 && allowed(&want, constraints);
+                        assert_eq!(done.is_ok(), fits, "{before:?} + {src:?} at {at}");
+                        let text = if fits { &want } else { before };
+                        assert_eq!(e.text(), text.as_slice(), "{before:?} + {src:?} at {at}");
+                    }
+                }
+                for offset in 0..=before.len() {
+                    for length in 0..=before.len() - offset {
+                        let mut want = before.clone();
+                        want.drain(offset..offset + length);
+                        let mut e = TextEditor::new(before, 5, constraints).unwrap();
+                        let done = e.delete(offset as i32, length as i32);
+                        let fits = allowed(&want, constraints);
+                        assert_eq!(done.is_ok(), fits, "{before:?} - {offset}+{length}");
+                        let text = if fits { &want } else { before };
+                        assert_eq!(e.text(), text.as_slice(), "{before:?} - {offset}+{length}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_refused_edit_changes_nothing() {
+        let mut e = editor("12", 4, NUMERIC);
+        let edits = e.edits();
+        assert!(e.insert(&units("x"), 1).is_err());
+        assert!(e.insert(&units("345"), 1).is_err());
+        assert!(e.delete(0, 3).is_err());
+        assert_eq!((text(&e).as_str(), e.caret(), e.edits()), ("12", 2, edits));
+        e.insert(&units("3"), 1).unwrap();
+        assert_eq!((text(&e).as_str(), e.caret()), ("132", 3));
+        assert_eq!(e.edits(), edits + 1);
     }
 
     #[test]

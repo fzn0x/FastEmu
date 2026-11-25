@@ -5,6 +5,7 @@
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Value};
 
 use super::{Handled, ItemData, Kind, Needs, changed, data, data_mut};
+use crate::env::env;
 use crate::lcdui::Rect;
 use crate::lcdui::highlevel::draw::{Fonts, Painter};
 use crate::lcdui::highlevel::text::{self, INSET, KeyUse, TextEditor, editor};
@@ -55,9 +56,8 @@ pub(super) fn paint(
 
 /// A key while the field has the focus.
 pub(super) fn key(ctx: &mut Ctx<'_>, item: ObjRef, event: KeyEvent) -> JResult<Handled> {
-    let mut e = editor(ctx, item)?.clone();
-    let used = text::key(ctx, &mut e, event);
-    *editor_of(ctx, item)? = e;
+    let codes = env(ctx).profile.key_codes;
+    let used = text::key(codes, editor_of(ctx, item)?, event);
     Ok(match used {
         KeyUse::Ignored => Handled::No,
         KeyUse::Moved => Handled::Yes,

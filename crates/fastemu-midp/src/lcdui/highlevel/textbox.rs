@@ -201,9 +201,7 @@ impl ScreenHandler for TextBoxHandler {
             }
             return Ok(true);
         }
-        let mut e = text_box(ctx, obj)?.editor.clone();
-        let used = text::key(ctx, &mut e, event);
-        editor_of(ctx, obj).map(|slot| *slot = e)?;
+        let used = text::key(codes, editor_of(ctx, obj)?, event);
         if used != KeyUse::Ignored {
             display::repaint(ctx, obj)?;
             super::wake_timer(ctx, obj);
