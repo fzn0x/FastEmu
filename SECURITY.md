@@ -178,9 +178,9 @@ instead, as they throw no `MediaException`.
 | MIDI messages a MIDI player sends in one render call, a block of at most 256 frames | 512 | the rest go out in the next blocks | [audio.md][audio-formats] |
 | Sample rate of a WAV file | 384000 Hz | the sound plays as silence, with a warning; a Nokia `Sound` stays uninitialized | [audio.md][audio-formats] |
 | Notes of a Siemens `MelodyComposer` | 32767 | `appendNote` throws `Exception`; the constructor keeps the first 32767 | [vendors.md][vendors-siemens] |
-| Tones of a Nokia ringing tone | 65536 | `MediaException`; a Nokia `Sound` stays uninitialized | [audio.md][audio-formats] |
+| Tones of a Nokia ringing tone | 65536 | `MediaException`; a Nokia `Sound` stays uninitialized, and a Samsung sound stays silent, with a warning | [audio.md][audio-formats] |
 | Tones of a tone sequence | 65536 in the sequence or in one block, 262144 in all its lists together | `IllegalArgumentException` from `setSequence`; a player of such data is silent | [audio.md][audio-formats] |
-| AMR file | 30000 frames, ten minutes | `MediaException`; a Nokia `Sound` stays uninitialized, and a Samsung or Siemens sound stays silent, with a warning | [audio.md][audio-formats] |
+| AMR file | 30000 frames, ten minutes | `MediaException`; a Nokia `Sound` stays uninitialized, and a Samsung sound stays silent, with a warning | [audio.md][audio-formats] |
 | Sound read from a stream | what one request of the runtime may take, never more than the heap or 32 MiB | `OutOfMemoryError` | [media.md][media-players] |
 | Sound events waiting | 1024 for a game, 4096 in the engine for all games; twice that for the events that end a run | the repeats are dropped first; `CLOSED` never is | [media.md][media-events] |
 | An MP3 seek the reader cannot do | 8 s of sound caught up in each render call | silence until the place is reached | [audio.md][audio-gaps] |
