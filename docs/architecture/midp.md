@@ -790,6 +790,8 @@ on, and a `LayerManager` scene checked frame by frame.
    file is read or copied, weigh the size it declares against the heap,
    and decode with the VM lock released. Nothing may wait for the turn
    while it holds the VM lock, and nothing inside a turn may call Java.
+   A stream is read before the turn, into a `stream_bytes::CountedBytes`
+   that the heap counts, as `Image.createImage(InputStream)` does.
 
 ## Not done yet
 

@@ -203,6 +203,14 @@ decodes nothing. So a game's image calls hold one file and one decode
 beside its heap at most. `createImage(byte[], offset, length)` and
 `DirectUtils.createImage` copy only the part of the array they decode.
 
+The bytes `Image.createImage(InputStream)` reads are held by an object on
+the heap, counted at the room of their vector, and the heap is asked
+before the vector grows. A stream the heap cannot hold ends in
+`OutOfMemoryError`: on a heap of 1 MiB after 1 MiB at most. Threads that
+read streams at once share the heap's room. The stream is read before the
+decode turn, as reading runs the game's code, and its bytes stay counted
+while the thread waits for its turn and while they decode.
+
 `Image.createImage(InputStream)` reads at most 16 MiB. A stream that gives
 more ends with `IOException`, and so does one whose `read` returns no
 bytes 1000 times in a row.
