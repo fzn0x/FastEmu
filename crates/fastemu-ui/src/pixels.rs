@@ -2,6 +2,7 @@
 //! suite icons and screenshots.
 
 use std::io::Cursor;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use fastemu_core::Frame;
 
@@ -52,7 +53,20 @@ const MAX_ICON_SIDE: u32 = 512;
 /// Decodes a suite's PNG icon and scales it up by whole pixels until its
 /// longer side reaches `min_side`, so a 16x16 icon stays crisp when the
 /// sidebar draws it larger. `None` for anything that is not a usable PNG.
+///
+/// The icon is a game's own file, read for every library entry on a
+/// background task, and the `png` crate panics on some damaged ones (a
+/// palette that is not a whole number of colours). A panic leaving a
+/// background task aborts the whole app, and every game running in it, so
+/// a decoder that panics gives no icon.
 pub fn icon_bgra(png: &[u8], min_side: u32) -> Option<Bgra> {
+    catch_unwind(AssertUnwindSafe(|| decode_icon(png, min_side))).unwrap_or_else(|_| {
+        log::warn!("a suite icon could not be decoded: the PNG decoder failed");
+        None
+    })
+}
+
+fn decode_icon(png: &[u8], min_side: u32) -> Option<Bgra> {
     let mut decoder = png::Decoder::new_with_limits(
         Cursor::new(png),
         png::Limits {
@@ -187,6 +201,33 @@ mod tests {
         // 100000 x 100000 RGBA would need a 40 GB buffer.
         assert!(icon_bgra(&png_claiming(100_000, 100_000), 8).is_none());
         assert!(icon_bgra(&png_claiming(MAX_ICON_SIDE + 1, 1), 8).is_none());
+    }
+
+    /// An indexed 1 x 1 PNG whose palette chunk holds `palette`, with valid
+    /// checksums, as a game's icon file would have them.
+    fn png_with_palette(palette: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, 1, 1);
+        encoder.set_color(png::ColorType::Indexed);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_palette(palette.to_vec());
+        let mut writer = encoder.write_header().expect("writes");
+        writer.write_image_data(&[0]).expect("writes");
+        writer.finish().expect("writes");
+        out
+    }
+
+    #[test]
+    fn an_icon_the_png_crate_panics_on_gives_no_icon() {
+        // The audit's file: a palette of 4 bytes. The decoder panics with
+        // "range end index 3 out of range" on it, and on a background task
+        // that aborts the app.
+        let odd = png_with_palette(&[1, 2, 3, 4]);
+        assert!(odd.len() < 100);
+        assert!(icon_bgra(&odd, 32).is_none());
+        for len in [1, 2, 5, 769] {
+            assert!(icon_bgra(&png_with_palette(&vec![9; len]), 32).is_none());
+        }
     }
 
     #[test]
