@@ -717,6 +717,16 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_panic_inside_the_png_crate_is_caught() {
+        // The stream the repair would pass on if it kept the palette. The
+        // png crate panics on it; the guard around every decode turns that
+        // into an error, whatever the crate does about it later.
+        let stream = with_palette(&[1, 2, 3, 4]);
+        let outcome = super::super::guarded(|| decode_stream(&stream));
+        assert!(matches!(outcome, Err(GfxError::Decode(_))));
+    }
+
+    #[test]
     fn unreadable_files_fail() {
         let good = encode(
             1,

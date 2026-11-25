@@ -13,6 +13,8 @@ mod gif;
 mod jpeg;
 mod png;
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use crate::error::{GfxError, Result};
 use crate::surface::{MAX_PIXELS, Surface, SurfaceKind, java_range};
 
@@ -49,19 +51,33 @@ impl ImageFormat {
     }
 }
 
+/// Runs a decode and turns a panic in it into a decode error. The decoders
+/// are other people's code reading hostile files; the `png` crate has
+/// already panicked on one palette, and a panic on a game's thread would
+/// stop its whole virtual machine, or abort the launcher on a background
+/// task. Needs `panic = "unwind"`, which every profile of FastEmu sets.
+fn guarded<T>(decode: impl FnOnce() -> Result<T>) -> Result<T> {
+    catch_unwind(AssertUnwindSafe(decode))
+        .unwrap_or_else(|_| Err(GfxError::Decode("the image decoder failed".into())))
+}
+
 impl Surface {
     /// `Image.createImage(imageData, 0, imageData.length)`: decodes a PNG,
     /// JPEG, GIF (its first frame) or BMP file into an immutable image.
+    /// A decoder that panics on a file is a [`GfxError::Decode`], as the
+    /// file is not one it can read.
     pub fn decode(data: &[u8]) -> Result<Surface> {
-        let format = ImageFormat::sniff(data)
-            .ok_or_else(|| GfxError::Decode("not a PNG, JPEG, GIF or BMP image".into()))?;
-        let (width, height, pixels) = match format {
-            ImageFormat::Png => png::decode(data),
-            ImageFormat::Jpeg => jpeg::decode(data),
-            ImageFormat::Gif => gif::decode(data),
-            ImageFormat::Bmp => bmp::decode(data),
-        }?;
-        Surface::from_pixels(width, height, pixels, SurfaceKind::Immutable)
+        guarded(|| {
+            let format = ImageFormat::sniff(data)
+                .ok_or_else(|| GfxError::Decode("not a PNG, JPEG, GIF or BMP image".into()))?;
+            let (width, height, pixels) = match format {
+                ImageFormat::Png => png::decode(data),
+                ImageFormat::Jpeg => jpeg::decode(data),
+                ImageFormat::Gif => gif::decode(data),
+                ImageFormat::Bmp => bmp::decode(data),
+            }?;
+            Surface::from_pixels(width, height, pixels, SurfaceKind::Immutable)
+        })
     }
 
     /// `Image.createImage(imageData, imageOffset, imageLength)`. A range
@@ -129,5 +145,20 @@ mod tests {
             Some(ImageFormat::Png)
         );
         assert_eq!(ImageFormat::sniff(b"\x89PNG"), None);
+    }
+
+    #[test]
+    fn a_decoder_panic_is_a_decode_error() {
+        let failure = guarded(|| -> Result<u8> { panic!("a decoder gave up") });
+        assert_eq!(
+            failure,
+            Err(GfxError::Decode("the image decoder failed".into()))
+        );
+        // Results that are not panics pass as they are.
+        assert_eq!(guarded(|| Ok(7)), Ok(7));
+        assert_eq!(
+            guarded(|| -> Result<u8> { Err(GfxError::OutOfMemory) }),
+            Err(GfxError::OutOfMemory)
+        );
     }
 }
