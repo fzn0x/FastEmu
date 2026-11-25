@@ -723,8 +723,7 @@ mod tests {
             ctx.set_extension(env);
             body(ctx);
         });
-        let lines = lines.lock().unwrap().clone();
-        lines
+        lines.lock().unwrap().clone()
     }
 
     /// Makes the machine's write budget `burst` and `rate` on a fake
