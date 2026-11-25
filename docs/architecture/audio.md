@@ -110,10 +110,11 @@ A game's sound is capped, because the Java heap never sees it. A group
 holds at most 128 players and 32 MiB of sound (`GroupLimits`; the host
 changes them with `Group::set_limits`, tests with tiny values). The bytes
 are what each source says it holds (`Source::memory_bytes`): the samples
-of decoded sound, the file of an MP3, the events of a MIDI file or a
-tone sequence. They are added up from the sources the group holds now,
-so a closed or dropped player gives its bytes back, and a tone sequence
-that replaces another counts in its place. `Group::insert` checks both
+of decoded sound, the file of an MP3, the events and time signatures of
+a MIDI file, the tones of a tone sequence. They are added up from the
+sources the group holds now, so a closed or dropped player gives its
+bytes back, and a tone sequence that replaces another counts in its
+place. `Group::insert` checks both
 limits, and every player is made there: MMAPI players, tone players,
 beeps, and the Nokia, Samsung and Siemens sounds. `playTone` tones are
 not players and keep their own cap of 16, below. A sound that is bigger

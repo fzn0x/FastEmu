@@ -32,7 +32,8 @@ const MAX_TONES: usize = 16;
 pub struct GroupLimits {
     /// Bytes of sound the group's players hold together: the decoded
     /// samples of a WAV or AMR file, the file an MP3 is decoded from as
-    /// it plays, the events of a MIDI file or a tone sequence.
+    /// it plays, the events and time signatures of a MIDI file, the tones
+    /// of a tone sequence.
     pub max_bytes: usize,
     /// Players the group holds, playing or not. `playTone` tones are
     /// capped on their own.
