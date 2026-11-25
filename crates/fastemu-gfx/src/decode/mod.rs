@@ -97,6 +97,39 @@ pub fn probe_size(data: &[u8]) -> Option<(u32, u32)> {
     .flatten()
 }
 
+/// The host bytes [`Surface::decode`] holds for the first frame of a GIF
+/// whose frame has more pixels than the image [`probe_size`] gives. The
+/// decoder reads that frame whole, at its own size, before it cuts it to
+/// the image, so a caller that weighed only the image would let through a
+/// file of 34 bytes that holds 160 MiB while it decodes. A caller weighs
+/// these bytes too, before it decodes. Only the header is read.
+///
+/// `None` for every other file: a GIF whose first frame has no more
+/// pixels than its image, any other format, and a file cut short before
+/// its first frame. Those decoders hold a few times the image's own size
+/// at most.
+///
+/// ```
+/// use fastemu_gfx::{probe_frame_bytes, probe_size};
+///
+/// // 34 bytes: a screen of 1 by 1 pixel and a first frame of 8192 by
+/// // 4096 whose data ends at once.
+/// let mut gif = b"GIF89a".to_vec();
+/// gif.extend_from_slice(&[1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255]);
+/// gif.extend_from_slice(&[0x2C, 0, 0, 0, 0, 0, 0x20, 0, 0x10, 0]);
+/// gif.extend_from_slice(&[2, 1, 0x2C, 0, 0x3B]);
+/// assert_eq!(probe_size(&gif), Some((1, 1)));
+/// assert_eq!(probe_frame_bytes(&gif), Some(8192 * 4096 * 5));
+/// assert_eq!(probe_frame_bytes(b"not an image"), None);
+/// ```
+pub fn probe_frame_bytes(data: &[u8]) -> Option<u64> {
+    match ImageFormat::sniff(data)? {
+        // The gif crate reads the header; a panic in it is no size.
+        ImageFormat::Gif => guarded(|| Ok(gif::frame_bytes(data))).ok().flatten(),
+        ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::Bmp => None,
+    }
+}
+
 /// Runs a decode and turns a panic in it into a decode error. The decoders
 /// are other people's code reading hostile files; the `png` crate has
 /// already panicked on one palette, and a panic on a game's thread would

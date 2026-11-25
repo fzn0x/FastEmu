@@ -40,6 +40,25 @@ pub(super) fn probe(data: &[u8]) -> Option<(u32, u32)> {
     (width > 0 && height > 0).then_some((width, height))
 }
 
+/// The bytes decoding holds for the first frame when it has more pixels
+/// than the image `probe` gives. `decode` reads the frame whole, at its
+/// own size, before it cuts it to the image: 4 bytes a pixel, and 1 for
+/// the index the `gif` crate reads it into first. `None` when the frame
+/// has no more pixels than the image, or the file cannot be read that
+/// far, which `decode` then refuses too. Only the frame header is read.
+pub(super) fn frame_bytes(data: &[u8]) -> Option<u64> {
+    let mut decoder = options().read_info(Cursor::new(data)).ok()?;
+    let screen = u64::from(decoder.width()) * u64::from(decoder.height());
+    // An empty screen makes the frame at its offset the image, which
+    // holds every pixel of the frame.
+    if screen == 0 {
+        return None;
+    }
+    let frame = decoder.next_frame_info().ok()??;
+    let pixels = u64::from(frame.width) * u64::from(frame.height);
+    (pixels > screen).then_some(pixels * 5)
+}
+
 pub(super) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>)> {
     let mut decoder = options()
         .read_info(Cursor::new(data))
