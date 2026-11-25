@@ -393,15 +393,27 @@ unless the case says "after 0.5 s":
 | A fourth such game starts beside three held ones, 4 s | 341 to 376 percent, every buffer late | 51 percent, 1 buffer late by 0.4 ms in one run, none in the other |
 | A game playing one cheap sound starts 31 such players beside three held games, 4 s | 336 to 340 percent, every buffer late | 50 percent, none late |
 | Eight games, each playing the heaviest corpus MIDI file twice, after 0.5 s, 8 s | 11.4 percent | 11.5 to 11.6 percent, no sound waits |
+| A game playing 18 such players, about its whole part alone, when three such games start beside it, 4 s | 310 to 545 percent, every buffer late | 52 percent, 1 buffer late by up to 4 ms; the four games take 86 to 94 percent over the first 4 buffers |
+| Two games of 32 silent MIDI players that all start 32 notes at once after 1 s, 3 s | 119 to 122 percent, every buffer late from the notes on | 35 to 36 percent, the first 4 buffers of the notes late, by up to 8 ms |
+| The same with four games | 232 to 257 percent, every buffer late from the notes on | 37 to 38 percent, 3 to 4 buffers late, by up to 35 ms |
 
 With the budget, four heavy games that have played for a while still
 take about 50 percent. In one run of that case 3 of 187 buffers were
 late, the worst 14.6 ms: about twice what the budget lets a buffer take,
 so the system paused the thread there.
 
+In the last three rows the games spend the time they saved. Sounds
+that were playing go on past the part while their game has saved time.
+So a game whose part shrinks, or whose playing sounds grow dearer all at
+once, renders them at their full cost until that time is spent, and the
+time several games saved adds up. Silent players also look cheap to the
+running average, which takes a few slices to catch up once their notes
+start.
+
 The heaviest MIDI file in the 305 games of the test corpus plays in about
 1 percent of real time, and with eight games each game's part is at least
-6.25 percent, so a game a phone could play never waits.
+6.25 percent, so a game a phone could play does not wait, unless the
+computer is busy (see below).
 
 What the budget does not do:
 
@@ -409,6 +421,10 @@ What the budget does not do:
   part by one sound. That sound is bounded by the other limits: 32
   synthesizer voices, 512 MIDI messages and 8 s of MP3 catching up per
   call.
+- It bounds what a game spends over time, not in each buffer. A game
+  that saved 20 ms of render time spends it at its full cost when its
+  playing sounds grow dearer at once. Games that do that together still
+  make a few buffers late, as the last rows of the table show.
 - It reads the system's clock, so time the system takes from the audio
   thread is charged to the game whose sound was rendering. On a busy
   computer a normal game's newer sounds can then wait.
