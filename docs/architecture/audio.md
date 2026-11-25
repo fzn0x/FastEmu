@@ -369,10 +369,11 @@ each game a part of the audio thread's time instead.
 - The averages rise an eighth of the way each slice, so the clock also
   keeps each game's pace: what its sounds after the oldest may take. The
   pace grows by the game's part and a quarter each slice and holds two
-  slices' worth, since a sound reads its source two slices at a time.
-  Once the sounds that played took the pace, every later sound of the
-  game waits, whatever the averages say, and a sound that waited comes
-  back only on a full pace. So a game spends what it saved about a
+  whole slices' worth, since a sound reads its source two whole slices
+  at a time, and it holds that much in the short last slice of a buffer
+  too. Once the sounds that played took the pace, every later sound of
+  the game waits, whatever the averages say, and a sound that waited
+  comes back only on a full pace. So a game spends what it saved about a
   quarter of its part a slice, its oldest sound aside, and the time
   several games saved does not all go in a few slices.
 - One render a slice is not counted against the pace: the one that took
