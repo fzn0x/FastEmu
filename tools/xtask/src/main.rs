@@ -95,7 +95,8 @@ bench:
                        unless --fastemu-only or --build-only
   --games DIR          the JARs of DIR (not its subfolders) run as real games
   --runs N             how many times each measurement runs (default: 4)
-  --out DIR            the folder (default: bench in the target folder)
+  --out DIR            the folder (default: bench in the target folder); it
+                       must be new, empty, or an earlier bench's
   --fastemu-only       measure FastEmu alone; MicroEmulator shows as not run
   --build-only         build the benchmark MIDlet and MeBench, run nothing;
                        works in any build and on any system

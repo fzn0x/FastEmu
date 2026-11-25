@@ -167,11 +167,39 @@ fn may_measure() -> Result<(), String> {
     Ok(())
 }
 
+/// The file that marks a folder as a bench's output folder.
+const MARK: &str = ".fastemu-bench";
+
+/// Takes `out` as the output folder, or refuses it. The bench clears
+/// folders such as `data`, `logs` and `stubs` in it, so it writes only
+/// into a folder that is new, empty, or marked as an earlier bench's,
+/// never into one that holds someone's other files.
+fn claim_out(out: &Path) -> Result<(), String> {
+    let mark = out.join(MARK);
+    if let Ok(mut entries) = std::fs::read_dir(out)
+        && entries.next().is_some()
+        && !mark.is_file()
+    {
+        return Err(format!(
+            "{} holds files no bench wrote, and the bench clears folders such as \
+             data and logs in its output folder: give --out a new or empty folder",
+            out.display()
+        ));
+    }
+    std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    std::fs::write(
+        &mark,
+        "The output folder of cargo xtask bench, which clears folders in it.\n",
+    )
+    .map_err(|e| format!("{}: {e}", mark.display()))
+}
+
 /// Runs `cargo xtask bench`. `root` is the repository.
 pub fn run(options: &Options, root: &Path) -> Result<(), String> {
     if !options.build_only {
         may_measure()?;
     }
+    claim_out(&options.out)?;
     let built = java::build(&options.out, root, options.microemu.as_deref())?;
     if options.build_only {
         println!(
@@ -331,6 +359,37 @@ mod tests {
         assert!(refused.contains("--release"), "{refused}");
         // Nothing was built or started.
         assert!(!out.exists());
+    }
+
+    #[test]
+    fn only_a_new_empty_or_bench_folder_is_written() {
+        let dir = std::env::temp_dir().join(format!("fastemu-bench-out-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // A folder that is not there yet, or is empty, becomes the bench's.
+        claim_out(&dir).unwrap();
+        assert!(dir.join(MARK).is_file());
+        claim_out(&dir).unwrap();
+        std::fs::remove_file(dir.join(MARK)).unwrap();
+        claim_out(&dir).unwrap();
+        // One that holds someone's files is refused before anything is
+        // built or cleared in it.
+        std::fs::remove_file(dir.join(MARK)).unwrap();
+        std::fs::create_dir_all(dir.join("logs")).unwrap();
+        std::fs::write(dir.join("logs").join("mine.txt"), "keep").unwrap();
+        let options = Options::parse(
+            &[
+                "--build-only".to_owned(),
+                "--out".to_owned(),
+                dir.display().to_string(),
+            ],
+            PathBuf::new(),
+        )
+        .unwrap();
+        let refused = run(&options, Path::new(".")).unwrap_err();
+        assert!(refused.contains("no bench wrote"), "{refused}");
+        assert!(dir.join("logs").join("mine.txt").is_file());
+        assert!(!dir.join("stubs").exists() && !dir.join(MARK).exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

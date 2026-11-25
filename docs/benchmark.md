@@ -191,6 +191,10 @@ waits. It writes `bench.md` and `bench.json` to the output folder, with
 a screenshot of each game on each emulator. Read the problems at the
 end of `bench.md` before you trust a number.
 
+The output folder must be new, empty, or one the bench wrote before.
+The bench clears folders such as `data` and `logs` in it, so it refuses
+a folder that holds other files.
+
 - `--fastemu-only` measures FastEmu alone, with no MicroEmulator.
 - `--runs N` changes the number of runs.
 - If MicroEmulator rejects a class with `VerifyError`, add
