@@ -9,6 +9,26 @@ use super::{MAX_SIDE, check_size, failed};
 use crate::color::OPAQUE;
 use crate::error::Result;
 
+/// How many extended XMP segments a file may hold, 16: one megabyte of
+/// metadata, far more than any picture a phone shows has. zune-jpeg joins
+/// the unfinished segments again after every marker it reads, so a file of
+/// thousands of them and a hundred thousand other markers kept it busy for
+/// seconds, and one of a few megabytes for much longer.
+const MAX_XMP_SEGMENTS: usize = 16;
+
+/// The name an extended XMP segment starts with.
+const XMP_EXTENSION: &[u8] = b"http://ns.adobe.com/xmp/extension/\0";
+
+/// Whether the file holds more extended XMP segments than it may. The
+/// name is searched for anywhere in the file, so no segment is missed
+/// whatever the header around it looks like.
+fn too_many_xmp_segments(data: &[u8]) -> bool {
+    data.windows(XMP_EXTENSION.len())
+        .filter(|window| window[0] == XMP_EXTENSION[0] && *window == XMP_EXTENSION)
+        .nth(MAX_XMP_SEGMENTS)
+        .is_some()
+}
+
 /// How a file is read, to decode it and to probe its size.
 fn options(max_side: usize) -> DecoderOptions {
     DecoderOptions::default()
@@ -25,6 +45,9 @@ fn options(max_side: usize) -> DecoderOptions {
 /// can say, so the size is what the file claims and not only what the
 /// decoder accepts.
 pub(super) fn probe(data: &[u8]) -> Option<(u32, u32)> {
+    if too_many_xmp_segments(data) {
+        return None;
+    }
     let mut decoder =
         JpegDecoder::new_with_options(ZCursor::new(data), options(usize::from(u16::MAX)));
     decoder.decode_headers().ok()?;
@@ -34,6 +57,9 @@ pub(super) fn probe(data: &[u8]) -> Option<(u32, u32)> {
 }
 
 pub(super) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>)> {
+    if too_many_xmp_segments(data) {
+        return Err(failed("JPEG", "too many extended XMP segments"));
+    }
     let mut decoder = JpegDecoder::new_with_options(ZCursor::new(data), options(MAX_SIDE as usize));
     decoder.decode_headers().map_err(|e| failed("JPEG", e))?;
     let (width, height) = decoder
@@ -97,5 +123,46 @@ mod tests {
             Surface::decode(&file[..30]),
             Err(GfxError::Decode(_))
         ));
+    }
+
+    /// `file` with `count` extended XMP segments that never complete (each
+    /// starts at a gap) and then `comments` empty comments in front of its
+    /// frame header.
+    fn with_xmp_segments(count: usize, comments: usize) -> Vec<u8> {
+        let file = halves(false);
+        let frame = file.windows(2).position(|w| w == [0xFF, 0xC0]).unwrap();
+        let mut out = file[..frame].to_vec();
+        for i in 0..count {
+            let mut body = super::XMP_EXTENSION.to_vec();
+            body.extend_from_slice(&[b'A'; 32]);
+            body.extend_from_slice(&1_000_000_u32.to_be_bytes());
+            body.extend_from_slice(&(i as u32 * 1000 + 7).to_be_bytes());
+            body.extend_from_slice(&[0; 4]);
+            out.extend_from_slice(&[0xFF, 0xE1]);
+            out.extend_from_slice(&(body.len() as u16 + 2).to_be_bytes());
+            out.extend_from_slice(&body);
+        }
+        for _ in 0..comments {
+            out.extend_from_slice(&[0xFF, 0xFE, 0, 2]);
+        }
+        out.extend_from_slice(&file[frame..]);
+        out
+    }
+
+    #[test]
+    fn a_file_of_many_xmp_segments_is_refused() {
+        // zune-jpeg sorts and walks every unfinished segment again after
+        // each marker, so thousands of them and many markers made one
+        // decode last seconds: 4.8 s for 1.6 MB, and more than that with
+        // every megabyte. The cap leaves real pictures alone.
+        let most = super::MAX_XMP_SEGMENTS;
+        assert!(Surface::decode(&with_xmp_segments(most, 10)).is_ok());
+        assert_eq!(super::probe(&with_xmp_segments(most, 10)), Some((16, 8)));
+        let many = with_xmp_segments(most + 1, 10);
+        assert!(matches!(Surface::decode(&many), Err(GfxError::Decode(_))));
+        assert_eq!(super::probe(&many), None);
+        // A file of the kind that was slow gives up at once.
+        let slow = with_xmp_segments(15_000, 100_000);
+        assert!(matches!(Surface::decode(&slow), Err(GfxError::Decode(_))));
     }
 }
