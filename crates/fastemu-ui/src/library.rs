@@ -117,10 +117,13 @@ impl Library {
         }
         let id = self.fresh_id(saved);
         self.next_id = id.0.saturating_add(1);
-        let fallback = path.file_stem().map_or_else(
-            || "Untitled".to_owned(),
-            |s| s.to_string_lossy().into_owned(),
-        );
+        // A suite with no name of its own is shown by its file's name, cut
+        // as a name from the suite is.
+        let fallback = path
+            .file_stem()
+            .map(|s| cut(&s.to_string_lossy()))
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "Untitled".to_owned());
         let mut entry = LibraryEntry {
             id,
             path,
@@ -354,6 +357,15 @@ mod tests {
         assert_eq!(entry.name, format!("{}\u{3044}", "\u{3042}".repeat(99)));
         entry.update_info(&info(&spaced));
         assert_eq!(entry.name, "y".repeat(99));
+    }
+
+    #[test]
+    fn a_long_file_name_is_cut_where_it_stands_for_the_name() {
+        // A suite with no name of its own is shown by its file's name.
+        let mut lib = Library::default();
+        let id = lib.add(format!("{}.jar", "f".repeat(250)).into(), &info(""));
+        let entry = lib.get(id).expect("added");
+        assert_eq!(entry.name, "f".repeat(MAX_DISPLAY_CHARS));
     }
 
     #[test]
