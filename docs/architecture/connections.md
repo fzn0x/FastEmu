@@ -49,7 +49,9 @@ With `Deny`, the default, every open of a network scheme throws
 `IOException("network access is off for this game")` from
 `Connector.open` itself, before any name lookup. A VM without an
 `InstanceEnv` has no network either. With `Allow`, connections are real
-`std::net` sockets.
+`std::net` sockets to any address. Allow means the whole network: a game
+with it can reach programs on the computer itself, devices on the local
+network and link local addresses, not only the internet.
 
 Messaging is not network access: `sms://` and `cbs://` open under either
 policy, as a phone without signal still opened them, and their sends
