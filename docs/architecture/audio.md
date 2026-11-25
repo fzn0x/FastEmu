@@ -66,6 +66,11 @@ A seek in a MIDI file replays the controllers before the new position. It
 is up to 65,536 events under the lock, about a millisecond. That stays a
 known limit, and the fair lock keeps it from starving anyone.
 
+[SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists the
+limits of sound with every other limit a game meets, and its
+[known limits](../../SECURITY.md#known-limits) say what this lock still
+lets one game do to the others.
+
 The audio thread never unwinds. Each voice renders inside `catch_unwind`:
 a source that panics (a decoder or synthesizer bug on damaged data) is
 replaced by an empty one, stopped, and its run ends with an `Error` event
