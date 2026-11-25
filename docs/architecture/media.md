@@ -220,7 +220,9 @@ up hears every event. A wake is queued once, however many starts ask for
 one.
 
 A start that fails (the game has 32 players started) lets go of the
-player at once: no event would end a run that never began. An `ERROR`
+player at once: no event would end a run that never began. A Nokia
+`Sound.play` that is refused does the same, and the sound stays stopped.
+An `ERROR`
 event is also written to the host log as a warning, 16 times for an
 instance, so a decoder that gave up or a sound that panicked leaves a
 trace.
