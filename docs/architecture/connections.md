@@ -79,10 +79,73 @@ and for as long as it takes otherwise (the VM's stop still ends it).
 HTTP waits at most 60 s for a response head whatever the flag says, as a
 phone's network gave up on a silent server too.
 
+An attempt must end after one system call, whatever the peer sends. A
+loop inside one attempt would never get back to the three checks above,
+so a server that sends without pause could keep a stopped game's thread
+alive. The HTTP reads follow this: reading a head takes in one read per
+attempt and gives up the attempt after each interim response, and
+reading a body gives it up after a read that brought no body bytes (a
+chunk header, a trailer line). A job that takes one attempt for each
+piece, such as filling a read buffer or writing a large array, calls
+`net::check` between the pieces, because a peer that sends or takes a
+little at a time makes every attempt succeed.
+
 I/O errors become `IOException` with short fixed messages ("connection
 refused", "connection reset by the peer"), not the host's own text,
-which differs between systems and names the host. A name without
-addresses throws `ConnectionNotFoundException("cannot find host ...")`.
+which differs between systems, is in the host's language and names the
+host. The kinds without a message of their own read "I/O error". Only
+the texts FastEmu wrote itself ("the response ended 5 bytes early") and
+the TLS library's ("TLS handshake with host failed: ...") pass on. A
+name without addresses throws `ConnectionNotFoundException("cannot find
+host ...")`.
+
+## What a game may hold
+
+A game that may use the network can still not make the host hold more
+than a phone would. Every limit throws `IOException` from the call that
+passes it, with a fixed text, and none of them is a setting.
+
+| What | Limit | Where it is checked |
+| --- | --- | --- |
+| open connections: sockets, secure sockets, accepted sockets and HTTP connections | 64 | `Connector.open`, `acceptAndOpen` |
+| open server sockets | 8 | `Connector.open` |
+| open datagram connections | 16 | `Connector.open` |
+| the request body of one HTTP connection | 4 MiB | `OutputStream.write` |
+| the request bodies of all of a game's HTTP connections, not yet sent | 8 MiB | `OutputStream.write` |
+| request headers of one HTTP connection | 64, and 16 KiB of names and values | `setRequestProperty` |
+| a connection name | 8 KiB | `Connector.open` (`IllegalArgumentException`) |
+| interim `1xx` responses before the final one | 16 | the response getters |
+| the trailer of a chunked body | 16 KiB | `InputStream.read` |
+| a response head | 64 KiB | the response getters |
+
+Each open connection of a game has a place, which `net::acquire` takes
+before anything opens and which is given back when the socket is closed:
+the connection and all its streams are closed, or the collector frees a
+connection the game never closed. A game at its limit gets one
+collection and a second try before the exception, because games written for phones
+open a connection for each request and close the stream but not the
+connection. A connection that fails to open gives its place back. A
+closed connection lets go of its socket at once, so the descriptor is
+free when the place is, not when the collector gets to the object. A
+server that has no place for a client leaves it in the listener's queue:
+`acceptAndOpen` throws before it accepts.
+
+The counts are an extension of the VM (`ConnectionSlots`), so every game
+has its own, and they hold no Java references.
+
+A request body is kept in the host until the request goes out, and the
+heap does not count it, so it has its own two limits: 4 MiB for a
+connection and 8 MiB for all of a game's connections together. Opening
+64 connections that each hold 4 MiB would otherwise make the host hold
+256 MiB for a game whose heap is 2 MiB. The share of a request goes back
+when the request is written. Names and headers are kept in the host for
+as long as the connection lives, which is why they are limited too.
+
+What stays open on purpose: with `Allow` a game reaches loopback and the
+local network, as a phone on a network did, and a server socket listens
+on every interface. The time zone and the local address
+(`getLocalAddress`) are visible to the game. Allowing the network is
+the user's choice per game.
 
 ## HTTP
 
@@ -126,7 +189,10 @@ length, when the stream closes or the response is first needed.
 `flush` sends nothing: a body has to be complete for its
 `Content-Length`, and the emulators these games were tested on buffered
 the same way. A stream that outlives its connection still sends when it
-closes, which keeps fire-and-forget score uploads working.
+closes, which keeps fire-and-forget score uploads working. The body is
+limited (see [What a game may hold](#what-a-game-may-hold)): a write that
+would pass 4 MiB throws `IOException` and keeps what was collected. The
+request takes over the body's buffer, so a large body is not copied.
 
 The response: a status line that is not HTTP makes `getResponseCode`
 -1, `getResponseMessage` `null`, and the whole reply the body (an
@@ -169,7 +235,8 @@ the connection and its streams.
 `ServerSocketConnection.acceptAndOpen` polls a non-blocking listener
 every 50 ms, so a stop or a `close` from another thread ends the wait.
 `close` drops the listener, so the game can listen on the same port
-again at once.
+again at once. Closing a client connection lets go of the socket as soon
+as its last stream is closed.
 
 ## Datagrams
 
@@ -263,8 +330,13 @@ no alarm having been set before.
   `tests/io_java` on the VM against peers on 127.0.0.1: a scripted HTTP
   server (GET, POST, HEAD, fixed, chunked and open-ended bodies, a reply
   that is not HTTP, the state errors, a refused connection), a server
-  that never answers (interrupt and stop), TCP and UDP echo peers, TLS
-  servers with a test authority, and the `Deny` policy. The programs
+  that never answers (interrupt and stop), servers that send interim
+  responses or trailers for ever or a head one byte at a time (the
+  game ends with an error, or when the VM stops), TCP and UDP echo peers,
+  TLS servers with a test authority, and the `Deny` policy. The limit
+  tests open a few more than the limits allow (65 sockets, 9 listeners,
+  17 UDP sockets) and write 5 MiB of body, all on loopback. Connects
+  that must fail go to port 0, which fails at once on every system. The programs
   compile with `javac --release 8` against stubs of the javax.microedition
   classes in `tests/io_java/stubs`; without a JDK the tests print why and
   pass, unless `FASTEMU_REQUIRE_JAVA=1` is set.
