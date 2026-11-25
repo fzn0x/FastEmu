@@ -601,7 +601,10 @@ impl<'a> Bench<'a> {
         let (send, lines) = mpsc::channel::<(usize, Instant, String)>();
         let mut running = Vec::new();
         let start = Instant::now();
-        let mut bases = Vec::new();
+        // The first game of each process, by the process's place in the
+        // plan, which is how its lines are tagged: one that did not start
+        // keeps its place.
+        let bases: Vec<usize> = plan.procs.iter().map(|p| p.game).collect();
         for (i, mut proc) in plan.procs.into_iter().enumerate() {
             let err_path = logs.join(format!("{}-{i}.err", plan.tag));
             let err = match File::create(&err_path) {
@@ -624,7 +627,6 @@ impl<'a> Bench<'a> {
                         }
                     });
                     running.push(Running { child });
-                    bases.push(proc.game);
                 }
                 Err(e) => m.problems.push(format!("process {i} did not start: {e}")),
             }
@@ -1086,5 +1088,74 @@ mod tests {
             let shot = shot_time(at);
             assert!(shot > at[1] && shot < end, "{at:?}, shot {shot}, end {end}");
         }
+    }
+
+    /// A process of a measurement that did not start keeps its place: the
+    /// lines of the next one reach that one's game, not the first's.
+    #[cfg(windows)]
+    #[test]
+    fn lines_reach_their_game_when_a_process_did_not_start() {
+        use std::os::windows::process::CommandExt;
+
+        let out =
+            std::env::temp_dir().join(format!("fastemu-bench-measure-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&out);
+        let options = Options::parse(
+            &[
+                "--fastemu-only".to_owned(),
+                "--out".to_owned(),
+                out.display().to_string(),
+            ],
+            PathBuf::new(),
+        )
+        .unwrap();
+        let built = Built {
+            bench_jar: out.join("bench.jar"),
+            scene_jar: out.join("scene.jar"),
+            check_jar: out.join("check.jar"),
+            mebench: out.join("mebench"),
+            mebench_real: false,
+        };
+        let mut bench = Bench::new(&options, &built, Path::new(".")).expect("the sampler starts");
+        let mut second = Command::new("cmd");
+        second.arg("/C").raw_arg(
+            "echo RUN first game=0 ms=1&& echo RUN end game=0 status=exited frames=1 errors=0 ms=2",
+        );
+        let plan = Plan {
+            work: Work::Eight,
+            side: Side::MicroEmu,
+            run: 1,
+            first_side: Side::MicroEmu,
+            tag: "test".into(),
+            procs: vec![
+                Proc {
+                    command: Command::new(out.join("no-such-program.exe")),
+                    game: 0,
+                },
+                Proc {
+                    command: second,
+                    game: 1,
+                },
+            ],
+            games: 2,
+            timing: Timing::Kernels,
+        };
+        let m = bench.measure(plan);
+        assert!(
+            m.problems
+                .iter()
+                .any(|p| p.contains("process 0 did not start")),
+            "{:?}",
+            m.problems
+        );
+        assert_eq!(m.ends[0], None, "{:?}", m.ends);
+        assert_eq!(
+            m.ends[1].as_ref().map(|e| e.status.as_str()),
+            Some("exited"),
+            "{:?}",
+            m.ends
+        );
+        drop(bench);
+        let _ = fs::remove_dir_all(&out);
     }
 }
