@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use common::{constant_wav, controller_midi, engine, wav};
-use fastemu_audio::{Engine, MAX_QUEUED, PlayerEventKind};
+use fastemu_audio::{MAX_QUEUED, PlayerEventKind};
 
 /// A listener that blocks on its first event until released, and counts
 /// every event it gets. The thread that started the player is stuck
@@ -51,12 +51,6 @@ fn blocked_listener(group: &fastemu_audio::Group) -> BlockedListener {
 /// end and starts again.
 fn one_frame() -> Vec<u8> {
     wav(384_000, 1, &[1000])
-}
-
-/// Renders `seconds` of engine time on another thread than the one that
-/// is stuck in the listener.
-fn run_for(engine: &Engine, seconds: f64) {
-    engine.advance((f64::from(engine.sample_rate()) * seconds) as usize);
 }
 
 /// One thread seeks a big MIDI file again and again, as fast as it can,
@@ -132,24 +126,29 @@ fn a_thread_that_keeps_seeking_cannot_starve_the_others() {
     assert!(worst_pair < Duration::from_secs(1), "{report}");
 }
 
-/// A one frame sound that loops makes an event for every pass, and the
-/// game's listener may take them slowly. What waits for it is bounded.
+/// A game can make volume events as fast as it can call `setLevel`, and
+/// the game's listener may take them slowly. What waits for it is bounded.
 #[test]
 fn events_behind_a_blocked_listener_are_bounded() {
     let engine = engine(48_000);
     let group = engine.create_group();
     let listener = blocked_listener(&group);
-    let player = group.create_player(&one_frame(), None).unwrap();
-    player.set_loop_count(-1).unwrap();
-    let starter = thread::spawn(move || {
-        player.start().unwrap();
-        player
-    });
+    let player = group
+        .create_player(&constant_wav(8000, 800, 1000), None)
+        .unwrap();
+    let player = Arc::new(player);
+    let starter = {
+        let player = Arc::clone(&player);
+        thread::spawn(move || player.start().unwrap())
+    };
     listener.entered.recv().unwrap();
-    // A quarter of a second: some 190,000 events when nothing limits them.
-    run_for(&engine, 0.25);
+    // The thread that started it is stuck in the listener now, so these
+    // events stay queued: 20,000 of them when nothing limits them.
+    for i in 0..20_000 {
+        player.set_level(if i % 2 == 0 { 10 } else { 90 }).unwrap();
+    }
     listener.release.send(()).unwrap();
-    let player = starter.join().unwrap();
+    starter.join().unwrap();
     player.stop().unwrap();
     // Everything queued has been delivered by now.
     let seen = listener.seen.load(Ordering::SeqCst);
@@ -157,10 +156,32 @@ fn events_behind_a_blocked_listener_are_bounded() {
         seen <= MAX_QUEUED + 16,
         "{seen} events reached the listener"
     );
-    assert!(engine.dropped_events() > 0);
+    assert!(engine.dropped_events() > 15_000);
     // The ones that end a run are never among the dropped.
     assert!(matches!(
         *listener.last.lock().unwrap(),
         Some(PlayerEventKind::Stopped { .. })
     ));
+}
+
+/// The same sound with a listener that keeps up: a loop of one frame is
+/// still heard, but it is reported about fifty times a second.
+#[test]
+fn a_one_frame_loop_is_reported_a_few_times_a_second() {
+    let engine = engine(48_000);
+    let group = engine.create_group();
+    let events = group.subscribe();
+    let player = group.create_player(&one_frame(), None).unwrap();
+    player.set_loop_count(-1).unwrap();
+    player.start().unwrap();
+    // A second of sound, 384,000 passes of the frame.
+    let mut sound = vec![0.0; 2 * 48_000];
+    engine.render(&mut sound);
+    let heard = sound.iter().filter(|v| v.abs() > 0.001).count();
+    assert!(heard > 2 * 40_000, "the loop went quiet: {heard} samples");
+    let events = events.try_iter().count();
+    assert!(
+        (90..=110).contains(&events),
+        "{events} events in a second of a loop of one frame"
+    );
 }

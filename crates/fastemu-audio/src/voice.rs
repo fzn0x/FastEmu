@@ -14,6 +14,16 @@ use crate::source::Source;
 /// Source frames read at a time.
 const BLOCK: usize = 256;
 
+/// A source whose wrap replays events (MIDI) is not looped when it is
+/// shorter than this, and listeners hear of the loops of any source at
+/// most this often. Phones did not loop a sound of a few milliseconds
+/// either: it was a click, or a tone.
+pub(crate) const MIN_LOOP_US: u64 = 20_000;
+
+/// A count of output frames long enough that the next loop is heard at
+/// once.
+const LONG_AGO: u64 = u64::MAX / 2;
+
 /// The MMAPI player states a voice can be in. Unrealized players live in
 /// the MIDP layer; closed ones are gone from the mixer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -75,6 +85,8 @@ pub(crate) struct Voice {
     /// The gain heard now; it slides toward the target so changes do not
     /// click.
     pub gain: f32,
+    /// Output frames rendered since listeners last heard of a loop.
+    since_loop_event: u64,
     playhead: Playhead,
 }
 
@@ -233,6 +245,7 @@ impl Voice {
             one_shot,
             at_end: false,
             gain: 0.0,
+            since_loop_event: LONG_AGO,
             playhead: Playhead::new(0, 0),
         }
     }
@@ -320,6 +333,7 @@ impl Voice {
         }
         self.state = PlayerState::Started;
         self.gain = 0.0;
+        self.since_loop_event = LONG_AGO;
     }
 
     /// Renders and adds `out.len() / 2` stereo frames at the output rate.
@@ -335,10 +349,12 @@ impl Voice {
         quiet: bool,
         mut on: impl FnMut(Reached, i64),
     ) {
+        // Output frames in the gap listeners are told of loops at.
+        let gap = (MIN_LOOP_US as f64 * f64::from(self.source.rate()) / 1_000_000.0 / step) as u64;
         if !self.playhead.primed {
             self.playhead.prime(self.source.as_mut());
             if let Some(reached) = self.playhead.check()
-                && self.reached(reached, quiet, &mut on)
+                && self.reached(reached, quiet, gap, &mut on)
             {
                 return;
             }
@@ -348,7 +364,7 @@ impl Voice {
                 self.playhead.advance(self.source.as_mut());
                 self.playhead.fraction -= 1.0;
                 if let Some(reached) = self.playhead.check()
-                    && self.reached(reached, quiet, &mut on)
+                    && self.reached(reached, quiet, gap, &mut on)
                 {
                     return;
                 }
@@ -362,14 +378,20 @@ impl Voice {
             frame[0] += left * self.gain;
             frame[1] += right * self.gain;
             self.playhead.fraction += step;
+            self.since_loop_event += 1;
         }
     }
 
-    /// Handles a loop or the end; returns whether rendering stops.
+    /// Handles a loop or the end; returns whether rendering stops. A loop
+    /// is heard at once, but listeners are told of it only when `gap`
+    /// output frames have gone by since they last were: a sound of a few
+    /// frames loops thousands of times a second, and each pass would be an
+    /// event.
     fn reached(
         &mut self,
         reached: Reached,
         quiet: bool,
+        gap: u64,
         on: &mut impl FnMut(Reached, i64),
     ) -> bool {
         let at_end = matches!(reached, Reached::End { .. });
@@ -377,7 +399,12 @@ impl Voice {
             return at_end;
         }
         match reached {
-            Reached::Loop => on(Reached::Loop, self.duration_us()),
+            Reached::Loop => {
+                if self.since_loop_event >= gap {
+                    self.since_loop_event = 0;
+                    on(Reached::Loop, self.duration_us());
+                }
+            }
             Reached::End { .. } => {
                 let error = self.source.take_error();
                 self.at_end = true;
@@ -398,8 +425,9 @@ impl Voice {
             return tail;
         }
         let (frame, wraps, at_end) = (self.media_frame(), self.wraps(), self.at_end);
-        let target = self.gain;
+        let (target, since_loop_event) = (self.gain, self.since_loop_event);
         self.render(&mut tail, step, target, slew, true, |_, _| {});
+        self.since_loop_event = since_loop_event;
         let len = frames.max(1) as f32;
         for (i, pair) in tail.as_chunks_mut::<2>().0.iter_mut().enumerate() {
             let fade = 1.0 - i as f32 / len;
@@ -464,7 +492,9 @@ mod tests {
 
     #[test]
     fn loops_play_the_media_again() {
-        let mut voice = ramp(100, 8000);
+        // 100 frames at 1 kHz: a pass of 100 ms, longer than the gap
+        // listeners are told of loops at.
+        let mut voice = ramp(100, 1000);
         voice.set_loop_count(3);
         voice.start();
         voice.gain = 1.0;
@@ -476,6 +506,55 @@ mod tests {
         assert_eq!(seen.len(), 3);
         assert_eq!(seen[0].0, Reached::Loop);
         assert_eq!(seen[2].0, Reached::End { error: None });
+    }
+
+    /// A voice over two frames at 8 kHz that loops forever.
+    fn tiny_loop() -> Voice {
+        let pcm = Arc::new(Pcm {
+            rate: 8000,
+            channels: 1,
+            samples: vec![16384, -16384],
+        });
+        let mut voice = Voice::new(Box::new(PcmSource::new(pcm)), false);
+        voice.set_loop_count(-1);
+        voice.start();
+        voice.gain = 1.0;
+        voice
+    }
+
+    #[test]
+    fn a_tiny_loop_keeps_playing_but_is_reported_every_20_ms() {
+        let mut voice = tiny_loop();
+        // A second of sound is 4000 passes of 250 us.
+        let (out, seen) = play(&mut voice, 8000, 1.0);
+        assert_eq!(&out[..4], &[16384.0, -16384.0, 16384.0, -16384.0]);
+        assert!(out.iter().all(|&v| v != 0.0), "the sound has gaps");
+        // The first pass is reported at once, then one in 160 frames.
+        assert!((49..=51).contains(&seen.len()), "{} reports", seen.len());
+        assert!(seen.iter().all(|(reached, _)| *reached == Reached::Loop));
+    }
+
+    #[test]
+    fn a_new_start_is_told_of_its_first_loop_at_once() {
+        let mut voice = tiny_loop();
+        assert_eq!(play(&mut voice, 20, 1.0).1.len(), 1);
+        // Stopped and started again within the same 20 ms.
+        voice.state = PlayerState::Prefetched;
+        voice.start();
+        voice.gain = 1.0;
+        assert_eq!(play(&mut voice, 20, 1.0).1.len(), 1);
+    }
+
+    #[test]
+    fn the_end_of_a_run_is_always_reported() {
+        let mut voice = tiny_loop();
+        voice.set_loop_count(5000);
+        voice.start();
+        voice.gain = 1.0;
+        let (_, seen) = play(&mut voice, 12_000, 1.0);
+        let last = seen.last().unwrap();
+        assert_eq!(last.0, Reached::End { error: None });
+        assert!(seen.len() < 100, "{} reports", seen.len());
     }
 
     #[test]
