@@ -565,7 +565,12 @@ fn manager_class() -> NativeClass {
         .method("<init>", "()V", |_, _| Ok(Value::Void))
         .method("addObject", &format!("({object})V"), |ctx, a| {
             let object = ctx.non_null(a[1])?;
-            manager(ctx, a[0])?.objects.push(object);
+            let objects = &mut manager(ctx, a[0])?.objects;
+            // An object is in the list once, as a layer is in a
+            // `LayerManager`'s; adding it again changes nothing.
+            if !objects.contains(&object) {
+                objects.push(object);
+            }
             Ok(Value::Void)
         })
         .method("insertObject", &format!("({object}I)V"), |ctx, a| {
