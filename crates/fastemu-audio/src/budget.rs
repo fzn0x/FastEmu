@@ -234,10 +234,12 @@ impl Pace {
 ///
 /// Whatever the estimates say, no sound after the first plays once those
 /// that played before it took the game's [`Pace`] by the clock, and a
-/// sound that waited comes back only when the pace was full. Of what the
-/// sounds took, the one render that took most past its estimate is not
-/// counted: when the system pauses the thread, one render takes the
-/// pause, while sounds that grow dearer do so many at once.
+/// sound that waited comes back only when the pace was full. The render
+/// that took most past its estimate counts only as far past it as the
+/// render that took the second most: when the system pauses the thread,
+/// one render takes the pause, while sounds that grow dearer do so many at
+/// once. And a sound plays only if the pace holds that second most on top
+/// of what was taken, since it may well take as much past its own.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Turn {
     /// What the game may spend this slice: its part, less an eighth of
@@ -257,8 +259,11 @@ pub(crate) struct Turn {
     pace: Pace,
     /// What the sounds after the first that played took by the clock.
     took: i64,
-    /// The most one of them took past its estimate: not counted.
+    /// The most one of them took past its estimate.
     spike: i64,
+    /// The second most one of them took past its estimate: what the next
+    /// sound is expected to take past its own.
+    second: i64,
     /// The estimate of the sound just let in after the first, until it
     /// rendered.
     expected: Option<i64>,
@@ -285,6 +290,7 @@ impl Turn {
             pace: Pace::UNLIMITED,
             took: 0,
             spike: 0,
+            second: 0,
             expected: None,
             first: true,
             past: false,
@@ -310,7 +316,10 @@ impl Turn {
             self.first = false;
             return true;
         }
-        let taken = self.took.saturating_sub(self.spike);
+        // The next sound may take as much past its estimate as the sound
+        // that took the second most past its own, so the pace must hold
+        // that much more.
+        let taken = self.taken().saturating_add(self.second);
         if taken > self.pace.room || (waiting && !self.pace.full) {
             self.closed = true;
             return false;
@@ -341,8 +350,20 @@ impl Turn {
         self.dearest = self.dearest.max(estimate);
         if let Some(expected) = self.expected.take() {
             self.took = self.took.saturating_add(took);
-            self.spike = self.spike.max(took.saturating_sub(expected));
+            let over = took.saturating_sub(expected);
+            if over > self.spike {
+                self.second = self.spike;
+                self.spike = over;
+            } else {
+                self.second = self.second.max(over);
+            }
         }
+    }
+
+    /// What the sounds after the first took by the clock, counting the one
+    /// that ran most past its estimate only as far past it as the next.
+    fn taken(&self) -> i64 {
+        self.took.saturating_sub(self.spike - self.second)
     }
 
     /// Counts a sound that rendered and took its estimate.
@@ -354,10 +375,9 @@ impl Turn {
     /// What is left of the pace for the next slice: never less than
     /// minus what it holds, so a game comes back within a few slices.
     pub fn pace_left(&self) -> i64 {
-        let taken = self.took.saturating_sub(self.spike);
         self.pace
             .room
-            .saturating_sub(taken)
+            .saturating_sub(self.taken())
             .max(self.pace.cap.saturating_neg())
     }
 }
@@ -593,26 +613,35 @@ mod tests {
     #[test]
     fn no_sound_plays_once_those_before_it_took_the_pace() {
         // A pace of 2000. Every sound takes 600 by the clock, 500 past its
-        // estimate: one of those 500 is not counted. The oldest is not
-        // counted at all. So the sounds after it took 100, 700, 1300 and
-        // 1900 when the next is offered, and 2500 after the fifth.
+        // estimate, and the oldest is not counted at all. Alone, the first
+        // sound after it counts its estimate, 100; once two have played,
+        // each counts 600. So the sounds after the oldest took 100, 1200
+        // and 1800, and the fifth sound, which may take 500 past its
+        // estimate as they did, finds 1800 and 500 more past the pace.
         let full = Pace::new(i64::MAX, 800, SLICE_FRAMES);
         let mut t = turn(1000).with_pace(full);
-        assert_eq!(offer_paced(&mut t, &[600; 8]), 6);
-        assert_eq!(t.pace_left(), -500);
+        assert_eq!(offer_paced(&mut t, &[600; 8]), 4);
+        assert_eq!(t.pace_left(), 200);
         // With no pace, the estimates alone let all eight play.
         assert_eq!(offer_paced(&mut turn(1000), &[600; 8]), 8);
     }
 
     #[test]
-    fn the_render_that_took_most_past_its_estimate_is_not_counted() {
+    fn the_render_that_took_most_past_its_estimate_counts_as_far_as_the_next() {
         // The system pauses the thread in the third sound's render: it
-        // takes 5000 by the clock. The sounds after it play on.
+        // takes 5000 by the clock, 4900 past its estimate, while the others
+        // take their estimates. The sounds after it play on.
         let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800, SLICE_FRAMES));
         let took = [100, 100, 5000, 100, 100, 100];
         assert_eq!(offer_paced(&mut t, &took), 6);
         assert_eq!(t.pace_left(), 2000 - 500);
-        // Two such renders: the second counts, and the pace is taken.
+        // The next render takes 1000 past its estimate: the pause counts
+        // that far past its own too, and the pace is taken.
+        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800, SLICE_FRAMES));
+        let took = [100, 100, 5000, 1100, 100];
+        assert_eq!(offer_paced(&mut t, &took), 4);
+        assert_eq!(t.pace_left(), 2000 - 2300);
+        // Two such pauses: the second counts, and the pace is taken.
         let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800, SLICE_FRAMES));
         let took = [100, 5000, 5000, 100, 100];
         assert_eq!(offer_paced(&mut t, &took), 3);

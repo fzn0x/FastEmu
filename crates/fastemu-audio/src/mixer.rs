@@ -1324,10 +1324,10 @@ mod tests {
                 })
                 .collect();
             // From then on every two slices stay within the share and a
-            // quarter, and for each game four sounds: its oldest, the one
-            // that took its pace past the end, the one render not counted,
-            // and one fading out. Without a pace each game renders all 16
-            // until its 20 ms are spent: 25.6 ms in two slices.
+            // quarter, and for each game four sounds: its oldest, two that
+            // ran past its pace before it knew, and one fading out. Without
+            // a pace each game renders all 16 until its 20 ms are spent:
+            // 25.6 ms in two slices.
             let share = 2 * SLICE as u64 * FRAME_NS / 2;
             let sound = BLOCK * ns_per_frame(10);
             let bound = share * 5 / 4 + 2 * 4 * sound;
@@ -1335,6 +1335,35 @@ mod tests {
                 let both = two[0] + two[1];
                 assert!(both <= bound, "slice {at} and the next: {both} of {bound}");
             }
+        }
+
+        #[test]
+        fn many_games_whose_sounds_grow_dearer_together_take_their_paces_and_no_more() {
+            let (engine, clock) = engine_with(Some(RenderBudget::DEFAULT));
+            // Eight games of 16 silent sounds, as MIDI players resting
+            // before their notes, cheap enough to save a full burst and a
+            // full pace. Then every sound costs 2.5% of real time: a block
+            // of one is under a third of its game's pace.
+            let cost = Arc::new(AtomicU64::new(ns_per_frame(1) / 10));
+            let _games = dearer_games(&engine, &clock, &cost, 8, 16, 0.0);
+            slices(&engine, 100);
+            cost.store(ns_per_frame(5) / 2, Ordering::Relaxed);
+            let most = (0..60)
+                .map(|_| {
+                    let before = clock.now_ns();
+                    slices(&engine, 1);
+                    clock.now_ns() - before
+                })
+                .max()
+                .unwrap();
+            // No slice takes more than the eight paces, two slices' worth
+            // of the share and a quarter, and a block of each game's oldest
+            // sound. With one render not counted at all and one sound let
+            // past the pace, each game rendered two blocks more in the
+            // slice the new cost showed: 9.6 ms of a 4 ms slice.
+            let paces = 2 * (SLICE as u64 * FRAME_NS / 2) * 5 / 4;
+            let bound = paces + 8 * BLOCK * (ns_per_frame(5) / 2);
+            assert!(most <= bound, "{most} of {bound}");
         }
 
         #[test]
