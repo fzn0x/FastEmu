@@ -50,6 +50,22 @@ fn group_volume_scales_its_players() {
     assert_eq!(group.volume(), 1.0);
 }
 
+/// The volume is kept outside the mixer, so a closed group still
+/// answers with the last one set; `is_closed` tells it is closed.
+#[test]
+fn a_closed_group_keeps_its_last_volume() {
+    let engine = engine(8000);
+    let group = engine.create_group();
+    group.set_volume(0.25);
+    group.close();
+    assert!(group.is_closed());
+    assert_eq!(group.volume(), 0.25);
+    // Setting it on a closed group is harmless and changes no sound.
+    group.set_volume(0.5);
+    assert_eq!(group.volume(), 0.5);
+    assert_eq!(peak(&render(&engine, 100)), 0.0);
+}
+
 #[test]
 fn a_volume_that_is_not_a_number_is_silence() {
     let engine = engine(8000);

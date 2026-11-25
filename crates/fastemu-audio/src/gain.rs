@@ -1,5 +1,7 @@
 //! Volume scales.
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 /// The amplitude for an MMAPI volume level from 0 to 100.
 ///
 /// JSR-135 asks for a scale that is linear in loudness: level 50 should
@@ -19,6 +21,30 @@ pub(crate) fn unit_gain(volume: f32) -> f32 {
         0.0
     } else {
         volume.clamp(0.0, 1.0)
+    }
+}
+
+/// A gain that one thread sets and the audio thread reads, with no lock:
+/// a group's volume, which the app sets from its UI thread. It holds the
+/// bits of an `f32` already passed through [`unit_gain`], so it is never
+/// NaN.
+#[derive(Debug)]
+pub(crate) struct SharedGain(AtomicU32);
+
+impl SharedGain {
+    pub(crate) fn new(gain: f32) -> Self {
+        Self(AtomicU32::new(unit_gain(gain).to_bits()))
+    }
+
+    /// Relaxed is enough: the gain is one value on its own, and nothing
+    /// else is published with it. The audio thread reads it for each
+    /// slice, so a new value reaches the mix at its next slice.
+    pub(crate) fn set(&self, gain: f32) {
+        self.0.store(unit_gain(gain).to_bits(), Ordering::Relaxed);
+    }
+
+    pub(crate) fn get(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
     }
 }
 

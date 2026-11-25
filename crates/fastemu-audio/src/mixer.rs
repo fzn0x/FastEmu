@@ -4,8 +4,10 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 
 use crate::event::{EventCallback, EventQueue, PlayerEvent, PlayerEventKind, PlayerId};
+use crate::gain::SharedGain;
 use crate::group::GroupLimits;
 use crate::voice::{PlayerState, Reached, Voice};
 
@@ -31,7 +33,10 @@ const MAX_PANIC_MESSAGE: usize = 200;
 pub struct GroupId(pub u64);
 
 pub(crate) struct GroupState {
-    pub volume: f32,
+    /// The group's volume, shared with its [`Group`](crate::Group)
+    /// handles: the app sets it without the mixer lock, and the mix reads
+    /// it for each slice.
+    pub volume: Arc<SharedGain>,
     pub muted: bool,
     pub paused: bool,
     pub listener: Option<EventCallback>,
@@ -41,7 +46,7 @@ pub(crate) struct GroupState {
 
 impl GroupState {
     fn gain(&self) -> f32 {
-        if self.muted { 0.0 } else { self.volume }
+        if self.muted { 0.0 } else { self.volume.get() }
     }
 }
 

@@ -16,7 +16,8 @@ why, and how the MIDP layer should map each MMAPI call onto it.
               v
   +--------------------------- Engine ----------------------------+
   |  Mixer (behind one mutex)                                     |
-  |    Group 1 (instance 1): volume, mute, pause, listener        |
+  |    Group 1 (instance 1): mute, pause, listener                |
+  |      volume: an atomic its Group handles set with no lock     |
   |      Player -> Voice -> Source (WAV, MP3, MIDI, tones, ...)   |
   |      Player -> Voice -> Source                                |
   |    Group 2 (instance 2) ...                                   |
@@ -42,8 +43,9 @@ why, and how the MIDP layer should map each MMAPI call onto it.
 
 ## Threads and locking
 
-All mixer state sits behind one lock, a `parking_lot` mutex. It is fair over
-about a millisecond: a caller that has waited that long gets it next, so a
+All mixer state but each group's volume sits behind one lock, a
+`parking_lot` mutex. It is fair over about a millisecond: a caller that
+has waited that long gets it next, so a
 thread that takes it again and again (a game that seeks a big MIDI file in a
 loop) cannot keep the audio thread or another game's calls out. API calls
 hold it briefly. The audio thread renders a buffer in slices of 128 frames
@@ -344,7 +346,7 @@ the engine's view of it.
 | -------------------------------- | ----------- |
 | App start                        | `Engine::default()`, then `AudioOutput::open(&engine)` or `NullOutput::start(&engine)`; `engine.set_soundfont(...)` if the user chose one |
 | Instance launch                  | `let group = engine.create_group(); group.set_volume(settings.volume)`; the MIDP media module sets the group's listener on first use and reads events on its own thread, so nothing else subscribes |
-| `Instance::set_volume(v)`        | `group.set_volume(v)` (0.0 also mutes) |
+| `Instance::set_volume(v)`        | `group.set_volume(v)` (0.0 also mutes); it takes no lock, so the app's UI thread never waits for the mixer |
 | `Instance::pause` / `resume`     | `group.set_paused(true)` / `false`, besides `pauseApp` and `startApp` |
 | `Instance::stop`, crash, exit    | `group.close()` (or drop every clone) |
 

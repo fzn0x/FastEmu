@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use parking_lot::{Mutex, MutexGuard};
 
 use crate::event::EventQueue;
-use crate::gain::unit_gain;
+use crate::gain::{SharedGain, unit_gain};
 use crate::group::{Group, GroupLimits};
 use crate::midi::soundfont::SoundFont;
 use crate::mixer::{GroupId, GroupState, Mixer};
@@ -126,17 +126,18 @@ impl Engine {
     /// the group, or calling [`Group::close`], closes its players.
     pub fn create_group(&self) -> Group {
         let id = GroupId(self.next_id());
+        let volume = Arc::new(SharedGain::new(1.0));
         self.lock().groups.insert(
             id,
             GroupState {
-                volume: 1.0,
+                volume: Arc::clone(&volume),
                 muted: false,
                 paused: false,
                 listener: None,
                 limits: GroupLimits::default(),
             },
         );
-        Group::new(self.clone(), id)
+        Group::new(self.clone(), id, volume)
     }
 
     /// Mixes the next `out.len() / 2` frames of interleaved stereo at the
