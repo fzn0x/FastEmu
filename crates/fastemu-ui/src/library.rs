@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use fastemu_core::SuiteInfo;
+use fastemu_core::suite::MAX_DISPLAY_CHARS;
 use serde::{Deserialize, Serialize};
 
 use crate::settings::GameSettings;
@@ -32,13 +33,36 @@ pub struct LibraryEntry {
 
 impl LibraryEntry {
     /// Refreshes what the suite says about itself, keeping the settings.
+    /// The name, vendor and version are cut to [`MAX_DISPLAY_CHARS`]
+    /// characters, as the suite reader already cuts them. The library file
+    /// is rewritten with them at every save and the sidebar draws the name,
+    /// so this is a second guard for a reader that would not. The suite's
+    /// own properties, and the record stores' owner names, stay whole.
     pub fn update_info(&mut self, info: &SuiteInfo) {
         if !info.name.trim().is_empty() {
-            info.name.trim().clone_into(&mut self.name);
+            self.name = cut(&info.name);
         }
-        info.vendor.trim().clone_into(&mut self.vendor);
-        info.version.trim().clone_into(&mut self.version);
+        self.vendor = cut(&info.vendor);
+        self.version = cut(&info.version);
     }
+
+    /// Cuts the strings of an entry read from `library.json`, which a
+    /// hand edit or an older version may have left long.
+    fn cut_strings(&mut self) {
+        for text in [&mut self.name, &mut self.vendor, &mut self.version] {
+            if text.chars().nth(MAX_DISPLAY_CHARS).is_some() {
+                *text = cut(text);
+            }
+        }
+    }
+}
+
+/// `text` without surrounding white space, cut to [`MAX_DISPLAY_CHARS`]
+/// characters.
+fn cut(text: &str) -> String {
+    let mut cut: String = text.trim().chars().take(MAX_DISPLAY_CHARS).collect();
+    cut.truncate(cut.trim_end().len());
+    cut
 }
 
 /// The ordered list of added games.
@@ -138,6 +162,15 @@ impl Library {
     pub fn remove(&mut self, id: EntryId) -> Option<LibraryEntry> {
         let index = self.entries.iter().position(|e| e.id == id)?;
         Some(self.entries.remove(index))
+    }
+
+    /// Cuts the name, vendor and version of every entry to
+    /// [`MAX_DISPLAY_CHARS`] characters. Run on a library just read, since
+    /// the file may hold longer ones.
+    pub fn cut_strings(&mut self) {
+        for entry in &mut self.entries {
+            entry.cut_strings();
+        }
     }
 
     /// Drops entries with a repeated id or path, which only a hand-edited
@@ -293,6 +326,50 @@ mod tests {
         assert_eq!(id, EntryId(3));
         let id = lib.add_beside("b.jar".into(), &info("B"), &saved(&[1, 2, 3, u64::MAX]));
         assert_eq!(id, EntryId(4), "not the folder of the game just added");
+    }
+
+    #[test]
+    fn long_suite_text_is_cut_when_the_library_keeps_it() {
+        let long = " ".to_owned() + &"x".repeat(10_000);
+        let mut lib = Library::default();
+        let id = lib.add(
+            "a.jar".into(),
+            &SuiteInfo {
+                name: long.clone(),
+                vendor: long.clone(),
+                version: long,
+                ..SuiteInfo::default()
+            },
+        );
+        let entry = lib.get(id).expect("added");
+        for text in [&entry.name, &entry.vendor, &entry.version] {
+            assert_eq!(text.chars().count(), MAX_DISPLAY_CHARS);
+        }
+        // Characters count, not bytes, so a name in another script is cut
+        // between characters; a space the cut leaves at its end goes too.
+        let wide = format!("{}{}", "\u{3042}".repeat(99), "\u{3044}\u{3046}");
+        let spaced = format!("{} {}", "y".repeat(99), "z".repeat(50));
+        let mut entry = entry.clone();
+        entry.update_info(&info(&wide));
+        assert_eq!(entry.name, format!("{}\u{3044}", "\u{3042}".repeat(99)));
+        entry.update_info(&info(&spaced));
+        assert_eq!(entry.name, "y".repeat(99));
+    }
+
+    #[test]
+    fn long_text_in_a_library_file_is_cut_on_load() {
+        let long = "x".repeat(5_000);
+        let json = format!(
+            r#"{{"entries":[{{"id":1,"path":"a.jar","name":"{long}","vendor":"{long}","version":"{long}"}},
+            {{"id":2,"path":"b.jar","name":"Short"}}],"next_id":3}}"#
+        );
+        let mut lib: Library = serde_json::from_str(&json).expect("parses");
+        lib.cut_strings();
+        let first = &lib.entries()[0];
+        for text in [&first.name, &first.vendor, &first.version] {
+            assert_eq!(text.chars().count(), MAX_DISPLAY_CHARS);
+        }
+        assert_eq!(lib.entries()[1].name, "Short");
     }
 
     #[test]

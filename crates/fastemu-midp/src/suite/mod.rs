@@ -45,9 +45,9 @@ pub const MAX_JAD_BYTES: u64 = 1024 * 1024;
 const MAX_NAME_BYTES: usize = 255;
 
 /// The most characters of a suite's name, vendor, version and MIDlet names
-/// that [`SuiteInfo`] holds for display. The longest of them in the test
-/// folder has 40. The attributes in [`SuiteInfo::properties`] stay whole.
-pub const MAX_DISPLAY_CHARS: usize = 100;
+/// that [`SuiteInfo`] holds for display (see the constant in
+/// `fastemu-core`, which the app's library cuts to as well).
+pub use fastemu_core::suite::MAX_DISPLAY_CHARS;
 
 /// The most characters of a suite's description that [`SuiteInfo`] holds.
 /// The longest description in the test folder has 129.

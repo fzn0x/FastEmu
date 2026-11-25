@@ -45,6 +45,7 @@ impl Store {
     pub fn load_library(&self) -> Loaded<Library> {
         let mut loaded: Loaded<Library> = self.load(LIBRARY_FILE, "an empty library");
         loaded.value.dedup();
+        loaded.value.cut_strings();
         loaded
     }
 
@@ -160,5 +161,21 @@ mod tests {
         assert!(problem.contains("settings.json is damaged"), "{problem}");
         assert!(dir.path().join("settings.json.broken").exists());
         assert!(!dir.path().join("settings.json").exists());
+    }
+
+    #[test]
+    fn a_library_file_with_long_text_loads_cut() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let long = "n".repeat(100_000);
+        let json = format!(
+            r#"{{"entries":[{{"id":1,"path":"a.jar","name":"{long}","vendor":"{long}","version":"{long}"}}]}}"#
+        );
+        fs::write(dir.path().join("library.json"), json).expect("writes");
+        let loaded = Store::new(dir.path()).load_library();
+        assert!(loaded.problem.is_none());
+        let entry = &loaded.value.entries()[0];
+        for text in [&entry.name, &entry.vendor, &entry.version] {
+            assert_eq!(text.len(), 100);
+        }
     }
 }

@@ -1,3 +1,10 @@
+/// The most characters of a suite's name, vendor, version and MIDlet names
+/// that [`SuiteInfo`] holds for display. The longest of them in the test
+/// folder has 40. The attributes in [`SuiteInfo::properties`] stay whole.
+/// The suite reader cuts them to this, and the app's library cuts them
+/// again before it keeps them.
+pub const MAX_DISPLAY_CHARS: usize = 100;
+
 /// What a MIDlet suite (a `.jar`, optionally with its `.jad`) says about
 /// itself, read without starting it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
