@@ -167,20 +167,38 @@ pub fn midlets(
 /// One `MIDlet-<n>` value: `name, icon, class`. The class is the text
 /// after the last comma, the name the text before the first, the icon the
 /// middle when there are three or more fields. A value with no comma is a
-/// class alone.
+/// class alone. A class that [`class_name`] refuses leaves no MIDlet.
 pub fn parse_midlet(value: &str, suite_name: &str) -> Option<MidletInfo> {
-    let fields: Vec<&str> = value.split(',').map(str::trim).collect();
-    let class = class_name(fields.last()?)?;
-    let name = if fields.len() > 1 && !fields[0].is_empty() {
-        fields[0].to_owned()
+    // The fields are found with the first and the last comma, not split
+    // into a list, so a value of a million commas costs no list.
+    let (head, class) = match value.rsplit_once(',') {
+        Some((head, class)) => (Some(head), class),
+        None => (None, value),
+    };
+    let class = class_name(class.trim())?;
+    let (first, middle) = match head.map(|head| head.split_once(',')) {
+        Some(Some((first, middle))) => (Some(first.trim()), Some(middle)),
+        Some(None) => (head.map(str::trim), None),
+        None => (None, None),
+    };
+    let name = if let Some(first) = first.filter(|first| !first.is_empty()) {
+        first.to_owned()
     } else if !suite_name.is_empty() {
         suite_name.to_owned()
     } else {
         class.rsplit('.').next().unwrap_or(&class).to_owned()
     };
-    let icon_path = (fields.len() >= 3)
-        .then(|| fields[1..fields.len() - 1].join(","))
-        .map(|icon| icon.trim().trim_start_matches('/').to_owned())
+    let icon_path = middle
+        .map(|middle| {
+            let mut icon = String::with_capacity(middle.len());
+            for (i, part) in middle.split(',').enumerate() {
+                if i > 0 {
+                    icon.push(',');
+                }
+                icon.push_str(part.trim());
+            }
+            icon.trim().trim_start_matches('/').to_owned()
+        })
         .filter(|icon| !icon.is_empty());
     Some(MidletInfo {
         name,
@@ -321,6 +339,15 @@ mod tests {
         assert_eq!(parse(text), pairs(&[("A", "1")]));
         // A first line that starts with a space has nothing to continue.
         assert_eq!(parse(b" B: 2\nA: 1\n"), pairs(&[("B", "2"), ("A", "1")]));
+    }
+
+    #[test]
+    fn a_value_of_a_hundred_thousand_commas_is_read_without_a_list_of_fields() {
+        let value = format!("N{}, com.a.Game", ",".repeat(100_000));
+        let midlet = parse_midlet(&value, "S").unwrap();
+        assert_eq!(midlet.name, "N");
+        assert_eq!(midlet.class_name, "com.a.Game");
+        assert_eq!(midlet.icon_path.map(|icon| icon.len()), Some(99_999));
     }
 
     #[test]
