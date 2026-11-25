@@ -21,6 +21,14 @@ use crate::source::Source;
 /// ended.
 const MAX_BAD_FRAMES: usize = 16;
 
+/// The seconds of sound one call to `render` decodes only to drop it. A
+/// seek the reader cannot do (a header in the middle of the file that it
+/// refuses) falls back to decoding from the start up to the target, which
+/// for a file of 16 MiB is half a second of work done with the mixer
+/// locked. The decoding is spread over the calls that follow instead, at
+/// about a millisecond each.
+const MAX_SKIP_SECONDS_PER_CALL: u64 = 8;
+
 fn malformed(reason: impl Into<String>) -> AudioError {
     AudioError::Malformed {
         format: Format::Mp3,
@@ -76,7 +84,10 @@ pub(crate) struct Mp3Source {
     /// Decoded frames not yet handed out, interleaved at `channels`.
     pending: Vec<f32>,
     taken: usize,
-    /// Frames still to drop after a seek landed before its target.
+    /// Frames still to drop after a seek landed before its target. While
+    /// it is more than a call may decode, the call plays silence and the
+    /// silence counts here too, so the sound that follows is the sound of
+    /// its place in the file.
     skip: u64,
     /// Why decoding stopped early, until the voice takes it.
     error: Option<String>,
@@ -173,14 +184,24 @@ impl Source for Mp3Source {
     fn render(&mut self, out: &mut [f32]) -> usize {
         let wanted = (out.len() / 2).min(usize::try_from(self.total - self.pos).unwrap_or(0));
         let mut done = 0;
+        let mut budget = MAX_SKIP_SECONDS_PER_CALL * u64::from(self.rate);
         while done < wanted {
+            if self.skip > 0 && budget == 0 {
+                // Still on the way to the target: this call is silence, and
+                // the frames of it are behind the target now as well.
+                out[done * 2..wanted * 2].fill(0.0);
+                self.skip += (wanted - done) as u64;
+                done = wanted;
+                break;
+            }
             if self.pending_frames() == 0 && !self.decode_next() {
                 break;
             }
             if self.skip > 0 {
-                let dropped = self.skip.min(self.pending_frames() as u64);
+                let dropped = self.skip.min(self.pending_frames() as u64).min(budget);
                 self.taken += dropped as usize;
                 self.skip -= dropped;
+                budget -= dropped;
                 continue;
             }
             let count = (wanted - done).min(self.pending_frames());
@@ -312,6 +333,61 @@ mod tests {
         assert!(error < 0.05, "{error}");
         source.seek(0);
         assert_eq!(render_all(&mut source), all);
+    }
+
+    /// A long stream the reader cannot seek in: the frames of the sine
+    /// file once more after each copy, with whatever trails a copy of the
+    /// file between them. The reader refuses a header there, so a seek
+    /// past the first copy falls back to decoding from the start.
+    fn long_and_damaged(copies: usize) -> Vec<u8> {
+        let stripped = strip_id3(SINE);
+        // The first frame holds the Xing and LAME header. Leave it out:
+        // the stream then has no length, and `new` walks it to find one.
+        let mut first = 100;
+        while !(stripped[first] == 0xFF && stripped[first + 1] & 0xE0 == 0xE0) {
+            first += 1;
+        }
+        stripped[first..].repeat(copies)
+    }
+
+    #[test]
+    fn a_seek_the_reader_cannot_do_is_caught_up_over_several_calls() {
+        let data = long_and_damaged(100);
+        let mut source = Mp3Source::new(&data).unwrap();
+        let rate = u64::from(source.rate());
+        let total = source.frames();
+        assert!(total > 100 * rate, "{total} frames");
+        let target = total - 5 * rate;
+        source.seek(target);
+        // The fallback: all the frames before the target are to be dropped.
+        assert!(
+            source.skip > 60 * rate,
+            "the reader could seek: {}",
+            source.skip
+        );
+        // Dropping them is spread over the calls that follow: the first
+        // one plays silence and does not decode all of it.
+        let mut out = vec![0.0; 2 * 256];
+        assert_eq!(source.render(&mut out), 256);
+        assert!(out.iter().all(|&v| v == 0.0));
+        assert!(source.skip > 40 * rate, "{} left", source.skip);
+        // The calls after it catch up, and the sound that comes is the
+        // sound of the last seconds of the file.
+        let (mut played, mut calls, mut heard) = (256, 1, false);
+        loop {
+            let count = source.render(&mut out);
+            played += count as u64;
+            calls += 1;
+            heard |= out[..count * 2].iter().any(|v| v.abs() > 0.1);
+            if count < 256 {
+                break;
+            }
+        }
+        assert!(heard, "the last seconds are silent");
+        // Most of the last five seconds played (the damaged stream ends a
+        // little short of its counted length).
+        assert!(played > 3 * rate, "{played} frames played");
+        assert!(calls < 600, "{calls} calls");
     }
 
     #[test]
