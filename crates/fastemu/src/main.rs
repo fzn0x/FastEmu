@@ -48,6 +48,8 @@ fn main() -> ExitCode {
         }
         Ok(Command::Run { args }) => run::main(args),
         Err(err) => {
+            // The option is as typed, or as a file name expanded it.
+            let err = fastemu_core::escape_control(err.to_string());
             eprintln!("fastemu: {err}\n\n{}", cli::USAGE);
             ExitCode::from(2)
         }

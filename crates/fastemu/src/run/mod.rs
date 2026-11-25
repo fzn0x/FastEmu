@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use fastemu_core::{
     DeviceProfile, Instance, InstanceSettings, InstanceStatus, LaunchRequest, Launcher, LogLevel,
-    builtin_profiles, default_profile,
+    builtin_profiles, default_profile, escape_control,
 };
 use fastemu_midp::MidpLauncher;
 
@@ -229,22 +229,35 @@ fn print_log(instance: &dyn Instance, out: &mut dyn Write, err: &mut dyn Write) 
     }
 }
 
+/// `text` as the terminal may show it. A game's name, version and error
+/// texts, and the suite's file name, are the game's to choose, so their
+/// control and bidirectional override characters are escaped as the log's
+/// are (see [`escape_control`]).
+fn shown(text: impl std::fmt::Display) -> String {
+    escape_control(text.to_string())
+}
+
 /// Runs `options`, printing to `out` and `err`, and returns the exit
 /// code.
 pub fn run(options: &Options, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     let launcher = MidpLauncher::new(None);
-    let file = options.suite.file_name().map_or_else(
+    let file = shown(options.suite.file_name().map_or_else(
         || options.suite.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
-    );
+    ));
     let info = match launcher.inspect(&options.suite) {
         Ok(info) => info,
         Err(e) => {
-            let _ = writeln!(err, "fastemu: {file}: {e}");
+            let _ = writeln!(err, "fastemu: {file}: {}", shown(e));
             return 1;
         }
     };
-    let _ = writeln!(out, "loaded {file} ({} {})", info.name, info.version);
+    let _ = writeln!(
+        out,
+        "loaded {file} ({} {})",
+        shown(&info.name),
+        shown(&info.version)
+    );
     let _ = writeln!(out, "profile {}, 1 instance", options.profile.id);
     let temporary = options.data.is_none();
     let data_dir = options.data.clone().unwrap_or_else(|| {
@@ -281,7 +294,7 @@ pub fn run(options: &Options, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     let instance = match launcher.launch_midp(request) {
         Ok(instance) => instance,
         Err(e) => {
-            let _ = writeln!(err, "fastemu: {file}: {e}");
+            let _ = writeln!(err, "fastemu: {file}: {}", shown(e));
             return 1;
         }
     };
@@ -382,7 +395,7 @@ fn drive(
         match instance.status() {
             InstanceStatus::Crashed { message } => {
                 print_log(instance, out, err);
-                let _ = writeln!(err, "fastemu: the game crashed: {message}");
+                let _ = writeln!(err, "fastemu: the game crashed: {}", shown(message));
                 return ran(1, first);
             }
             InstanceStatus::Exited => {
@@ -437,7 +450,7 @@ pub fn main(args: Vec<OsString>) -> std::process::ExitCode {
             std::process::ExitCode::from(code)
         }
         Err(e) => {
-            eprintln!("fastemu run: {e}\n\n{USAGE}");
+            eprintln!("fastemu run: {}\n\n{USAGE}", shown(e));
             std::process::ExitCode::from(2)
         }
     }
@@ -590,5 +603,57 @@ mod tests {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         assert_eq!(run(&options, &mut out, &mut err), 1);
         assert!(String::from_utf8_lossy(&err).contains("no-such-game.jar"));
+    }
+
+    #[test]
+    fn a_game_name_that_holds_escape_sequences_is_printed_escaped() {
+        let dir = std::env::temp_dir().join(format!("fastemu-run-escape-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("evil.jar");
+        // A name that sets the terminal's title and a version that clears
+        // its screen, then one with a right to left override.
+        let manifest: &[u8] = b"MIDlet-Name: Evil\x1b]0;owned\x07\n\
+            MIDlet-Version: 1.\x1b[2J\xe2\x80\xae0\n\
+            MIDlet-1: Evil, , no.such.Game\n";
+        std::fs::write(&path, jar(&[("META-INF/MANIFEST.MF", manifest)])).unwrap();
+        let options = parse([path.into_os_string()]).unwrap();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        assert_eq!(run(&options, &mut out, &mut err), 1);
+        let out = String::from_utf8(out).unwrap();
+        let err = String::from_utf8(err).unwrap();
+        assert!(
+            out.starts_with(
+                "loaded evil.jar (Evil\u{fffd}]0;owned\u{fffd} 1.\u{fffd}[2J\u{fffd}0)\n"
+            ),
+            "{out:?}"
+        );
+        for text in [&out, &err] {
+            assert!(
+                !text.chars().any(|c| c.is_control() && c != '\n') && !text.contains('\u{202e}'),
+                "{text:?}"
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_name_that_holds_escape_sequences_is_printed_escaped() {
+        let name = "evil\u{1b}]0;owned\u{7}\u{202e}.jar";
+        let options = parse_strs(&[name]).unwrap();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        assert_eq!(run(&options, &mut out, &mut err), 1);
+        let err = String::from_utf8(err).unwrap();
+        assert!(
+            err.starts_with("fastemu: evil\u{fffd}]0;owned\u{fffd}\u{fffd}.jar: "),
+            "{err:?}"
+        );
+        assert!(
+            !err.trim_end().chars().any(char::is_control) && !err.contains('\u{202e}'),
+            "{err:?}"
+        );
+        // So are the command line's own complaints.
+        let complaint = parse_strs(&["--evil\u{1b}[2J"]).unwrap_err();
+        assert!(complaint.contains('\u{1b}'), "the parser keeps the text");
+        assert_eq!(shown(complaint), "unknown option --evil\u{fffd}[2J");
     }
 }
