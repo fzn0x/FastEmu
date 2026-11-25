@@ -16,16 +16,40 @@ use crate::value::{ObjRef, Value};
 use crate::vm::{VmShared, VmState};
 
 /// Writes `bytes` to `System.out` or `System.err`, sending each finished
-/// line to the log sink.
+/// line to the log sink. Text without a line break is cut into lines of
+/// `limits.max_log_line_bytes` bytes, so what a game prints with `print`
+/// in a loop never piles up in the buffer.
 pub(crate) fn write_std(shared: &VmShared, state: &mut VmState, level: LogLevel, bytes: &[u8]) {
-    for &b in bytes {
-        if b == b'\n' {
-            let line = std::mem::take(line_buffer(state, level));
-            emit(shared, state, level, &line);
-        } else {
-            line_buffer(state, level).push(b);
+    let max = shared.config.limits.max_log_line_bytes.max(1);
+    for (i, part) in bytes.split(|&b| b == b'\n').enumerate() {
+        if i > 0 {
+            end_line(shared, state, level);
         }
+        append(shared, state, level, part, max);
     }
+}
+
+/// Adds `part`, which holds no line break, to the line being written,
+/// sending the line on whenever it reaches `max` bytes.
+fn append(shared: &VmShared, state: &mut VmState, level: LogLevel, mut part: &[u8], max: usize) {
+    while !part.is_empty() {
+        if line_buffer(state, level).len() >= max {
+            end_line(shared, state, level);
+        }
+        let buffer = line_buffer(state, level);
+        let room = (max - buffer.len()).min(part.len());
+        buffer.extend_from_slice(&part[..room]);
+        part = &part[room..];
+    }
+}
+
+/// Sends the line being written to the log sink and starts the next, with
+/// the buffer it had.
+fn end_line(shared: &VmShared, state: &mut VmState, level: LogLevel) {
+    let mut line = std::mem::take(line_buffer(state, level));
+    emit(shared, state, level, &line);
+    line.clear();
+    *line_buffer(state, level) = line;
 }
 
 fn line_buffer(state: &mut VmState, level: LogLevel) -> &mut Vec<u8> {
