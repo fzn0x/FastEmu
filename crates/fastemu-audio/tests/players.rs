@@ -83,8 +83,9 @@ fn loops_post_end_of_media_and_started_each_time() {
     let engine = engine(8000);
     let group = engine.create_group();
     let events = group.subscribe();
+    // 25 ms a pass: listeners are told of passes at most every 20 ms.
     let player = group
-        .create_player(&constant_wav(8000, 100, 8000), None)
+        .create_player(&constant_wav(8000, 200, 8000), None)
         .unwrap();
     assert!(matches!(
         player.set_loop_count(0),
@@ -96,16 +97,16 @@ fn loops_post_end_of_media_and_started_each_time() {
         player.set_loop_count(2),
         Err(AudioError::InvalidState(_))
     ));
-    let heard = render(&engine, 400);
+    let heard = render(&engine, 800);
     // Three times through, then silence.
-    assert!(heard[290..299].iter().all(|&v| v > 0.0));
-    assert!(heard[310..].iter().all(|&v| v == 0.0));
+    assert!(heard[590..599].iter().all(|&v| v > 0.0));
+    assert!(heard[610..].iter().all(|&v| v == 0.0));
     let pass = PlayerEventKind::EndOfMedia {
-        media_time_us: 12_500,
+        media_time_us: 25_000,
         last: false,
     };
     let end = PlayerEventKind::EndOfMedia {
-        media_time_us: 12_500,
+        media_time_us: 25_000,
         last: true,
     };
     let started = PlayerEventKind::Started { media_time_us: 0 };
@@ -122,7 +123,7 @@ fn loops_post_end_of_media_and_started_each_time() {
     );
     // The loop count holds for the next start.
     player.start().unwrap();
-    render(&engine, 400);
+    render(&engine, 800);
     assert_eq!(kinds(&events).len(), 6);
 }
 
