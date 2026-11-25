@@ -5,6 +5,7 @@
 //! override its methods, and native code reaches game overrides through
 //! the same virtual dispatch the interpreter uses.
 
+mod budget;
 mod link;
 mod table;
 

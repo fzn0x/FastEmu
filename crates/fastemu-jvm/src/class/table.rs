@@ -4,6 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use super::budget::ClassBudget;
 use super::{ArrayType, Class, ClassId, ClassKind, Field, Method, Selector};
 use crate::classfile::{ClassFile, access};
 use crate::native::NativeClass;
@@ -114,10 +115,20 @@ pub(crate) struct ClassTable {
     pub(crate) init: Vec<InitState>,
     /// The `java.lang.Class` object of each class, made on first use.
     pub(crate) mirrors: Vec<Option<ObjRef>>,
+    /// What the classes a game can make take of the machine's limit on
+    /// class data. Classes are never unloaded, so nothing is given back.
+    pub(super) budget: ClassBudget,
 }
 
 impl ClassTable {
-    pub(crate) fn new(source: Arc<dyn ClassSource>, natives: Vec<NativeClass>) -> Self {
+    /// A table that loads classes from `source` and `natives`, and lets
+    /// the classes of a game take `max_class_bytes` of class data (see
+    /// [`VmLimits::max_class_bytes`](crate::VmLimits::max_class_bytes)).
+    pub(crate) fn new(
+        source: Arc<dyn ClassSource>,
+        natives: Vec<NativeClass>,
+        max_class_bytes: usize,
+    ) -> Self {
         Self {
             classes: Vec::new(),
             by_name: HashMap::new(),
@@ -129,6 +140,7 @@ impl ClassTable {
             statics: Vec::new(),
             init: Vec::new(),
             mirrors: Vec::new(),
+            budget: ClassBudget::new(max_class_bytes),
         }
     }
 
@@ -502,7 +514,7 @@ mod tests {
             NativeClass::new("a/B").extends("a/A").field("y", "D"),
             NativeClass::new("a/Loop").extends("a/Loop"),
         ];
-        ClassTable::new(Arc::new(MemorySource::new()), natives)
+        ClassTable::new(Arc::new(MemorySource::new()), natives, usize::MAX)
     }
 
     #[test]
@@ -546,7 +558,7 @@ mod tests {
     fn table_of(natives: Vec<NativeClass>) -> ClassTable {
         let mut all = vec![NativeClass::new("java/lang/Object")];
         all.extend(natives);
-        ClassTable::new(Arc::new(MemorySource::new()), all)
+        ClassTable::new(Arc::new(MemorySource::new()), all, usize::MAX)
     }
 
     #[test]
@@ -723,5 +735,57 @@ mod tests {
         let err = t.load("a/Loop").unwrap_err();
         assert_eq!(err.exception, "java/lang/ClassCircularityError");
         assert!(t.load("[Q").is_err());
+    }
+
+    /// A class file `name` with `statics` static `int` fields and the
+    /// abstract method `m` with the descriptor `desc`.
+    fn class_file(name: &str, statics: usize, desc: &str) -> ClassFile {
+        use crate::classfile::{ConstantPool, FieldInfo, MethodInfo};
+        ClassFile {
+            minor_version: 0,
+            major_version: 49,
+            constant_pool: ConstantPool::default(),
+            access: access::PUBLIC | access::SUPER,
+            name: name.into(),
+            super_name: Some("java/lang/Object".into()),
+            interfaces: Vec::new(),
+            fields: (0..statics)
+                .map(|i| FieldInfo {
+                    access: access::STATIC,
+                    name: format!("f{i}").into(),
+                    descriptor: "I".into(),
+                    constant_value: None,
+                })
+                .collect(),
+            methods: vec![MethodInfo {
+                access: access::PUBLIC | access::ABSTRACT,
+                name: "m".into(),
+                descriptor: desc.into(),
+                code: None,
+            }],
+            source_file: None,
+        }
+    }
+
+    #[test]
+    fn a_class_that_does_not_link_leaves_nothing_behind() {
+        let mut t = table_of(Vec::new());
+        t.load("java/lang/Object").unwrap();
+        let (statics, selectors, used) = (t.statics.len(), t.selector_count, t.budget.used);
+        // A game that loads a class like this in a loop would otherwise
+        // add its static fields to the table's storage every time.
+        for _ in 0..3 {
+            let def = super::super::link::from_class_file(class_file("a/Bad", 100, "(")).unwrap();
+            let err = t.define(def).unwrap_err();
+            assert_eq!(err.exception, "java/lang/ClassFormatError");
+        }
+        assert_eq!(t.statics.len(), statics);
+        assert_eq!(t.selector_count, selectors);
+        assert_eq!(t.budget.used, used);
+        assert!(t.lookup("a/Bad").is_none());
+
+        let def = super::super::link::from_class_file(class_file("a/Good", 100, "()V")).unwrap();
+        t.define(def).unwrap();
+        assert_eq!(t.statics.len(), statics + 100);
     }
 }

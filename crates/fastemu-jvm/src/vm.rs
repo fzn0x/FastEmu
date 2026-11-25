@@ -368,7 +368,11 @@ impl Vm {
         for class in natives {
             library.insert(class.name.clone(), class);
         }
-        let mut classes = ClassTable::new(source, library.into_values().collect());
+        let mut classes = ClassTable::new(
+            source,
+            library.into_values().collect(),
+            config.limits.max_class_bytes,
+        );
         let mut load = |name: &str| {
             classes
                 .load(name)

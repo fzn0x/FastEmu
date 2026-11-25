@@ -158,6 +158,23 @@ impl ConstantPool {
         self.entries.len() <= 1
     }
 
+    /// The bytes the text of the `Utf8` entries holds, each with the
+    /// counts of its `Arc`. The entries themselves are not in it: they
+    /// have a fixed size each.
+    pub(crate) fn utf8_bytes(&self) -> usize {
+        let header = 2 * std::mem::size_of::<usize>();
+        self.entries
+            .iter()
+            .map(|entry| match entry {
+                Constant::Utf8(u) => {
+                    let exact = u.exact.as_ref().map_or(0, |units| 2 * units.len());
+                    header.saturating_add(u.text.len()).saturating_add(exact)
+                }
+                _ => 0,
+            })
+            .fold(0, usize::saturating_add)
+    }
+
     pub fn get(&self, index: u16) -> Option<&Constant> {
         self.entries.get(index as usize)
     }
