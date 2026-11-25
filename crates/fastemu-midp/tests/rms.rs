@@ -568,3 +568,34 @@ fn damaged_files_open_and_the_quota_holds() {
     assert!(rms.join("cut.bad").exists());
     assert_eq!(read_store(&rms, "broken").records.len(), 1);
 }
+
+#[test]
+fn a_suite_has_at_most_64_stores() {
+    let Some(classes) = programs() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let output = run(
+        classes,
+        "RmsStores",
+        &[],
+        InstanceEnv::for_tests(dir.path()),
+        |_| {},
+    );
+    check(
+        &output,
+        "
+        made 64
+        65th RecordStoreFullException, 64 stores
+        s0 holds 1 record
+        nothing RecordStoreNotFoundException
+        deleted, 63 stores
+        again made, 64 stores
+        one more RecordStoreFullException, 64 stores
+        done
+        ",
+    );
+    // The refused stores left no file behind.
+    let files = std::fs::read_dir(disk::rms_dir(dir.path()))
+        .unwrap()
+        .count();
+    assert_eq!(files, 64);
+}
