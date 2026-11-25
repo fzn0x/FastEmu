@@ -428,7 +428,8 @@ enforces some of them; the rest are on the native's author.
 4. **Never keep an `ObjRef` beyond the native call** in Rust state: not in
    a `static`, a closure, an extension, a host structure, a thread body or
    a posted task. Keep a `GlobalRef` (`ctx.new_global(obj)`), which is
-   `Send` and `Sync` and frees its root when dropped, or store the
+   `Send` and `Sync` and frees its root when dropped (the next
+   `new_global` uses its slot, no collection needed), or store the
    reference in a Java field or in a payload that traces it.
 5. **Payloads trace what they hold.** A payload with `ObjRef`s implements
    `Payload::trace` and marks each one; otherwise the collector frees the
