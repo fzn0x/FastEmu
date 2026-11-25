@@ -130,7 +130,8 @@ impl Instance for NotStarted {
 /// got, and a user who taps fast would answer a question they have not read.
 pub const LINK_ARMING: Duration = Duration::from_millis(500);
 
-/// A web page a game asked to open, and when the user was first shown it.
+/// A web page a game asked to open, and when the app picked the request
+/// up, which is when its prompt appears.
 struct AskedLink {
     url: String,
     asked_at: Instant,
