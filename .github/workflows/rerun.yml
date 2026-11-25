@@ -13,7 +13,8 @@ name: Rerun
 #
 # A pull request's run is rerun only while its commit is still the head of
 # the pull request, and the pull request is open: a newer commit has a run
-# of its own. A run from a fork does not name its pull request, so it is
+# of its own. A push's run likewise only while its commit is still the head
+# of its branch. A run from a fork does not name its pull request, so it is
 # found by the fork's owner and branch; a run whose pull request cannot be
 # found is not rerun. A run that was rerun by hand meanwhile is left to that
 # rerun. When GitHub refuses a rerun, as for a run whose pull request
@@ -81,7 +82,8 @@ jobs:
           fi
 
           # still says whether the run should still be rerun: not rerun by
-          # hand meanwhile, and, for a pull request, still its head and open.
+          # hand meanwhile, for a pull request still its head and open, and
+          # for a push still the head of its branch.
           still() {
             local attempt status
             attempt="$(gh api "repos/$REPO/actions/runs/$RUN" --jq '.run_attempt')"
@@ -95,6 +97,14 @@ jobs:
               pr="$(gh api "repos/$REPO/pulls/$PR" --jq '.state + " " + .head.sha')"
               if [ "$pr" != "open $SHA" ]; then
                 echo "Pull request #$PR is no longer open at this commit ($pr): it isn't rerun."
+                return 1
+              fi
+            fi
+            if [ "$EVENT" = push ] && [ -n "$HEAD_BRANCH" ]; then
+              local head
+              head="$(gh api "repos/$REPO/branches/$HEAD_BRANCH" --jq '.commit.sha' || true)"
+              if [ -n "$head" ] && [ "$head" != "$SHA" ]; then
+                echo "$HEAD_BRANCH has moved on to $head, which has a run of its own: $NAME isn't rerun."
                 return 1
               fi
             fi
