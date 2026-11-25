@@ -23,9 +23,12 @@ const ENCRYPTED: u16 = 1;
 /// General purpose flag bit 3: sizes follow the data in a descriptor.
 const HAS_DESCRIPTOR: u16 = 1 << 3;
 
-/// The largest entry this reader inflates, so a hostile archive cannot
-/// exhaust the host. No phone had this much storage for one file.
-const MAX_ENTRY_BYTES: usize = 64 * 1024 * 1024;
+/// The largest entry [`ZipArchive::read`] inflates, so a hostile archive
+/// cannot exhaust the host. No phone had this much storage for one file.
+/// Readers that know what they want use [`ZipArchive::read_limited`] with
+/// a smaller limit.
+pub const MAX_ENTRY_BYTES: usize = 64 * 1024 * 1024;
+
 
 /// The most a deflate stream can expand: a 258-byte match can take as
 /// little as two bits, so one input byte gives at most 4 * 258 bytes.
@@ -43,6 +46,9 @@ pub enum ZipError {
     Encrypted,
     /// The entry's data is cut short or does not inflate at all.
     Corrupt(String),
+    /// The entry holds more than the reader was asked to read, which is
+    /// the number of bytes.
+    TooLarge(usize),
 }
 
 impl fmt::Display for ZipError {
@@ -52,6 +58,7 @@ impl fmt::Display for ZipError {
             Self::UnsupportedMethod(m) => write!(f, "compression method {m} is not supported"),
             Self::Encrypted => f.write_str("the entry is encrypted"),
             Self::Corrupt(why) => write!(f, "the entry is damaged: {why}"),
+            Self::TooLarge(max) => write!(f, "the entry is more than {max} bytes"),
         }
     }
 }
@@ -164,10 +171,33 @@ impl ZipArchive {
         })
     }
 
-    /// The decompressed contents of `entry`. A deflate stream that breaks
-    /// part way returns what inflated before the break; the CRC is never
-    /// checked.
+    /// The decompressed contents of `entry`, at most [`MAX_ENTRY_BYTES`].
+    /// A deflate stream that breaks part way returns what inflated before
+    /// the break; the CRC is never checked.
     pub fn read(&self, entry: &Entry) -> Result<Vec<u8>, ZipError> {
+        self.read_limited(entry, MAX_ENTRY_BYTES)
+    }
+
+    /// The decompressed contents of `entry`, or [`ZipError::TooLarge`] when
+    /// it holds more than `max` bytes. The inflate stops at `max`, so an
+    /// entry that expands a thousand times costs `max` bytes of memory and
+    /// time, whatever its header says it holds.
+    pub fn read_limited(&self, entry: &Entry, max: usize) -> Result<Vec<u8>, ZipError> {
+        match self.read_bounded(entry, max)? {
+            (bytes, false) => Ok(bytes),
+            (_, true) => Err(ZipError::TooLarge(max)),
+        }
+    }
+
+    /// The first `max` bytes of the decompressed contents of `entry`, or all
+    /// of them when there are fewer, for a reader that makes do with the
+    /// start of a file.
+    pub fn read_prefix(&self, entry: &Entry, max: usize) -> Result<Vec<u8>, ZipError> {
+        self.read_bounded(entry, max).map(|(bytes, _)| bytes)
+    }
+
+    /// At most `max` bytes of `entry`, and whether it holds more.
+    fn read_bounded(&self, entry: &Entry, max: usize) -> Result<(Vec<u8>, bool), ZipError> {
         if entry.flags & ENCRYPTED != 0 {
             return Err(ZipError::Encrypted);
         }
@@ -177,16 +207,17 @@ impl ZipArchive {
             .min(self.data.len());
         let raw = &self.data[entry.data_start.min(end)..end];
         match entry.method {
-            STORED => Ok(raw.to_vec()),
-            DEFLATED => inflate(raw, entry.uncompressed),
+            STORED => Ok((raw[..raw.len().min(max)].to_vec(), raw.len() > max)),
+            DEFLATED => inflate(raw, entry.uncompressed, max),
             other => Err(ZipError::UnsupportedMethod(other)),
         }
     }
 }
 
-/// Inflates a raw deflate stream. A stream that breaks part way keeps what
-/// inflated before the break, so the rows of a damaged image still show.
-fn inflate(raw: &[u8], expected: usize) -> Result<Vec<u8>, ZipError> {
+/// Inflates a raw deflate stream into at most `max` bytes and says whether
+/// it had more to give. A stream that breaks part way keeps what inflated
+/// before the break, so the rows of a damaged image still show.
+fn inflate(raw: &[u8], expected: usize, max: usize) -> Result<(Vec<u8>, bool), ZipError> {
     use miniz_oxide::inflate::TINFLStatus;
     use miniz_oxide::inflate::core::{DecompressorOxide, decompress, inflate_flags};
 
@@ -196,11 +227,13 @@ fn inflate(raw: &[u8], expected: usize) -> Result<Vec<u8>, ZipError> {
     let start = expected
         .min(raw.len().saturating_mul(MAX_DEFLATE_RATIO))
         .max(raw.len().saturating_mul(2))
-        .clamp(64, MAX_ENTRY_BYTES);
+        .max(64)
+        .min(max);
     let mut out = vec![0u8; start];
     let mut decompressor = Box::<DecompressorOxide>::default();
     let mut input = raw;
     let mut written = 0;
+    let mut more = false;
     loop {
         let (status, consumed, produced) =
             decompress(&mut decompressor, input, &mut out, written, flags);
@@ -208,17 +241,23 @@ fn inflate(raw: &[u8], expected: usize) -> Result<Vec<u8>, ZipError> {
         input = input.get(consumed..).unwrap_or_default();
         match status {
             TINFLStatus::Done => break,
-            TINFLStatus::HasMoreOutput if out.len() < MAX_ENTRY_BYTES => {
-                let grown = out.len().saturating_mul(2).min(MAX_ENTRY_BYTES);
+            TINFLStatus::HasMoreOutput if out.len() < max => {
+                let grown = out.len().saturating_mul(2).max(64).min(max);
                 out.resize(grown, 0);
+            }
+            TINFLStatus::HasMoreOutput => {
+                more = true;
+                break;
             }
             _ if written > 0 => break,
             status => return Err(ZipError::Corrupt(format!("{status:?}"))),
         }
     }
+    #[cfg(test)]
+    testing::count_inflated(written);
     out.truncate(written);
     out.shrink_to_fit();
-    Ok(out)
+    Ok((out, more))
 }
 
 /// Decodes an entry name for display.
@@ -401,6 +440,23 @@ pub(crate) mod testing {
     //! A small ZIP writer for tests: stored or deflated entries, with or
     //! without a central directory, so tests can build broken JARs.
 
+    use std::cell::Cell;
+
+    thread_local! {
+        static INFLATED: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// Adds `bytes` to what this thread's inflates have produced.
+    pub(super) fn count_inflated(bytes: usize) {
+        INFLATED.with(|c| c.set(c.get() + bytes as u64));
+    }
+
+    /// The bytes every inflate on this thread has produced since the last
+    /// call, and starts the count again.
+    pub fn take_inflated() -> u64 {
+        INFLATED.with(|c| c.replace(0))
+    }
+
     /// One file to write.
     pub struct TestEntry<'a> {
         pub name: &'a [u8],
@@ -427,6 +483,33 @@ pub(crate) mod testing {
                 ..Self::stored(name, data)
             }
         }
+    }
+
+    /// A deflated file `data` that the central directory lists once for
+    /// each of `names`: every entry points at the same local header and
+    /// the same compressed bytes, as in a crafted archive.
+    pub fn write_overlapping(names: &[String], data: &[u8]) -> Vec<u8> {
+        let one = write(&[TestEntry::deflated("x", data)], true);
+        let central_at = one.len() - 22 - 46 - 1;
+        let mut out = one[..central_at].to_vec();
+        let template = one[central_at..central_at + 46].to_vec();
+        let start = out.len() as u32;
+        let mut directory = Vec::new();
+        for name in names {
+            let mut header = template.clone();
+            header[28..30].copy_from_slice(&(name.len() as u16).to_le_bytes());
+            directory.extend_from_slice(&header);
+            directory.extend_from_slice(name.as_bytes());
+        }
+        out.extend_from_slice(&directory);
+        out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+        out.extend_from_slice(&[0; 4]);
+        out.extend_from_slice(&(names.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(names.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(directory.len() as u32).to_le_bytes());
+        out.extend_from_slice(&start.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out
     }
 
     /// Writes the archive; `central` false leaves out the central
@@ -735,6 +818,59 @@ mod tests {
             archive.read(archive.find(b"a.txt").unwrap()).unwrap(),
             b"data"
         );
+    }
+
+    #[test]
+    fn read_limited_stops_at_the_limit_however_much_the_stream_would_give() {
+        let zeros = vec![0u8; 1 << 20];
+        let bytes = write(
+            &[
+                TestEntry::deflated("z.bin", &zeros),
+                TestEntry::stored("s.bin", &[7; 100]),
+            ],
+            true,
+        );
+        let archive = ZipArchive::new(bytes).unwrap();
+        let z = archive.find(b"z.bin").unwrap();
+        testing::take_inflated();
+        assert_eq!(archive.read_limited(z, 1000), Err(ZipError::TooLarge(1000)));
+        assert_eq!(testing::take_inflated(), 1000, "nothing past the limit");
+        assert_eq!(archive.read_limited(z, 0), Err(ZipError::TooLarge(0)));
+        assert_eq!(
+            archive.read_limited(z, (1 << 20) - 1),
+            Err(ZipError::TooLarge((1 << 20) - 1))
+        );
+        // An exact fit is not too large.
+        assert_eq!(archive.read_limited(z, 1 << 20).unwrap(), zeros);
+        assert_eq!(archive.read_prefix(z, 10).unwrap(), vec![0; 10]);
+        assert_eq!(archive.read(z).unwrap().len(), 1 << 20);
+
+        let s = archive.find(b"s.bin").unwrap();
+        assert_eq!(archive.read_limited(s, 99), Err(ZipError::TooLarge(99)));
+        assert_eq!(archive.read_limited(s, 0), Err(ZipError::TooLarge(0)));
+        assert_eq!(archive.read_limited(s, 100).unwrap(), vec![7; 100]);
+        assert_eq!(archive.read_prefix(s, 50).unwrap(), vec![7; 50]);
+        assert_eq!(archive.read_prefix(s, 500).unwrap(), vec![7; 100]);
+    }
+
+    #[test]
+    fn overlapping_entries_read_the_same_bytes_and_each_read_stops_at_its_limit() {
+        let data = vec![5u8; 100_000];
+        let names: Vec<String> = (0..50).map(|i| format!("a{i}.bin")).collect();
+        let archive = ZipArchive::new(testing::write_overlapping(&names, &data)).unwrap();
+        assert_eq!(archive.entries().len(), 50);
+        testing::take_inflated();
+        for entry in archive.entries() {
+            assert_eq!(archive.read(entry).unwrap(), data);
+        }
+        assert_eq!(testing::take_inflated(), 50 * 100_000);
+        for entry in archive.entries() {
+            assert_eq!(
+                archive.read_limited(entry, 1000),
+                Err(ZipError::TooLarge(1000))
+            );
+        }
+        assert_eq!(testing::take_inflated(), 50 * 1000);
     }
 
     /// Every single-byte corruption and every truncation of a small
