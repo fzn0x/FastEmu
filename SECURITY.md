@@ -163,10 +163,8 @@ links to the page that describes the limit.
 
 ### Sound
 
-The table gives what MMAPI does. The vendor sound APIs throw no
-`MediaException`: a sound the engine refuses leaves a Nokia `Sound`
-uninitialized and a Samsung `AudioClip` or Siemens melody silent, with a
-warning, and a start past the cap of started players plays nothing.
+The table gives what MMAPI does, and what the vendor sound APIs do
+instead, as they throw no `MediaException`.
 
 | Limit | Bound | When a game reaches it | Described in |
 | --- | --- | --- | --- |
