@@ -135,25 +135,31 @@ links to the page that describes the limit.
 | --- | --- | --- | --- |
 | Pixels of an image | counted on the heap, 4 bytes a pixel | `OutOfMemoryError` before the pixels exist | [graphics.md][gfx-images] |
 | One image | 2^25 pixels | `OutOfMemoryError` | [graphics.md][gfx-images] |
-| Size an image file declares | checked against the heap before decoding; 16384 pixels a side | `OutOfMemoryError` | [graphics.md][gfx-decoding] |
+| Size an image file declares | checked against the heap before decoding; 16384 pixels a side | `OutOfMemoryError`; a JPEG over 16384 pixels a side that the heap could hold is a decode error instead: `IllegalArgumentException`, or `IOException` from `createImage(String)` and `createImage(InputStream)` | [graphics.md][gfx-decoding] |
 | `Image.createImage(InputStream)` | 16 MiB, or 1000 reads in a row that give no bytes | `IOException` | [graphics.md][gfx-images] |
 | Repair of a damaged PNG | 64 MiB of rows | `OutOfMemoryError` | [graphics.md][gfx-decoding] |
 | Extended XMP segments of a JPEG | 16 | the image does not decode | [graphics.md][gfx-decoding] |
 | Nokia `drawPixels` block | 4194304 pixels | `IllegalArgumentException` | [graphics.md][gfx-nokia] |
 | Glyphs kept for one font and size, for all games | 4096 above U+00FF | the cache empties and starts again | [graphics.md][gfx-text] |
 | Cells of a `TiledLayer` | 2^24, and the heap | `OutOfMemoryError` | [midp.md][midp-game] |
-| Animated tiles of a layer | 32767 | `OutOfMemoryError` | [midp.md][midp-game] |
+| Animated tiles of a `TiledLayer` | 32767 | `OutOfMemoryError`; Siemens' `TiledLayer` throws `IllegalArgumentException` | [midp.md][midp-game] |
+| Tiles of a Siemens `TiledLayer`, static and animated | 32767 of each | `IllegalArgumentException` | [vendors.md][vendors-siemens] |
 | Back buffer of a shown screen | counted on the heap, 4 bytes a pixel | counted, never refused; the game's next allocation fails | [midp.md][midp-frames] |
-| Surface of a `CustomItem` | the heap | the item stays blank, with one warning | [midp.md][midp-screens] |
-| Text a list row draws | 4096 UTF-16 units | the row draws cut | [midp.md][midp-screens] |
+| Surface of a `CustomItem` | 8192 pixels a side, and the heap | a larger size is cut to 8192; a surface the heap cannot hold leaves the item blank, with one warning | [midp.md][midp-screens] |
+| Text a `List` or `ChoiceGroup` row draws | 4096 UTF-16 units; past 256 elements, 1 Mi units shared by the rows, at least 128 a row | the row draws cut | [midp.md][midp-screens] |
+| `drawArc`, or `drawRoundRect` with rounded corners | 65536 pixels wide or tall | nothing is drawn | [graphics.md][gfx-pixels] |
+| Lights whose level is kept, every vendor API together | 16 | a change of any other light is logged each time and not kept | [vendors.md][vendors-lights] |
 
 [gfx-images]: docs/architecture/graphics.md#images
 [gfx-decoding]: docs/architecture/graphics.md#decoding
 [gfx-nokia]: docs/architecture/graphics.md#nokia-directgraphics
+[gfx-pixels]: docs/architecture/graphics.md#the-pixel-model
 [gfx-text]: docs/architecture/graphics.md#text
 [midp-game]: docs/architecture/midp.md#the-game-api
 [midp-frames]: docs/architecture/midp.md#repaints-and-frames
 [midp-screens]: docs/architecture/midp.md#the-high-level-screens
+[vendors-siemens]: docs/architecture/vendors.md#siemens
+[vendors-lights]: docs/architecture/vendors.md#lights-and-vibration
 
 ### Sound
 
