@@ -44,8 +44,18 @@ pub const MAX_JAD_BYTES: u64 = 1024 * 1024;
 /// file systems allow.
 const MAX_NAME_BYTES: usize = 255;
 
+/// The most characters of a suite's name, vendor, version and MIDlet names
+/// that [`SuiteInfo`] holds for display. The longest of them in the test
+/// folder has 40. The attributes in [`SuiteInfo::properties`] stay whole.
+pub const MAX_DISPLAY_CHARS: usize = 100;
+
+/// The most characters of a suite's description that [`SuiteInfo`] holds.
+/// The longest description in the test folder has 129.
+pub const MAX_DESCRIPTION_CHARS: usize = 500;
+
 /// The longest suite icon read, inflated. Icons are a few KB.
 const MAX_ICON_BYTES: usize = 1024 * 1024;
+
 /// What a search for MIDlet classes may spend: how many class files it
 /// opens, how large one may be, and how many bytes all of them inflate to
 /// in all. Entries that share one compressed stream, which a ZIP file
@@ -296,6 +306,7 @@ fn read_info(
             attributes::lookup(&manifest, key),
         ) && a != b
         {
+            let (a, b) = (shown(a, MAX_DISPLAY_CHARS), shown(b, MAX_DISPLAY_CHARS));
             notes.push(format!(
                 "the JAD says {key} is {a:?} but the JAR says {b:?}; using the JAD"
             ));
@@ -303,10 +314,13 @@ fn read_info(
     }
     let mut properties = jad;
     properties.extend(manifest);
-    let get = |key: &str| attributes::lookup(&properties, key).map(str::to_owned);
-    let name = get("MIDlet-Name")
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| fallback_name.to_owned());
+    // What the app shows is cut; `properties` keeps every value whole, as
+    // `getAppProperty` gives them.
+    let get = |key: &str| attributes::lookup(&properties, key);
+    let name = get("MIDlet-Name").filter(|n| !n.is_empty()).map_or_else(
+        || shown(fallback_name, MAX_DISPLAY_CHARS),
+        |n| shown(n, MAX_DISPLAY_CHARS),
+    );
     let (mut midlets, midlet_notes) = attributes::midlets(&properties, &name);
     notes.extend(midlet_notes);
     if midlets.is_empty() {
@@ -316,6 +330,9 @@ fn read_info(
                 .push("the suite lists no MIDlet-<n>; using the MIDlet classes found in it".into());
         }
     }
+    for midlet in &mut midlets {
+        midlet.name = shown(&midlet.name, MAX_DISPLAY_CHARS);
+    }
     let icon_path = get("MIDlet-Icon")
         .map(|p| p.trim_start_matches('/').to_owned())
         .filter(|p| !p.is_empty())
@@ -324,17 +341,30 @@ fn read_info(
         let entry = jar.find_str(&source::normalize(&path))?;
         jar.read_limited(entry, MAX_ICON_BYTES).ok()
     });
+    let vendor = get("MIDlet-Vendor").map_or_else(String::new, |v| shown(v, MAX_DISPLAY_CHARS));
+    let version = get("MIDlet-Version").map_or_else(String::new, |v| shown(v, MAX_DISPLAY_CHARS));
+    let description = get("MIDlet-Description")
+        .filter(|d| !d.is_empty())
+        .map(|d| shown(d, MAX_DESCRIPTION_CHARS));
     let info = SuiteInfo {
         name,
-        vendor: get("MIDlet-Vendor").unwrap_or_default(),
-        version: get("MIDlet-Version").unwrap_or_default(),
-        description: get("MIDlet-Description").filter(|d| !d.is_empty()),
+        vendor,
+        version,
+        description,
         icon,
         midlets,
         properties,
         jar_bytes,
     };
     (info, notes)
+}
+
+/// `text` cut to its first `max` characters.
+fn shown(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) {
+        Some((at, _)) => text[..at].to_owned(),
+        None => text.to_owned(),
+    }
 }
 
 /// The classes in `jar` that extend `MIDlet`, directly or through other
@@ -516,6 +546,41 @@ mod tests {
         let suite = open_jar("mfbomb", &bytes);
         assert_eq!(take_inflated(), attributes::MAX_ATTRIBUTE_BYTES as u64);
         assert_eq!(suite.info.midlets[0].class_name, "com.a.A");
+    }
+
+    #[test]
+    fn a_name_vendor_version_and_description_are_cut_for_display_and_whole_as_properties() {
+        let long = "N".repeat(200_000);
+        let manifest = format!(
+            "MIDlet-Name: {long}\nMIDlet-Vendor: {long}\nMIDlet-Version: {long}\n\
+             MIDlet-Description: {long}\nMIDlet-1: {long}, , com.a.G\n"
+        );
+        let suite = open_jar("long", &jar("META-INF/MANIFEST.MF", manifest.as_bytes()));
+        let info = &suite.info;
+        assert_eq!(info.name.chars().count(), MAX_DISPLAY_CHARS);
+        assert_eq!(info.vendor.chars().count(), MAX_DISPLAY_CHARS);
+        assert_eq!(info.version.chars().count(), MAX_DISPLAY_CHARS);
+        assert_eq!(
+            info.description.as_deref().map(|d| d.chars().count()),
+            Some(MAX_DESCRIPTION_CHARS)
+        );
+        assert_eq!(info.midlets[0].name.chars().count(), MAX_DISPLAY_CHARS);
+        // What getAppProperty reads is whole.
+        for key in ["MIDlet-Name", "MIDlet-Vendor", "MIDlet-Version"] {
+            assert_eq!(info.property(key).map(str::len), Some(200_000), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_cut_never_splits_a_character() {
+        assert_eq!(shown("abc", 100), "abc");
+        assert_eq!(shown("abc", 3), "abc");
+        assert_eq!(shown("abcd", 3), "abc");
+        assert_eq!(
+            shown("\u{e9}\u{4e2d}\u{1f600}x", 3),
+            "\u{e9}\u{4e2d}\u{1f600}"
+        );
+        assert_eq!(shown("", 0), "");
     }
 
     #[test]
