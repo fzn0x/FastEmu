@@ -345,13 +345,14 @@ few times the heap limit, and the host never holds much more than that.
 count. The `OutOfMemoryError` itself is made without a check, so it can
 always be thrown.
 
-The count follows a phone, not the host. An object counts 8 bytes and 4
-or 8 for each field, while the host gives it a slab entry and 16 bytes a
+The count follows a phone, not the host. An object counts 8 bytes and 4 or
+8 for each field, while the host gives it a slab entry and 16 bytes a
 field, so a game made of very many tiny objects holds several times its
 heap in real memory, about ten times in a test with many small timer
-tasks. The heap lives as long as the machine: a
-game that has ended keeps its memory until the host lets go of its `Vm`,
-which the apps do when its tile is closed.
+tasks. A monitor entry for each locked object and a second copy of each
+interned string also live outside the count. The heap lives as long as the
+machine: a game that has ended keeps its memory until the host lets go of
+its `Vm`, which the apps do when its tile is closed.
 
 ### Limits
 
