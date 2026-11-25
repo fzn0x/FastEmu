@@ -209,11 +209,15 @@ warning, and a start past the cap of started players plays nothing.
 | Interim `1xx` responses | 16 | `IOException` | [connections.md][net-hold] |
 | Trailer of a chunked body | 16 KiB | `IOException` | [connections.md][net-hold] |
 | Response head | 64 KiB | `IOException` | [connections.md][net-hold] |
+| Chunk size line of a chunked body | 1 KiB, extensions included | `IOException` | [connections.md][net-hold] |
 | Wait for a response head | 60 s | `InterruptedIOException` | [connections.md][net-blocking] |
-| Web link a game asks to open | `http` or `https` with a host, no backslash, a port from 1 to 65535, 4096 bytes | `ConnectionNotFoundException` | [midp.md][midp-links] |
+| Name lookup and connect, TLS handshake, sending an HTTP request | 30 s each | `InterruptedIOException` | [connections.md][net-blocking] |
+| Datagram size | 65507 bytes | `IllegalArgumentException` from `newDatagram` | [connections.md][net-datagrams] |
+| Web link a game asks to open | `http` or `https` with a host, printable ASCII only, no backslash, no user name, a port from 1 to 65535, at most 4096 bytes, not a `.jad` or `.jar` | `ConnectionNotFoundException` | [midp.md][midp-links] |
 
 [net-hold]: docs/architecture/connections.md#what-a-game-may-hold
 [net-blocking]: docs/architecture/connections.md#blocking-without-freezing-the-vm
+[net-datagrams]: docs/architecture/connections.md#datagrams
 [midp-links]: docs/architecture/midp.md#links
 
 ### Record stores
@@ -224,10 +228,12 @@ warning, and a start past the cap of started players plays nothing.
 | Stores of a suite | 64 | `RecordStoreFullException` from the 65th `openRecordStore` | [rms.md][rms-quota] |
 | Disk writes | a burst of 32 MiB, then 4 MiB a second; a write costs at least 4 KiB | the save waits, in slices of 50 ms; it is never refused | [rms.md][rms-budget] |
 | Other suites whose stores a game opens | 16 | `RecordStoreException` | [rms.md][rms-where] |
+| Name of a record store | 1 to 32 UTF-16 units | `IllegalArgumentException` | [rms.md][rms-names] |
 
 [rms-quota]: docs/architecture/rms.md#sizes-and-the-quota
 [rms-budget]: docs/architecture/rms.md#the-write-budget
 [rms-where]: docs/architecture/rms.md#where-stores-live
+[rms-names]: docs/architecture/rms.md#file-names
 
 ### The apps
 
