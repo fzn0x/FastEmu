@@ -12,6 +12,7 @@ use crate::gain::unit_gain;
 use crate::media;
 use crate::mixer::{GroupId, GroupState, Mixer, Slot};
 use crate::nokia;
+use crate::pcm::MAX_DECODED_BYTES;
 use crate::player::Player;
 use crate::tone::ToneEvent;
 use crate::voice::{PlayerState, Voice};
@@ -72,10 +73,10 @@ fn held(mixer: &Mixer, group: GroupId) -> (usize, usize) {
 /// `freeing` of what it holds given back (a source being replaced), and
 /// for one more player when `new_player`.
 ///
-/// A sound bigger than the whole budget is [`AudioError::TooLarge`]: it
-/// can never fit. Anything else the group has no room for is
-/// [`AudioError::OutOfMemory`], which a closed or collected player can
-/// cure.
+/// A sound bigger than the whole budget, or than a decoder may make
+/// ([`MAX_DECODED_BYTES`]), is [`AudioError::TooLarge`]: it can never fit.
+/// Anything else the group has no room for is [`AudioError::OutOfMemory`],
+/// which a closed or collected player can cure.
 pub(crate) fn admit(
     mixer: &Mixer,
     group: GroupId,
@@ -84,10 +85,13 @@ pub(crate) fn admit(
     new_player: bool,
 ) -> Result<(), AudioError> {
     let limits = mixer.groups.get(&group).ok_or(AudioError::Closed)?.limits;
-    if adding > limits.max_bytes {
+    // The decoders refuse what decodes past the cap, but a MIDI file or a
+    // tone list is not decoded to samples: its events are counted here, so
+    // that no one sound passes the cap, whatever its format.
+    let most = limits.max_bytes.min(MAX_DECODED_BYTES);
+    if adding > most {
         return Err(AudioError::TooLarge(format!(
-            "a sound of {adding} bytes, when a game may hold {} bytes of sound",
-            limits.max_bytes
+            "a sound of {adding} bytes, when one sound may hold {most} bytes"
         )));
     }
     let (bytes, players) = held(mixer, group);
@@ -471,5 +475,53 @@ impl Group {
 impl fmt::Debug for Group {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Group").field("id", &self.inner.id).finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::EngineConfig;
+    use crate::pcm::{Pcm, PcmSource};
+    use crate::source::Source;
+
+    /// A sound of `bytes` bytes of silence, whose pages are never touched.
+    fn silence(bytes: usize) -> Box<dyn Source> {
+        Box::new(PcmSource::new(Arc::new(Pcm {
+            rate: 8000,
+            channels: 1,
+            samples: vec![0; bytes / 2],
+        })))
+    }
+
+    #[test]
+    fn no_one_sound_is_bigger_than_a_decoder_may_make() {
+        let engine = Engine::new(EngineConfig { sample_rate: 8000 });
+        let group = engine.create_group();
+        // A budget of 40 MiB is no reason for one sound of 17.
+        group.set_limits(GroupLimits {
+            max_bytes: 40 * 1024 * 1024,
+            max_players: 8,
+        });
+        group
+            .insert(Voice::new(silence(MAX_DECODED_BYTES), false))
+            .unwrap();
+        let refused = group
+            .insert(Voice::new(silence(MAX_DECODED_BYTES + 2), false))
+            .unwrap_err();
+        assert!(matches!(refused, AudioError::TooLarge(_)), "{refused}");
+        assert_eq!(
+            refused.to_string(),
+            "sound too large: a sound of 16777218 bytes, when one sound may hold 16777216 bytes"
+        );
+        assert_eq!(group.player_count(), 1);
+        // The budget still counts what the group holds in all.
+        group
+            .insert(Voice::new(silence(MAX_DECODED_BYTES), false))
+            .unwrap();
+        let full = group
+            .insert(Voice::new(silence(MAX_DECODED_BYTES), false))
+            .unwrap_err();
+        assert!(matches!(full, AudioError::OutOfMemory(_)), "{full}");
     }
 }
