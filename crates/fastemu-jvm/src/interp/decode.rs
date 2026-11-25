@@ -379,8 +379,15 @@ fn check_local(insn: &Insn, max_locals: u16) -> Result<(), String> {
     Ok(())
 }
 
-/// Decodes a method's code. The error becomes a `VerifyError`.
-pub(crate) fn decode(attr: &CodeAttr, cp: &ConstantPool, arg_slots: u16) -> Result<Code, String> {
+/// Decodes a method's code. `ret_slots` is the width of its result: 0 for
+/// `void`, 2 for `long` and `double`, 1 for the rest. The error becomes a
+/// `VerifyError`.
+pub(crate) fn decode(
+    attr: &CodeAttr,
+    cp: &ConstantPool,
+    arg_slots: u16,
+    ret_slots: u8,
+) -> Result<Code, String> {
     if attr.max_locals < arg_slots {
         return Err(format!(
             "max_locals {} is less than the {arg_slots} argument slots",
@@ -448,8 +455,15 @@ pub(crate) fn decode(attr: &CodeAttr, cp: &ConstantPool, arg_slots: u16) -> Resu
             catch_type: h.catch_type,
         });
     }
-    let heights =
-        super::flow::stack_heights(&insns, &pcs, &switches, &handlers, cp, attr.max_stack)?;
+    let heights = super::flow::stack_heights(
+        &insns,
+        &pcs,
+        &switches,
+        &handlers,
+        cp,
+        attr.max_stack,
+        ret_slots,
+    )?;
     // Only `ret` reads the heights, to check where a subroutine returns.
     let ret_heights = if insns.iter().any(|i| matches!(i, Insn::Ret(_))) {
         heights.into()
@@ -488,7 +502,7 @@ mod tests {
         let code = vec![
             0x03, 0x3b, 0x84, 0, 1, 0x1a, 0x10, 10, 0xa1, 0xff, 0xfa, 0xb1,
         ];
-        let decoded = decode(&attr(code, 1), &ConstantPool::default(), 0).unwrap();
+        let decoded = decode(&attr(code, 1), &ConstantPool::default(), 0, 0).unwrap();
         assert_eq!(
             &*decoded.insns,
             &[
@@ -513,7 +527,7 @@ mod tests {
             code.extend(v.to_be_bytes());
         }
         code.extend([0x03, 0xac, 0x04, 0xac, 0x05, 0xac]);
-        let decoded = decode(&attr(code, 1), &ConstantPool::default(), 1).unwrap();
+        let decoded = decode(&attr(code, 1), &ConstantPool::default(), 1, 1).unwrap();
         assert_eq!(decoded.insns[1], Insn::TableSwitch(0));
         let Switch::Table {
             targets, default, ..
@@ -530,7 +544,7 @@ mod tests {
         let mut code = vec![0xc4, 0x15, 0x01, 0x2c, 0xc4, 0x84, 0x01, 0x2c];
         code.extend((-1000i16).to_be_bytes());
         code.extend([0xa8, 0, 4, 0xb1, 0x4c, 0xa9, 1]);
-        let decoded = decode(&attr(code, 301), &ConstantPool::default(), 0).unwrap();
+        let decoded = decode(&attr(code, 301), &ConstantPool::default(), 0, 0).unwrap();
         assert_eq!(
             &*decoded.insns,
             &[
@@ -548,21 +562,37 @@ mod tests {
     fn bad_code_is_refused() {
         let pool = ConstantPool::default();
         assert!(
-            decode(&attr(vec![0xa7, 0, 1, 0xb1], 0), &pool, 0).is_err(),
+            decode(&attr(vec![0xa7, 0, 1, 0xb1], 0), &pool, 0, 0).is_err(),
             "mid-instruction"
         );
         assert!(
-            decode(&attr(vec![0x1b, 0xb1], 1), &pool, 0).is_err(),
+            decode(&attr(vec![0x1b, 0xb1], 1), &pool, 0, 0).is_err(),
             "local 1 of 1"
         );
         assert!(
-            decode(&attr(vec![0xfe], 0), &pool, 0).is_err(),
+            decode(&attr(vec![0xfe], 0), &pool, 0, 0).is_err(),
             "unknown opcode"
         );
-        assert!(decode(&attr(vec![0x10], 0), &pool, 0).is_err(), "truncated");
         assert!(
-            decode(&attr(vec![0xb1], 0), &pool, 1).is_err(),
+            decode(&attr(vec![0x10], 0), &pool, 0, 0).is_err(),
+            "truncated"
+        );
+        assert!(
+            decode(&attr(vec![0xb1], 0), &pool, 1, 0).is_err(),
             "too few locals"
         );
+    }
+
+    #[test]
+    fn a_return_of_another_width_than_the_method_declares_is_refused() {
+        let pool = ConstantPool::default();
+        // iconst_0; ireturn in a void method and in a long one
+        for ret_slots in [0, 2] {
+            let e = decode(&attr(vec![0x03, 0xac], 0), &pool, 0, ret_slots).unwrap_err();
+            assert!(e.contains("different kind"), "{e}");
+        }
+        // return in an int method
+        assert!(decode(&attr(vec![0xb1], 0), &pool, 0, 1).is_err());
+        assert!(decode(&attr(vec![0x03, 0xac], 0), &pool, 0, 1).is_ok());
     }
 }

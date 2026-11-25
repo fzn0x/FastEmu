@@ -210,9 +210,11 @@ impl Method {
         let MethodBody::Bytecode(bc) = &self.body else {
             return None;
         };
-        let decoded = bc
-            .decoded
-            .get_or_init(|| crate::interp::decode(&bc.attr, &bc.pool.cp, self.arg_slots));
+        let decoded = bc.decoded.get_or_init(|| {
+            // At most 2: a `u8` holds it.
+            let ret_slots = self.ret.slots() as u8;
+            crate::interp::decode(&bc.attr, &bc.pool.cp, self.arg_slots, ret_slots)
+        });
         Some(match decoded {
             Ok(code) => Ok(code),
             Err(e) => Err(e.as_str()),

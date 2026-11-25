@@ -9,6 +9,20 @@ use std::sync::Arc;
 use fastemu_jvm::{Throw, Vm, VmConfig};
 use support::{ClassBuilder, Handler, PUBLIC, STATIC, idx};
 
+/// Calls `static void Bad.f()` of the given classes and returns what it
+/// threw.
+fn run_classes(classes: &[(&str, Vec<u8>)]) -> String {
+    let source = support::source(classes);
+    let vm = Vm::new(VmConfig::default(), Arc::new(source), Vec::new());
+    vm.attach("test", |ctx| {
+        match ctx.call_static("Bad", "f", "()V", &[]) {
+            Ok(_) => "returned".to_owned(),
+            Err(Throw::Exception(e)) => ctx.describe_exception(e),
+            Err(Throw::Stop) => "stopped".to_owned(),
+        }
+    })
+}
+
 /// Calls `static void Bad.f()`, whose code is `code`, and returns what it
 /// threw.
 fn run(max_stack: u16, max_locals: u16, code: &[u8], handlers: &[Handler]) -> String {
@@ -22,15 +36,44 @@ fn run(max_stack: u16, max_locals: u16, code: &[u8], handlers: &[Handler]) -> St
         code,
         handlers,
     );
-    let source = support::source(&[("Bad", c.build())]);
-    let vm = Vm::new(VmConfig::default(), Arc::new(source), Vec::new());
-    vm.attach("test", |ctx| {
-        match ctx.call_static("Bad", "f", "()V", &[]) {
-            Ok(_) => "returned".to_owned(),
-            Err(Throw::Exception(e)) => ctx.describe_exception(e),
-            Err(Throw::Stop) => "stopped".to_owned(),
-        }
-    })
+    run_classes(&[("Bad", c.build())])
+}
+
+/// The code of a `static void` method that calls method `callee` (a
+/// constant pool index) a thousand times, and `discard` after each call
+/// to drop the result.
+fn call_in_a_loop(callee: u16, discard: &[u8]) -> Vec<u8> {
+    let [h, l] = idx(callee);
+    // 0: sipush 1000; 3: istore_0; 4: iload_0; 5: ifeq end; 8: invokestatic
+    let mut code = vec![0x11, 0x03, 0xe8, 0x3b, 0x1a, 0x99, 0, 0, 0xb8, h, l];
+    code.extend(discard);
+    // iinc 0 -1; goto 4; return
+    code.extend([0x84, 0, 0xff]);
+    let goto = code.len();
+    code.extend([0xa7, 0, 0]);
+    let end = code.len();
+    code.push(0xb1);
+    code[6..8].copy_from_slice(&((end - 5) as i16).to_be_bytes());
+    code[goto + 1..goto + 3].copy_from_slice(&((4 - goto as i32) as i16).to_be_bytes());
+    code
+}
+
+/// Calls `Bad.v`, whose descriptor is `desc` and code is `code`, a thousand
+/// times from `Bad.f`, which drops each result with `discard`.
+fn run_returning(desc: &str, max_stack: u16, code: &[u8], discard: &[u8]) -> String {
+    let mut c = ClassBuilder::new("Bad", "java/lang/Object", 49, 0);
+    let v = c.method_ref("Bad", "v", desc);
+    c.method(PUBLIC | STATIC, "v", desc, max_stack, 2, code, &[]);
+    c.method(
+        PUBLIC | STATIC,
+        "f",
+        "()V",
+        2,
+        1,
+        &call_in_a_loop(v, discard),
+        &[],
+    );
+    run_classes(&[("Bad", c.build())])
 }
 
 fn assert_verify_error(result: &str, detail: &str) {
@@ -84,4 +127,59 @@ fn a_subroutine_that_returns_with_more_on_the_stack_is_refused() {
 fn well_formed_code_still_runs() {
     // iconst_1; iconst_2; iadd; pop; return
     assert_eq!(run(2, 0, &[0x04, 0x05, 0x60, 0x57, 0xb1], &[]), "returned");
+}
+
+/// One case of `run_returning`: descriptor, `max_stack`, code, and the
+/// instruction that drops the result.
+type Returning<'a> = (&'a str, u16, &'a [u8], &'a [u8]);
+
+#[test]
+fn a_return_of_another_kind_than_the_method_declares_is_refused() {
+    // Each is called a thousand times in a loop: before the check, the
+    // caller's stack grew by a slot or more on every call.
+    let cases: [Returning<'_>; 7] = [
+        // iconst_0; ireturn in a void, a long and a double method
+        ("()V", 1, &[0x03, 0xac], &[]),
+        ("()J", 1, &[0x03, 0xac], &[0x58]),
+        ("()D", 1, &[0x03, 0xac], &[0x58]),
+        // return in an int method
+        ("()I", 0, &[0xb1], &[0x57]),
+        // lconst_0; lreturn in an int and in a void method
+        ("()I", 2, &[0x09, 0xad], &[0x57]),
+        ("()V", 2, &[0x09, 0xad], &[]),
+        // dconst_0; dreturn in a float method
+        ("()F", 2, &[0x0e, 0xaf], &[0x57]),
+    ];
+    for (desc, max_stack, code, discard) in cases {
+        let result = run_returning(desc, max_stack, code, discard);
+        assert_verify_error(&result, "a return of a different kind");
+        assert!(result.contains(".v"), "{desc}: names the method: {result}");
+    }
+}
+
+#[test]
+fn a_mismatched_return_nothing_reaches_still_runs() {
+    // goto 5; iconst_0; ireturn; return: the ireturn is dead code of a
+    // void method, as obfuscators leave it and phones accept it.
+    let code = [0xa7, 0, 5, 0x03, 0xac, 0xb1];
+    assert_eq!(run_returning("()V", 1, &code, &[]), "returned");
+}
+
+#[test]
+fn returns_that_match_the_method_run() {
+    let cases: [Returning<'_>; 6] = [
+        ("()V", 0, &[0xb1], &[]),
+        ("()I", 1, &[0x03, 0xac], &[0x57]),
+        ("()J", 2, &[0x09, 0xad], &[0x58]),
+        ("()F", 1, &[0x0b, 0xae], &[0x57]),
+        ("()D", 2, &[0x0e, 0xaf], &[0x58]),
+        ("()Ljava/lang/Object;", 1, &[0x01, 0xb0], &[0x57]),
+    ];
+    for (desc, max_stack, code, discard) in cases {
+        assert_eq!(
+            run_returning(desc, max_stack, code, discard),
+            "returned",
+            "{desc}"
+        );
+    }
 }

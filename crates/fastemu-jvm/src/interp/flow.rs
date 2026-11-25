@@ -8,8 +8,10 @@
 //! height whichever way it is reached, never pops more than the stack
 //! holds, never grows it past `max_stack`, and never runs off the end of
 //! the code. Constant pool operands of reachable instructions must name
-//! entries of the right kind. Code javac or ProGuard wrote always passes,
-//! as the verifiers of phones and desktop virtual machines demand the same.
+//! entries of the right kind. A return must leave as many slots as the
+//! method's descriptor says, because the caller counted on that many. Code
+//! javac or ProGuard wrote always passes, as the verifiers of phones and
+//! desktop virtual machines demand the same.
 //!
 //! A subroutine (`jsr` and `ret`) is assumed to leave the stack as it was
 //! before its `jsr`, as javac's `finally` blocks do; `ret` checks that at
@@ -211,8 +213,20 @@ fn successors(insn: Insn, switches: &[Switch], out: &mut Vec<Option<u32>>) {
     }
 }
 
+/// The slots a return instruction hands to the caller.
+fn return_slots(insn: Insn) -> Option<u8> {
+    match insn {
+        Insn::Return => Some(0),
+        Insn::Return1 => Some(1),
+        Insn::Return2 => Some(2),
+        _ => None,
+    }
+}
+
 /// Checks the operand stack of decoded code and returns the stack height
-/// before each instruction ([`UNREACHED`] for unreachable ones).
+/// before each instruction ([`UNREACHED`] for unreachable ones). A
+/// reachable return must give `ret_slots` slots, the width of the method's
+/// result: 0 for `void`, 2 for `long` and `double`, 1 for the rest.
 ///
 /// `pcs` maps instruction indices to bytecode offsets, for messages.
 pub(crate) fn stack_heights(
@@ -222,6 +236,7 @@ pub(crate) fn stack_heights(
     handlers: &[Handler],
     cp: &ConstantPool,
     max_stack: u16,
+    ret_slots: u8,
 ) -> Result<Vec<u32>, String> {
     let max = u32::from(max_stack);
     let mut heights = vec![UNREACHED; insns.len()];
@@ -253,6 +268,11 @@ pub(crate) fn stack_heights(
         let insn = insns[at as usize];
         let pc = pcs[at as usize];
         let height = heights[at as usize];
+        if return_slots(insn).is_some_and(|slots| slots != ret_slots) {
+            return Err(format!(
+                "a return of a different kind than the method declares at {pc}"
+            ));
+        }
         let (pops, pushes) = effect(insn, cp).map_err(|e| format!("at {pc}: {e}"))?;
         let Some(base) = height.checked_sub(pops as u32) else {
             return Err(format!("operand stack underflow at {pc}"));
@@ -289,9 +309,23 @@ pub(crate) fn stack_heights(
 mod tests {
     use super::*;
 
+    /// The heights of code of a `void` method.
     fn heights(insns: &[Insn], max_stack: u16) -> Result<Vec<u32>, String> {
+        returning(insns, max_stack, 0)
+    }
+
+    /// The heights of code of a method whose result takes `ret_slots`.
+    fn returning(insns: &[Insn], max_stack: u16, ret_slots: u8) -> Result<Vec<u32>, String> {
         let pcs: Vec<u32> = (0..insns.len() as u32).collect();
-        stack_heights(insns, &pcs, &[], &[], &ConstantPool::default(), max_stack)
+        stack_heights(
+            insns,
+            &pcs,
+            &[],
+            &[],
+            &ConstantPool::default(),
+            max_stack,
+            ret_slots,
+        )
     }
 
     #[test]
@@ -331,5 +365,33 @@ mod tests {
         assert!(heights(&deep, 2).unwrap_err().contains("overflow"));
         assert!(heights(&[Insn::Nop], 1).unwrap_err().contains("falls off"));
         assert!(heights(&[Insn::Jsr(1), Insn::Store(0), Insn::Ret(0)], 1).is_err());
+    }
+
+    #[test]
+    fn a_return_must_match_the_declared_width() {
+        let void = [Insn::Return];
+        let int = [Insn::Iconst(0), Insn::Return1];
+        let long = [Insn::Lconst(0), Insn::Return2];
+        let kinds = [(0, &void[..]), (1, &int[..]), (2, &long[..])];
+        for (declared, _) in kinds {
+            for (width, insns) in kinds {
+                let result = returning(insns, 2, declared);
+                if width == declared {
+                    assert!(result.is_ok(), "width {width}");
+                } else {
+                    let e = result.unwrap_err();
+                    assert!(e.contains("different kind"), "{declared} {width}: {e}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_return_nothing_reaches_is_not_checked() {
+        // goto 3; iconst_0; ireturn; return: the ireturn is dead code of a
+        // void method, which phones accept and so does this.
+        let insns = [Insn::Goto(3), Insn::Iconst(0), Insn::Return1, Insn::Return];
+        let h = heights(&insns, 1).unwrap();
+        assert_eq!(h, [0, UNREACHED, UNREACHED, 0]);
     }
 }
