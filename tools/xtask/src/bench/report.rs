@@ -14,6 +14,10 @@ use super::sample::Memory;
 /// How much more than the idle baseline the other load may be before a
 /// measurement counts as noisy, in CPU milliseconds a second.
 pub const NOISE_MARGIN: f64 = 100.0;
+/// An idle baseline over this many CPU milliseconds a second, one
+/// processor's time, means the computer was busy before the bench began.
+/// The noise flag cannot see load on top of what was already there.
+pub const BUSY_BASELINE: f64 = 1000.0;
 /// How far apart the runs of one number may be, as a share of their
 /// median, before the number counts as noisy.
 pub const MAX_SPREAD: f64 = 0.15;
@@ -578,12 +582,20 @@ fn me_sides(report: &Report, work: &Work) -> Vec<Side> {
     .collect()
 }
 
-/// The problems of the run: what the measurements noted, checks that
-/// differ, screens that are not 240x320, kernels that failed, games with
-/// no frames, noisy measurements and numbers whose runs spread apart.
+/// The problems of the run: a computer busy before it began, what the
+/// measurements noted, checks that differ, screens that are not 240x320,
+/// kernels that failed, games with no frames, noisy measurements and
+/// numbers whose runs spread apart.
 pub fn problems(report: &Report) -> Vec<String> {
     let mut out = report.problems.clone();
     let baseline = report.baseline.unwrap_or(0.0);
+    if baseline > BUSY_BASELINE {
+        out.push(format!(
+            "the computer was busy before the bench began: idle baseline \
+             {baseline:.0} ms/s, over {BUSY_BASELINE:.0}, so the noise flag \
+             cannot see load on top of it"
+        ));
+    }
     for m in &report.measurements {
         let what = format!("{} on {}, run {}", m.work.key(), m.side.label(), m.run);
         for p in &m.problems {
@@ -1630,5 +1642,27 @@ mod tests {
             "{found:?}"
         );
         assert!(json(&noisy).contains("\"work\": \"game-g\""));
+    }
+
+    #[test]
+    fn a_busy_start_is_a_problem() {
+        let busy = Report {
+            baseline: Some(1411.0),
+            ..Report::default()
+        };
+        let found = problems(&busy);
+        assert!(
+            found
+                .iter()
+                .any(|p| p
+                    .contains("busy before the bench began: idle baseline 1411 ms/s, over 1000")),
+            "{found:?}"
+        );
+        assert!(markdown(&busy).contains("- the computer was busy before the bench began"));
+        let quiet = Report {
+            baseline: Some(BUSY_BASELINE),
+            ..Report::default()
+        };
+        assert_eq!(problems(&quiet), Vec::<String>::new());
     }
 }
