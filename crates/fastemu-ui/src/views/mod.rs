@@ -308,6 +308,7 @@ impl FastEmuView {
     /// phone pauses its game for a call, and resumes those when the app is
     /// back. Games the user paused stay paused.
     pub fn set_background(&mut self, background: bool, cx: &mut Context<'_, Self>) {
+        let now = cx.background_executor().now();
         for tile in &mut self.tiles {
             if background && tile.session.is_running() {
                 tile.session.release_everything();
@@ -317,7 +318,7 @@ impl FastEmuView {
                 tile.session.instance.resume();
                 tile.paused_by_app = false;
             }
-            tile.session.poll();
+            tile.session.poll(now);
         }
         cx.notify();
     }
@@ -532,9 +533,15 @@ impl Focusable for FastEmuView {
 
 impl Render for FastEmuView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-        self.poll_tiles();
+        let now = cx.background_executor().now();
+        self.poll_tiles(now);
         self.ask_for_text(cx);
-        self.animating = self.tiles.iter().any(|t| t.session.is_running());
+        // A link prompt that does not take clicks yet is dimmed, and gets
+        // its frames until it does, even over a game that has ended.
+        self.animating = self
+            .tiles
+            .iter()
+            .any(|t| t.session.is_running() || (t.shows_link() && !t.session.link_armed(now)));
         if self.animating {
             window.request_animation_frame();
         }

@@ -260,6 +260,18 @@ impl Harness<'_> {
         self.cx.run_until_parked();
     }
 
+    /// Lets `time` pass on the test clock, which the link prompt's wait
+    /// follows, and draws the window again.
+    fn wait(&mut self, time: std::time::Duration) {
+        self.cx.executor().advance_clock(time);
+        self.redraw();
+    }
+
+    /// Waits until a link prompt that just appeared takes clicks.
+    fn wait_for_the_prompt(&mut self) {
+        self.wait(crate::session::LINK_ARMING);
+    }
+
     /// The link the prompt of tile number `tile` shows.
     fn link(&mut self, tile: usize) -> Option<String> {
         self.read(|v| v.tiles[tile].session.link().map(str::to_owned))
@@ -1144,6 +1156,7 @@ fn a_link_waits_for_the_user_and_dismiss_drops_it(cx: &mut TestAppContext) {
     h.redraw();
     assert!(h.bounds("link-prompt", 0).is_some(), "until it is answered");
 
+    h.wait_for_the_prompt();
     h.click("link-dismiss", 0);
     assert_eq!(h.link(0), None);
     assert!(h.bounds("link-prompt", 0).is_none());
@@ -1168,6 +1181,7 @@ fn open_opens_the_link_the_prompt_shows(cx: &mut TestAppContext) {
     assert_eq!(h.link(0).as_deref(), Some("http://example.com/second"));
     assert_eq!(h.cx.opened_url(), None, "nothing opens by itself");
 
+    h.wait_for_the_prompt();
     h.click("link-open", 0);
     assert_eq!(
         h.cx.opened_url().as_deref(),
@@ -1175,6 +1189,58 @@ fn open_opens_the_link_the_prompt_shows(cx: &mut TestAppContext) {
     );
     assert_eq!(h.link(0), None);
     assert!(h.bounds("link-prompt", 0).is_none());
+    assert!(game.events().is_empty(), "{:?}", game.events());
+}
+
+#[gpui::test]
+fn the_link_prompt_ignores_clicks_in_its_first_half_second(cx: &mut TestAppContext) {
+    use std::time::Duration;
+
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    let game = h.launcher.instance(0);
+    game.show(1);
+    game.ask_to_open("https://example.com/first");
+    h.redraw();
+    // A fast second tap of a player lands on a button the moment it is up.
+    for button in ["link-open", "link-dismiss"] {
+        h.click(button, 0);
+    }
+    assert_eq!(h.cx.opened_url(), None);
+    assert_eq!(
+        h.link(0).as_deref(),
+        Some("https://example.com/first"),
+        "the prompt stays"
+    );
+    h.wait(Duration::from_millis(499));
+    h.click("link-open", 0);
+    assert_eq!(h.cx.opened_url(), None, "not yet");
+
+    // Another link starts the wait again, so a click meant for the first
+    // one opens nothing of the second.
+    game.ask_to_open("https://example.com/second");
+    h.redraw();
+    h.wait(Duration::from_millis(499));
+    h.click("link-open", 0);
+    assert_eq!(h.cx.opened_url(), None);
+    assert_eq!(h.link(0).as_deref(), Some("https://example.com/second"));
+    h.wait(Duration::from_millis(1));
+    h.click("link-open", 0);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://example.com/second")
+    );
+    assert_eq!(h.link(0), None);
+
+    // Dismiss waits just as long.
+    game.ask_to_open("https://example.com/third");
+    h.redraw();
+    h.click("link-dismiss", 0);
+    assert!(h.link(0).is_some(), "too soon to dismiss");
+    h.wait(Duration::from_millis(500));
+    h.click("link-dismiss", 0);
+    assert_eq!(h.link(0), None);
     assert!(game.events().is_empty(), "{:?}", game.events());
 }
 
@@ -1329,6 +1395,7 @@ fn the_link_prompt_fits_a_small_screen(cx: &mut TestAppContext) {
     assert_eq!(h.cx.opened_url(), None, "the old spot opens nothing");
     assert_eq!(h.link(0).as_deref(), Some("https://example.com/other"));
     scroll(&mut h);
+    h.wait_for_the_prompt();
     h.click("link-open", 0);
     assert_eq!(
         h.cx.opened_url().as_deref(),
@@ -1350,8 +1417,14 @@ fn the_link_prompt_over_an_ended_game_keeps_clicks_off_its_buttons(cx: &mut Test
     *lock(&game.status) = InstanceStatus::Exited;
     h.redraw();
     assert!(h.bounds("link-prompt", 0).is_some(), "the question shows");
+    assert!(
+        h.read(|v| v.animating),
+        "frames come until the buttons take clicks, though no game runs"
+    );
     let starts = lock(&h.launcher.started).len();
 
+    h.wait_for_the_prompt();
+    assert!(!h.read(|v| v.animating), "the prompt takes clicks now");
     h.click("link-dismiss", 0);
     assert_eq!(h.read(|v| v.tiles.len()), 1, "Dismiss closed the game");
     assert_eq!(h.link(0), None);
@@ -1359,6 +1432,7 @@ fn the_link_prompt_over_an_ended_game_keeps_clicks_off_its_buttons(cx: &mut Test
 
     game.ask_to_open("https://example.com/again");
     h.redraw();
+    h.wait_for_the_prompt();
     h.click("link-open", 0);
     assert_eq!(
         h.cx.opened_url().as_deref(),

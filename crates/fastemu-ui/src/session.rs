@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use fastemu_core::{
     Frame, InputEvent, Instance, InstanceId, InstanceStatus, Key, KeyAction, LaunchError,
@@ -124,6 +125,17 @@ impl Instance for NotStarted {
     }
 }
 
+/// How long a link prompt ignores clicks after it appears or its link
+/// changes. A game can ask to open a page at the moment of a tap it just
+/// got, and a user who taps fast would answer a question they have not read.
+pub const LINK_ARMING: Duration = Duration::from_millis(500);
+
+/// A web page a game asked to open, and when the user was first shown it.
+struct AskedLink {
+    url: String,
+    asked_at: Instant,
+}
+
 /// A running game.
 pub struct Session {
     pub entry: EntryId,
@@ -149,7 +161,7 @@ pub struct Session {
     pointer_at: Option<(i32, i32)>,
     /// The web page the game asked to open, until the user opens or
     /// dismisses it.
-    link: Option<String>,
+    link: Option<AskedLink>,
 }
 
 impl Session {
@@ -180,9 +192,11 @@ impl Session {
     }
 
     /// Picks up the latest frame, status, log lines and the link the game
-    /// asks to open. Returns whether anything changed. Frames are compared
-    /// by serial, so an unchanged picture costs nothing.
-    pub fn poll(&mut self) -> bool {
+    /// asks to open. `now` is the time of the poll, which starts the wait
+    /// before the link's prompt takes clicks (see [`LINK_ARMING`]).
+    /// Returns whether anything changed. Frames are compared by serial, so
+    /// an unchanged picture costs nothing.
+    pub fn poll(&mut self, now: Instant) -> bool {
         let mut changed = false;
         if let Some(frame) = self.instance.frame()
             && self
@@ -210,8 +224,18 @@ impl Session {
             changed = true;
         }
         if let Some(link) = self.instance.take_link_request() {
+            // The runtime hands over only web links; this guards against an
+            // instance that would hand over more.
             if is_web_link(&link) {
-                self.link = Some(link);
+                // The same page asked for again keeps its wait running, so
+                // a game cannot hold the prompt shut by asking in a loop
+                // and cannot restart it on a user about to click.
+                if self.link.as_ref().is_none_or(|asked| asked.url != link) {
+                    self.link = Some(AskedLink {
+                        url: link,
+                        asked_at: now,
+                    });
+                }
                 changed = true;
             } else {
                 log::warn!("{} asked to open {link:?}, not a web link", self.title);
@@ -223,15 +247,30 @@ impl Session {
     /// The web page the game asked to open, until the user opens or
     /// dismisses it. A newer request replaces it.
     pub fn link(&self) -> Option<&str> {
-        self.link.as_deref()
+        self.link.as_ref().map(|asked| asked.url.as_str())
     }
 
-    /// Drops the request to open `link`, once the user has answered it. A
-    /// newer request the game made meanwhile stays.
-    pub fn dismiss_link(&mut self, link: &str) {
-        if self.link.as_deref() == Some(link) {
+    /// Whether the prompt for the game's link takes clicks at `now`: it
+    /// has been up for [`LINK_ARMING`].
+    pub fn link_armed(&self, now: Instant) -> bool {
+        self.link.as_ref().is_some_and(|asked| armed(asked, now))
+    }
+
+    /// Answers the prompt for `link`, which the user chose to open or to
+    /// dismiss: drops the request and returns true. Nothing happens, and
+    /// the answer is false, when the prompt is not armed yet (a click that
+    /// came too fast to have read it), or when the game asked for another
+    /// page since the prompt showed `link`: its prompt follows, and its
+    /// own wait.
+    pub fn answer_link(&mut self, link: &str, now: Instant) -> bool {
+        let answer = self
+            .link
+            .as_ref()
+            .is_some_and(|asked| asked.url == link && armed(asked, now));
+        if answer {
             self.link = None;
         }
+        answer
     }
 
     /// Swaps in a fresh instance after a restart, keeping the settings and
@@ -371,6 +410,11 @@ impl Session {
     }
 }
 
+/// Whether the prompt for `asked` takes clicks at `now`.
+fn armed(asked: &AskedLink, now: Instant) -> bool {
+    now.saturating_duration_since(asked.asked_at) >= LINK_ARMING
+}
+
 /// A word or two for a title bar.
 pub fn status_label(status: &InstanceStatus) -> String {
     match status {
@@ -494,25 +538,55 @@ mod tests {
         let request = LaunchRequest::new("snake.jar", "unused");
         let instance = MockLauncher.launch(request.clone()).expect("mock");
         let mut session = Session::new(EntryId(1), 0, request.clone(), instance);
-        session.poll();
+        let (asked, armed) = (Instant::now(), Instant::now() + LINK_ARMING);
+        session.poll(asked);
         assert_eq!(session.link(), None);
         session.press(Key::Pound);
-        assert!(session.poll());
+        assert!(session.poll(asked));
         assert_eq!(session.link(), Some(MOCK_LINK));
-        session.poll();
+        session.poll(armed);
         assert_eq!(session.link(), Some(MOCK_LINK), "it waits for an answer");
-        session.dismiss_link("https://other.example/");
+        assert!(!session.answer_link("https://other.example/", armed));
         assert_eq!(session.link(), Some(MOCK_LINK), "only the shown link");
-        session.dismiss_link(MOCK_LINK);
+        assert!(session.answer_link(MOCK_LINK, armed));
         assert_eq!(session.link(), None);
+        assert!(!session.answer_link(MOCK_LINK, armed), "answered once");
 
         session.press(Key::Pound);
-        session.poll();
+        session.poll(armed);
         assert!(session.link().is_some());
         let again = MockLauncher.launch(request).expect("mock");
         session.instance.stop();
         session.replace_instance(again);
         assert_eq!(session.link(), None, "a restart drops it");
+        session.instance.stop();
+    }
+
+    #[test]
+    fn a_link_prompt_takes_no_answer_in_its_first_half_second() {
+        let request = LaunchRequest::new("snake.jar", "unused");
+        let instance = MockLauncher.launch(request.clone()).expect("mock");
+        let mut session = Session::new(EntryId(1), 0, request, instance);
+        let asked = Instant::now();
+        let almost = asked + LINK_ARMING - Duration::from_millis(1);
+        assert!(!session.link_armed(asked), "no link, no prompt");
+        session.press(Key::Pound);
+        session.poll(asked);
+        for now in [asked, almost] {
+            assert!(!session.link_armed(now));
+            assert!(!session.answer_link(MOCK_LINK, now), "too soon: {now:?}");
+            assert_eq!(session.link(), Some(MOCK_LINK), "the prompt stays");
+        }
+        assert!(session.link_armed(asked + LINK_ARMING));
+        // The game asking for the same page again does not restart the wait.
+        session.press(Key::Pound);
+        session.poll(almost);
+        assert!(session.link_armed(asked + LINK_ARMING));
+        assert!(session.answer_link(MOCK_LINK, asked + LINK_ARMING));
+        // A clock that reads earlier than the poll is never armed.
+        session.press(Key::Pound);
+        session.poll(asked + LINK_ARMING);
+        assert!(!session.link_armed(asked));
         session.instance.stop();
     }
 
@@ -545,14 +619,14 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         while session.frame.is_none() {
             assert!(Instant::now() < deadline, "no frame within 5 s");
-            session.poll();
+            session.poll(Instant::now());
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(session.screen_size(), (240, 320));
         assert!(!session.log.is_empty());
         while session.status != InstanceStatus::Running {
             assert!(Instant::now() < deadline, "not running within 5 s");
-            session.poll();
+            session.poll(Instant::now());
         }
         session.toggle_pause();
         assert_eq!(session.status, InstanceStatus::Paused);
@@ -561,7 +635,7 @@ mod tests {
         session.instance.stop();
         while session.status != InstanceStatus::Exited {
             assert!(Instant::now() < deadline, "did not stop within 5 s");
-            session.poll();
+            session.poll(Instant::now());
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(session.status_label(), "Exited");

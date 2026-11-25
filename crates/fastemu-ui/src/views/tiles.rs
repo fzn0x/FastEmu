@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 use fastemu_core::{Instance, InstanceStatus, LaunchError, LaunchRequest, Launcher};
 use gpui::{
@@ -27,6 +27,8 @@ use crate::session::{NotStarted, Session, free_slot, phone_pixel, status_label};
 use crate::settings::{LayoutMode, profile_by_id};
 use crate::theme::Theme;
 
+/// How faint the link prompt's buttons look while they ignore clicks.
+const DIMMED: f32 = 0.5;
 /// The toolbar above the workspace.
 const TOOLBAR_HEIGHT: f32 = 44.0;
 /// Space around the tiles.
@@ -326,17 +328,17 @@ impl FastEmuView {
         cx.notify();
     }
 
-    /// Reads every game's latest frame, status and log lines. The open log
-    /// follows its game's new lines while it shows the last line; scrolled
-    /// up to read older ones, it stays where it is.
-    pub(super) fn poll_tiles(&mut self) {
+    /// Reads every game's latest frame, status and log lines, at `now`. The
+    /// open log follows its game's new lines while it shows the last line;
+    /// scrolled up to read older ones, it stays where it is.
+    pub(super) fn poll_tiles(&mut self, now: Instant) {
         let focused = self.focused;
         let log_open = self.log_open;
         let following = self.log_scroll.is_scrolled_to_end().unwrap_or(true);
         let mut scroll_to = None;
         for tile in &mut self.tiles {
             let before = tile.session.log.len() + tile.session.log.dropped() as usize;
-            tile.session.poll();
+            tile.session.poll(now);
             let grew = tile.session.log.len() + tile.session.log.dropped() as usize != before;
             if log_open && Some(tile.id) == focused {
                 tile.session.log.mark_seen();
@@ -353,18 +355,33 @@ impl FastEmuView {
     }
 
     /// Opens `link`, which `id`'s prompt showed, in the system's browser,
-    /// and answers the prompt. Only the user's click gets here.
+    /// and answers the prompt. Only the user's click gets here, and only
+    /// one that comes after the prompt's wait (see `answer_link`).
     fn open_link(&mut self, id: TileId, link: &str, cx: &mut Context<'_, Self>) {
-        cx.open_url(link);
-        self.dismiss_link(id, link, cx);
+        if self.answer_link(id, link, cx) {
+            cx.open_url(link);
+        }
     }
 
-    /// Answers `id`'s prompt for `link` without opening it.
+    /// Answers `id`'s prompt for `link` without opening it, with the same
+    /// wait.
     fn dismiss_link(&mut self, id: TileId, link: &str, cx: &mut Context<'_, Self>) {
-        if let Some(tile) = self.tile_mut(id) {
-            tile.session.dismiss_link(link);
+        self.answer_link(id, link, cx);
+    }
+
+    /// Takes a click on a button of `id`'s prompt for `link`. A click in the
+    /// first half second of the prompt, or on a prompt whose link changed
+    /// since, does nothing: a user who taps fast has not read it. Returns
+    /// whether the prompt was answered.
+    fn answer_link(&mut self, id: TileId, link: &str, cx: &mut Context<'_, Self>) -> bool {
+        let now = cx.background_executor().now();
+        let answered = self
+            .tile_mut(id)
+            .is_some_and(|tile| tile.session.answer_link(link, now));
+        if answered {
+            cx.notify();
         }
-        cx.notify();
+        answered
     }
 
     fn on_screen_down(&mut self, id: TileId, event: &MouseDownEvent, cx: &mut Context<'_, Self>) {
@@ -1020,11 +1037,16 @@ impl FastEmuView {
     /// squeezed out and the buttons, below it, are always in reach. A new
     /// link gets a new scroll position, at the top, so **Open** is not left
     /// under the pointer for a link the user has not read.
+    ///
+    /// The buttons ignore clicks for half a second after the question
+    /// appears or its link changes (see `LINK_ARMING`), and show dimmed
+    /// until then, so a fast tap meant for the game answers nothing.
     fn render_link_prompt(tile: &Tile, cx: &mut Context<'_, Self>) -> Option<Div> {
         if !tile.shows_link() {
             return None;
         }
         let link = tile.session.link()?.to_owned();
+        let armed = tile.session.link_armed(cx.background_executor().now());
         let theme = Theme::get(cx).clone();
         let id = tile.id;
         let (to_open, to_dismiss) = (link.clone(), link.clone());
@@ -1073,6 +1095,7 @@ impl FastEmuView {
                             .min_w_0()
                             .overflow_hidden()
                             .debug_selector(|| format!("link-dismiss-{}", id.0))
+                            .when(!armed, |button| button.opacity(DIMMED))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.dismiss_link(id, &to_dismiss, cx);
                             })),
@@ -1083,6 +1106,7 @@ impl FastEmuView {
                             .min_w_0()
                             .overflow_hidden()
                             .debug_selector(|| format!("link-open-{}", id.0))
+                            .when(!armed, |button| button.opacity(DIMMED))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_link(id, &to_open, cx);
                             })),
