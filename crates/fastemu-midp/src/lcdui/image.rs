@@ -493,3 +493,136 @@ pub fn class() -> NativeClass {
         })
         .method("getRGB", "([IIIIIII)V", get_rgb)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
+    use std::sync::{Arc, mpsc};
+    use std::time::{Duration, Instant};
+
+    use fastemu_jvm::{JResult, MemorySource, Throw, Vm, VmConfig};
+
+    use super::decode_in_turn;
+
+    /// How long a test waits for something that comes at once when the
+    /// turns work. It only matters when they deadlock: the test then fails
+    /// instead of hanging.
+    const PATIENCE: Duration = Duration::from_secs(30);
+
+    fn vm() -> Vm {
+        let config = VmConfig {
+            log: Arc::new(|_| {}),
+            ..VmConfig::default()
+        };
+        Vm::new(config, Arc::new(MemorySource::new()), Vec::new())
+    }
+
+    /// Spins until `done`, or until [`PATIENCE`] has passed.
+    fn spin_until(done: impl Fn() -> bool) {
+        let deadline = Instant::now() + PATIENCE;
+        while !done() && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+    }
+
+    /// Runs `body` on a thread attached to `vm` as `name` and returns where
+    /// its result will arrive.
+    fn attached(
+        vm: &Vm,
+        name: &str,
+        body: impl FnOnce(&mut fastemu_jvm::Ctx<'_>) -> JResult<()> + Send + 'static,
+    ) -> mpsc::Receiver<JResult<()>> {
+        let (vm, name) = (vm.clone(), name.to_owned());
+        let (done, result) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(vm.attach(&name, body));
+        });
+        result
+    }
+
+    /// The result `thread` sent, or a failure when none came in time.
+    fn joined(thread: &mpsc::Receiver<JResult<()>>) -> JResult<()> {
+        thread
+            .recv_timeout(PATIENCE)
+            .expect("the decode turn deadlocked")
+    }
+
+    #[test]
+    fn the_threads_of_a_game_decode_one_image_at_a_time() {
+        const THREADS: usize = 4;
+        let vm = vm();
+        let asked = Arc::new(AtomicUsize::new(0));
+        // How many are inside now, and the most that were at once.
+        let inside = Arc::new((AtomicUsize::new(0), AtomicUsize::new(0)));
+        let threads: Vec<_> = (0..THREADS)
+            .map(|i| {
+                let (asked, inside) = (Arc::clone(&asked), Arc::clone(&inside));
+                attached(&vm, &format!("decoder {i}"), move |ctx| {
+                    asked.fetch_add(1, SeqCst);
+                    decode_in_turn(ctx, |ctx| {
+                        let now = inside.0.fetch_add(1, SeqCst) + 1;
+                        inside.1.fetch_max(now, SeqCst);
+                        // The first decode lasts until every thread has
+                        // asked for its turn, with the VM lock released as
+                        // a decode runs: without turns they would all be
+                        // inside now.
+                        ctx.without_lock(|| spin_until(|| asked.load(SeqCst) == THREADS));
+                        inside.0.fetch_sub(1, SeqCst);
+                        Ok(())
+                    })
+                })
+            })
+            .collect();
+        for thread in &threads {
+            assert!(joined(thread).is_ok());
+        }
+        assert_eq!(asked.load(SeqCst), THREADS);
+        assert_eq!(inside.1.load(SeqCst), 1, "two decodes ran at once");
+    }
+
+    #[test]
+    fn a_thread_that_waits_for_its_turn_while_the_game_stops_decodes_nothing() {
+        let vm = vm();
+        let first_inside = Arc::new(AtomicBool::new(false));
+        let second_asked = Arc::new(AtomicBool::new(false));
+        let second_ran = Arc::new(AtomicBool::new(false));
+        let first = {
+            let (stopping, first_inside, second_asked) = (
+                vm.clone(),
+                Arc::clone(&first_inside),
+                Arc::clone(&second_asked),
+            );
+            attached(&vm, "first", move |ctx| {
+                decode_in_turn(ctx, |ctx| {
+                    first_inside.store(true, SeqCst);
+                    // Holds the turn until the second thread asked for it
+                    // and the game is stopping.
+                    ctx.without_lock(|| {
+                        spin_until(|| second_asked.load(SeqCst) && stopping.is_stopping());
+                    });
+                    Ok(())
+                })
+            })
+        };
+        spin_until(|| first_inside.load(SeqCst));
+        assert!(first_inside.load(SeqCst), "the first thread never decoded");
+        let second = {
+            let (second_asked, second_ran) = (Arc::clone(&second_asked), Arc::clone(&second_ran));
+            attached(&vm, "second", move |ctx| {
+                second_asked.store(true, SeqCst);
+                decode_in_turn(ctx, |_| {
+                    second_ran.store(true, SeqCst);
+                    Ok(())
+                })
+            })
+        };
+        spin_until(|| second_asked.load(SeqCst));
+        vm.stop();
+        assert!(joined(&first).is_ok());
+        assert!(matches!(joined(&second), Err(Throw::Stop)));
+        assert!(
+            !second_ran.load(SeqCst),
+            "a decode ran after the game stopped"
+        );
+    }
+}
