@@ -1,6 +1,7 @@
 //! The workspace: starting, restarting and closing games, and drawing
 //! them as tiles in the grid or focus layout.
 
+use std::panic::{self, AssertUnwindSafe};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
@@ -11,7 +12,7 @@ use gpui::{
     Point, ScrollStrategy, Stateful, Styled, Window, canvas, div, prelude::*, px,
 };
 
-use super::library::SIDEBAR_WIDTH;
+use super::library::{SIDEBAR_WIDTH, UNREADABLE};
 use super::panels::LOG_HEIGHT;
 use super::touch::{self, Finger};
 use super::widgets::{icon, icon_button, primary_button, text_button, toggle_icon_button};
@@ -40,13 +41,20 @@ const TILE_BORDER: f32 = 2.0;
 const NARROW_WIDTH: f32 = 2.5 * SIDEBAR_WIDTH;
 
 /// Starts an instance off the main thread: makes its data folder and asks
-/// the launcher.
+/// the launcher. The launcher reads the suite again, and the file may have
+/// changed since the library read it, so a reader that panics on it must
+/// not take the app down: the game is reported as not started, as one the
+/// library could not read is (see `inspect`).
 fn start(
     launcher: &dyn Launcher,
     request: LaunchRequest,
 ) -> Result<Arc<dyn Instance>, LaunchError> {
     std::fs::create_dir_all(&request.data_dir)?;
-    launcher.launch(request)
+    let suite = request.suite.clone();
+    panic::catch_unwind(AssertUnwindSafe(|| launcher.launch(request))).unwrap_or_else(|_| {
+        log::error!("starting {} panicked; it is not started", suite.display());
+        Err(LaunchError::InvalidSuite(UNREADABLE.to_owned()))
+    })
 }
 
 /// Stops an instance that finished starting after its window or view

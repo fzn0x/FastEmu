@@ -2,6 +2,7 @@
 //! launcher whose instances record what they receive.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use fastemu_core::{
@@ -103,6 +104,9 @@ impl Instance for FakeInstance {
 #[derive(Default)]
 struct FakeLauncher {
     started: Mutex<Vec<(LaunchRequest, Arc<FakeInstance>)>>,
+    /// Makes `launch` panic, as a reader would on a file that changed
+    /// after the library read it.
+    launch_panics: AtomicBool,
 }
 
 impl FakeLauncher {
@@ -138,6 +142,10 @@ impl Launcher for FakeLauncher {
     }
 
     fn launch(&self, request: LaunchRequest) -> Result<Arc<dyn Instance>, LaunchError> {
+        assert!(
+            !self.launch_panics.load(Ordering::SeqCst),
+            "the launcher panicked"
+        );
         let info = self.inspect(&request.suite)?;
         if info.name.starts_with("FAILS") {
             return Err(LaunchError::Unsupported("JSR-184 3D graphics".into()));
@@ -965,6 +973,49 @@ fn a_game_that_cannot_start_shows_why_in_its_tile(cx: &mut TestAppContext) {
     h.cx.run_until_parked();
     assert_eq!(h.read(|v| v.tiles.len()), 1);
     assert!(h.read(|v| matches!(v.tiles[0].session.status, InstanceStatus::Crashed { .. })));
+}
+
+#[gpui::test]
+fn a_launcher_that_panics_leaves_a_game_that_did_not_start(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    assert_eq!(h.launcher.count(), 1);
+
+    // The file changed after the library read it, and the reader panics
+    // on it at the restart: the tile says so, and the app stays up.
+    h.launcher.launch_panics.store(true, Ordering::SeqCst);
+    let restart = |h: &mut Harness<'_>| {
+        h.view.update_in(h.cx, |v, window, cx| {
+            let id = v.tiles[0].id;
+            v.restart_tile(id, window, cx);
+        });
+        h.cx.run_until_parked();
+    };
+    restart(&mut h);
+    let status = h.read(|v| v.tiles[0].session.status.clone());
+    assert!(
+        matches!(&status, InstanceStatus::Crashed { message } if message.contains("could not read")),
+        "{status:?}"
+    );
+
+    // So does a start from the library.
+    h.launch_first();
+    assert_eq!(h.read(|v| v.tiles.len()), 2, "the failure gets a tile");
+    let status = h.read(|v| v.tiles[1].session.status.clone());
+    assert!(
+        matches!(status, InstanceStatus::Crashed { .. }),
+        "{status:?}"
+    );
+
+    // Once the file reads again, the game starts.
+    h.launcher.launch_panics.store(false, Ordering::SeqCst);
+    restart(&mut h);
+    assert_eq!(h.launcher.count(), 2);
+    assert_eq!(
+        h.read(|v| v.tiles[0].session.status.clone()),
+        InstanceStatus::Running
+    );
 }
 
 #[gpui::test]

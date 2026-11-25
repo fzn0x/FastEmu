@@ -33,7 +33,7 @@ struct Inspected {
 }
 
 /// What the library shows for a file whose reading panicked.
-const UNREADABLE: &str = "FastEmu could not read this file";
+pub(super) const UNREADABLE: &str = "FastEmu could not read this file";
 
 /// Reads the suite at `path` and decodes its icon. A suite is a game's
 /// file, so the readers must not panic on it; but one that does must not
