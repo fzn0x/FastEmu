@@ -15,6 +15,12 @@ pub(super) const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A,
 /// A decoded image: width, height and `0xAARRGGBB` pixels.
 type Decoded = (u32, u32, Vec<u32>);
 
+/// The most filtered row bytes the repair of a damaged file builds: 64
+/// MiB, an 8-bit RGBA image of 16 million pixels, far above any phone's
+/// screen. The repair holds the rows twice, so a file may cost twice this
+/// on top of the image it makes. Valid files do not go through it.
+const MAX_RAW_BYTES: usize = 64 << 20;
+
 pub(super) fn decode(data: &[u8]) -> Result<Decoded> {
     let chunks = Chunks::read(data)?;
     match decode_stream(&chunks.assemble(&chunks.image)?) {
@@ -60,6 +66,9 @@ fn refill(chunks: &Chunks<'_>) -> Option<Result<Decoded>> {
         return Some(Err(e));
     }
     let expected = layout.raw_len();
+    if expected > MAX_RAW_BYTES {
+        return Some(Err(GfxError::OutOfMemory));
+    }
     let mut raw =
         match miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&chunks.image, expected) {
             Ok(raw) => raw,
@@ -69,11 +78,16 @@ fn refill(chunks: &Chunks<'_>) -> Option<Result<Decoded>> {
         return None;
     }
     raw.resize(expected, 0);
-    let stream = match chunks.assemble(&zlib_stored(&raw)) {
-        Ok(stream) => stream,
-        Err(e) => return Some(Err(e)),
-    };
-    Some(decode_stream(&stream))
+    // The rows go into a stored stream and that into a file, each copy
+    // freed before the next is made and the last before decoding.
+    let stored = zlib_stored(&raw);
+    drop(raw);
+    let stream = chunks.assemble(&stored);
+    drop(stored);
+    match stream {
+        Ok(stream) => Some(decode_stream(&stream)),
+        Err(e) => Some(Err(e)),
+    }
 }
 
 /// The chunks that decide the picture.
@@ -622,6 +636,18 @@ pub(crate) mod tests {
         let file = crafted(ihdr(16384, 2048, 255, 6, 0), &[], &[0, 1, 2, 3]);
         assert_eq!(file.len(), 72);
         assert!(matches!(Surface::decode(&file), Err(GfxError::Decode(_))));
+    }
+
+    #[test]
+    fn a_repair_larger_than_its_cap_is_refused() {
+        // 16-bit RGBA at 4096 x 4096 promises 128 MiB of rows from a
+        // 70 byte file. A valid image of that size still decodes; only
+        // the repair of a damaged one needs the rows in memory.
+        let file = crafted(ihdr(4096, 4096, 16, 6, 0), &[], &[0, 1, 2, 3]);
+        assert!(matches!(Surface::decode(&file), Err(GfxError::OutOfMemory)));
+        // Just under the cap is repaired: 4 x 8 pixels of 16-bit RGBA.
+        let file = crafted(ihdr(4, 8, 16, 6, 0), &[], &[0, 1, 2, 3]);
+        assert_eq!(Surface::decode(&file).unwrap().width(), 4);
     }
 
     #[test]
