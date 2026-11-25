@@ -13,12 +13,14 @@
 
 use std::collections::HashSet;
 use std::fmt;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use fastemu_core::{LogLevel, LogLine};
-use fastemu_jvm::{ClassSource, VmLimits};
+use fastemu_jvm::{ClassSource, ResourceRead, VmLimits};
 
-use super::zip::{ZipArchive, ZipError};
+use super::zip::{MAX_ENTRY_BYTES, ZipArchive, ZipError};
 
 /// Receives the source's warnings: resources a game asked for that the
 /// JAR does not have.
@@ -46,6 +48,34 @@ pub struct JarSource {
     log: Option<SourceLog>,
     limits: VmLimits,
     missed: Mutex<Missed>,
+    /// Held while a resource inflates, so that the threads of one game, up
+    /// to the machine's limit, do not each hold a buffer of the size the
+    /// caller allows (up to the heap's) at the same time.
+    inflating: Mutex<()>,
+    /// What the tests see of `inflating`: how many resources inflate now,
+    /// and the most that did at once.
+    #[cfg(test)]
+    busy: (AtomicUsize, AtomicUsize),
+}
+
+/// Counts a resource as inflating while it lives.
+#[cfg(test)]
+struct Busy<'a>(&'a AtomicUsize);
+
+#[cfg(test)]
+impl<'a> Busy<'a> {
+    fn enter(busy: &'a (AtomicUsize, AtomicUsize)) -> Self {
+        let now = busy.0.fetch_add(1, SeqCst) + 1;
+        busy.1.fetch_max(now, SeqCst);
+        Self(&busy.0)
+    }
+}
+
+#[cfg(test)]
+impl Drop for Busy<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, SeqCst);
+    }
 }
 
 impl fmt::Debug for JarSource {
@@ -72,17 +102,15 @@ impl JarSource {
             log,
             limits,
             missed: Mutex::new(Missed::default()),
+            inflating: Mutex::new(()),
+            #[cfg(test)]
+            busy: Default::default(),
         }
     }
 
     /// The archive this source reads.
     pub fn archive(&self) -> &Arc<ZipArchive> {
         &self.archive
-    }
-
-    fn read(&self, name: &str) -> Option<Vec<u8>> {
-        let entry = self.archive.find_str(name)?;
-        self.archive.read(entry).ok()
     }
 
     /// Logs a resource the game asked for and the JAR lacks, once for each
@@ -144,22 +172,46 @@ impl ClassSource for JarSource {
     }
 
     fn resource(&self, path: &str) -> Option<Vec<u8>> {
+        match self.resource_within(path, MAX_ENTRY_BYTES) {
+            ResourceRead::Found(bytes) => Some(bytes),
+            ResourceRead::Missing | ResourceRead::TooLarge => None,
+        }
+    }
+
+    fn resource_within(&self, path: &str, max: usize) -> ResourceRead {
         let path = normalize(path);
         if path.is_empty() {
-            return None;
+            return ResourceRead::Missing;
         }
-        let mut candidate = path.as_str();
-        loop {
-            if let Some(bytes) = self.read(candidate) {
-                return Some(bytes);
+        let found = {
+            // One resource inflates at a time, so the buffers of the
+            // threads of a game never add up. Nothing here waits on
+            // anything else, so no lock can be held the other way round.
+            let _inflating = self
+                .inflating
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            #[cfg(test)]
+            let _busy = Busy::enter(&self.busy);
+            let mut candidate = path.as_str();
+            loop {
+                if let Some(entry) = self.archive.find_str(candidate) {
+                    match self.archive.read_limited(entry, max) {
+                        Ok(bytes) => break Some(ResourceRead::Found(bytes)),
+                        Err(ZipError::TooLarge(_)) => break Some(ResourceRead::TooLarge),
+                        Err(_) => {}
+                    }
+                }
+                match candidate.split_once('/') {
+                    Some((_, rest)) if !rest.is_empty() => candidate = rest,
+                    _ => break None,
+                }
             }
-            match candidate.split_once('/') {
-                Some((_, rest)) if !rest.is_empty() => candidate = rest,
-                _ => break,
-            }
-        }
-        self.report_miss(&path);
-        None
+        };
+        found.unwrap_or_else(|| {
+            self.report_miss(&path);
+            ResourceRead::Missing
+        })
     }
 }
 
@@ -249,6 +301,59 @@ mod tests {
             *lines.lock().unwrap(),
             ["a/Over.class is more than 4 MiB, so it is not loaded"]
         );
+    }
+
+    #[test]
+    fn a_resource_is_read_up_to_the_limit_it_is_asked_for() {
+        let zeros = vec![0u8; 1 << 20];
+        let (src, lines) = source(&[
+            TestEntry::deflated("data/z.bin", &zeros),
+            TestEntry::stored("data/s.bin", b"small"),
+        ]);
+        super::super::zip::testing::take_inflated();
+        assert_eq!(
+            src.resource_within("/data/z.bin", 1000),
+            ResourceRead::TooLarge
+        );
+        assert_eq!(super::super::zip::testing::take_inflated(), 1000);
+        assert_eq!(
+            src.resource_within("data/z.bin", 1 << 20),
+            ResourceRead::Found(zeros)
+        );
+        assert_eq!(
+            src.resource_within("data/s.bin", 5),
+            ResourceRead::Found(b"small".to_vec())
+        );
+        assert_eq!(src.resource_within("data/s.bin", 4), ResourceRead::TooLarge);
+        assert_eq!(
+            src.resource_within("data/none", 1 << 20),
+            ResourceRead::Missing
+        );
+        // Only the missing name is a miss.
+        assert_eq!(*lines.lock().unwrap(), ["resource not found: /data/none"]);
+    }
+
+    #[test]
+    fn the_threads_of_a_game_read_one_resource_at_a_time() {
+        let zeros = vec![0u8; 1 << 20];
+        let (src, _) = source(&[TestEntry::deflated("z.bin", &zeros)]);
+        let src = Arc::new(src);
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let src = Arc::clone(&src);
+                std::thread::spawn(move || {
+                    for _ in 0..3 {
+                        let read = src.resource_within("z.bin", 1 << 20);
+                        assert!(matches!(read, ResourceRead::Found(_)));
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(src.busy.1.load(SeqCst), 1, "two resources inflated at once");
+        assert_eq!(src.busy.0.load(SeqCst), 0);
     }
 
     #[test]

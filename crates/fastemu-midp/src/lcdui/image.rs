@@ -13,7 +13,6 @@ use parking_lot::Mutex;
 
 use super::graphics::new_graphics;
 use super::throw_gfx;
-use crate::env::env;
 use crate::suite::source::normalize;
 
 const CLASS: &str = "javax/microedition/lcdui/Image";
@@ -133,9 +132,7 @@ fn create_from_resource(ctx: &mut Ctx<'_>, name: Value) -> JResult<Value> {
     let name = ctx.non_null(name)?;
     let name = ctx.string(name)?;
     let path = normalize(&name);
-    let source = Arc::clone(&env(ctx).source);
-    let bytes = ctx.without_lock(|| source.resource(&path));
-    let Some(bytes) = bytes else {
+    let Some(bytes) = ctx.read_resource(&path)? else {
         return ctx.throw(
             "java/io/IOException",
             &format!("resource not found: {name}"),

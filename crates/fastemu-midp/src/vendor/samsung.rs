@@ -11,14 +11,11 @@
 //! and `SMS.send` throws the `IllegalStateException` the javadoc names
 //! for phones without messaging, after logging the attempt.
 
-use std::sync::Arc;
-
 use fastemu_audio::Player;
 use fastemu_core::LogLevel;
 use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Payload, Tracer, Value};
 
 use super::{clip, device};
-use crate::env::env;
 use crate::suite::source::normalize;
 
 const AUDIO_CLIP: &str = "com/samsung/util/AudioClip";
@@ -87,8 +84,7 @@ fn from_resource(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let name = ctx.non_null(a[2])?;
     let name = ctx.string(name)?;
     let path = normalize(&name);
-    let source = Arc::clone(&env(ctx).source);
-    let Some(bytes) = ctx.without_lock(|| source.resource(&path)) else {
+    let Some(bytes) = ctx.read_resource(&path)? else {
         return ctx.throw(
             "java/io/IOException",
             &format!("resource not found: {name}"),

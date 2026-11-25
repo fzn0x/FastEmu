@@ -14,15 +14,12 @@
 //!
 //! A mask given as a MIDP image is transparent where it is white.
 
-use std::sync::Arc;
-
 use fastemu_gfx::{GfxError, MAX_PIXELS, Surface, SurfaceKind, Transform};
 use fastemu_jvm::{
     Ctx, JResult, NativeClass, ObjRef, Payload, Throw, Tracer, Value, classfile::access,
 };
 
 use super::NATIVE_MEM;
-use crate::env::env;
 use crate::lcdui::image::{SharedSurface, new_image, reserve_decoded, reserve_pixels, surface_of};
 use crate::lcdui::throw_gfx;
 use crate::suite::source::normalize;
@@ -211,9 +208,7 @@ fn load(ctx: &mut Ctx<'_>, name: Value) -> JResult<ObjRef> {
     let name = ctx.non_null(name)?;
     let name = ctx.string(name)?;
     let path = normalize(&name);
-    let source = Arc::clone(&env(ctx).source);
-    let bytes = ctx.without_lock(|| source.resource(&path));
-    let Some(bytes) = bytes else {
+    let Some(bytes) = ctx.read_resource(&path)? else {
         return Err(io_error(ctx, &format!("resource not found: {name}")));
     };
     reserve_decoded(ctx, &bytes)?;
