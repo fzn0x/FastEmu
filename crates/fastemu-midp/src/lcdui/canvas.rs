@@ -17,7 +17,7 @@ use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Value, classfile::access};
 use parking_lot::Mutex;
 
 use super::display::{self, is_shown};
-use super::displayable::{self, DisplayableData, data, data_mut};
+use super::displayable::{self, DisplayableData, Kind, data, data_mut};
 use super::event::{acquire, release};
 use super::frame;
 use super::graphics::{GraphicsData, new_graphics};
@@ -35,7 +35,13 @@ const SERVICE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// The back buffer of a canvas (or the content of a screen), made on first
 /// use at the size of the whole screen, so a switch to full-screen mode
-/// keeps every pixel.
+/// keeps every pixel. The heap counts it with the displayable, 4 bytes a
+/// pixel, from the moment it is made.
+///
+/// It is made when the displayable is painted, on the event thread, which
+/// has no caller to give an `OutOfMemoryError` to, so it is counted and not
+/// refused: a game that shows canvas after canvas and keeps them takes the
+/// heap's room, and its next allocation is the one that fails.
 pub fn buffer(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<SharedSurface> {
     if let Some(buffer) = &data(ctx, obj)?.buffer {
         return Ok(Arc::clone(buffer));
@@ -45,9 +51,29 @@ pub fn buffer(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<SharedSurface> {
         (st.screen_width as u32, st.screen_height as u32)
     };
     let surface = Surface::screen(w, h).map_err(|e| super::throw_gfx(ctx, &e))?;
+    let bytes = surface.width() as usize * surface.height() as usize * 4;
     let buffer = Arc::new(Mutex::new(surface));
-    data_mut(ctx, obj)?.buffer = Some(Arc::clone(&buffer));
+    let d = data_mut(ctx, obj)?;
+    d.buffer = Some(Arc::clone(&buffer));
+    d.buffer_bytes = bytes;
+    ctx.recount(obj);
     Ok(buffer)
+}
+
+/// Gives back the buffer of a screen that is no longer shown. A screen
+/// paints all of its content every time, so it makes a new buffer when it is
+/// shown again, and a game that makes many screens and keeps them holds one
+/// buffer at a time, not one for each. A canvas keeps its buffer and its
+/// `Graphics`, which a game may hold on to.
+pub(crate) fn release_screen_buffer(ctx: &mut Ctx<'_>, obj: ObjRef) -> JResult<()> {
+    let d = data_mut(ctx, obj)?;
+    if d.kind() != Kind::Screen || d.buffer.is_none() {
+        return Ok(());
+    }
+    d.buffer = None;
+    d.buffer_bytes = 0;
+    ctx.recount(obj);
+    Ok(())
 }
 
 /// The `Graphics` a canvas's `paint` gets, made once and reset before

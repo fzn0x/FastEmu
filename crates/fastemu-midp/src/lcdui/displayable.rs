@@ -41,6 +41,10 @@ pub struct DisplayableData {
     /// The pixels of the displayable: a canvas's back buffer, kept between
     /// paints, or a screen's content. Made on first paint, screen-sized.
     pub(crate) buffer: Option<SharedSurface>,
+    /// The bytes of `buffer`, which the heap counts with the object: 4 for
+    /// each pixel. A plain number, so a collection that measures the
+    /// payload never waits for the buffer's lock.
+    pub(crate) buffer_bytes: usize,
     /// The `Graphics` passed to `paint`, reset before each paint.
     pub(crate) graphics: Option<ObjRef>,
     suppress_game_keys: bool,
@@ -64,7 +68,7 @@ impl Payload for DisplayableData {
     }
 
     fn heap_bytes(&self) -> usize {
-        self.state.as_ref().map_or(0, |s| s.heap_bytes())
+        self.buffer_bytes + self.state.as_ref().map_or(0, |s| s.heap_bytes())
     }
 }
 
@@ -80,6 +84,7 @@ impl DisplayableData {
             full_screen: false,
             last_size: None,
             buffer: None,
+            buffer_bytes: 0,
             graphics: None,
             suppress_game_keys: false,
             handler: None,
