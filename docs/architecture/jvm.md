@@ -386,7 +386,12 @@ hundred in all. A call that would pass the limit throws
 `StackOverflowError`, which a game can catch, whether the caller is
 bytecode or a native that calls into Java. A frame that declares 65535
 locals and 65535 stack slots needs 131072 slots, the whole limit, so it
-fits only when nothing is below it on the thread's stack.
+fits only when nothing is below it on the thread's stack. The stack
+doubles as it grows, cut at the limit, and reserves its buffer at exactly
+that length. A buffer left to double on its own reached 4 MiB when a
+frame took all slots but one and the next call took the last. While the
+stack grows, it holds the old buffer and the new one for as long as the
+copy takes.
 
 A game chooses the text of its output, its log lines and the names it asks
 for, and none of that is on the Java heap, so these three bound what the
@@ -806,6 +811,18 @@ the game gets `OutOfMemoryError` with the message `class memory limit
 reached`, which it can catch. The classes that loaded stay, and a smaller
 class can still load.
 
+A class is charged in two parts. What it holds on its own is charged as
+soon as it is parsed: its name, pool, fields, methods and code, the
+interfaces it names, and a method table slot for each method a subclass
+could override. What it copies from the classes above it is charged once
+they have loaded: their instance slots, method tables and lists of
+classes. A class loaded before its superclass and interfaces waits for
+them, parsed, and one load nests up to 256 such classes. Charged only
+once linked, 100 chained classes with 2 MiB of code each held 203 MiB
+under the 128 MiB limit. Charged as they are parsed, they hold 10 MiB. A
+class that does not load gives its charge back, so a refused chain leaves
+its room to the classes that fit.
+
 The classes a game can make count: those read from class files, and the
 array classes of any name it asks for (an array of 255 dimensions of every
 class is 255 classes). The classes of the library do not, and neither do
@@ -825,7 +842,8 @@ machine:
 | a method | 216 and the lengths of its name and descriptor |
 | a method with code, besides | 184, 21 per byte of code, 24 per exception handler, 4 per line number |
 | an entry of a method table | 32: the superclass's entries, a slot for each method a subclass could override, and the methods of interfaces the superclass does not implement |
-| a superclass or interface of the class | 4 each, so a chain of interfaces loaded from its root takes memory by the square of its length |
+| an interface the class names | 16 each time it names it, for the name it holds until it links |
+| a class on its lists of superclasses, itself included, and of all its interfaces | 4 each, so a chain of interfaces loaded from its root takes memory by the square of its length |
 | an array class | 512 and the length of its name, and 32 per entry of the method table of `Object` |
 
 A byte of code is counted at 21 because the decoded instruction takes 16
@@ -837,7 +855,12 @@ hook.
 
 The estimate is not exact. Methods that all have names of their own fill
 the table of selectors fastest, and a set of classes of 60000 such
-methods each held about a fifth more than the estimate says.
+methods each held about a fifth more than the estimate says. The static
+fields of all classes share one list, which doubles as it grows: classes
+of 65535 static fields each kept 3% more than the limit. A method's line
+numbers and the name of a class's source file take exactly what they are
+counted at. Kept in a list that doubled as it grew, and in a copy of the
+name, they held up to twice that.
 
 By this model the JARs of the test game folder cost 3 KB to 29 MiB. The
 largest game (327 classes) costs 7.3 MiB. The 29 MiB is a desktop library
@@ -860,15 +883,16 @@ parameter, so a class of 65535 methods that share one descriptor of
 65532 parameters costs a few milliseconds, not six minutes. The
 interpreter sizes a call with `method_shape` too, when it checks the
 stack of a method. The parser walks a field descriptor once for each
-pool entry as well. The names of a class, its superclass and its
-interfaces are the `Arc` of their pool entries, not copies, since a
-class can name one interface of 65535 bytes 65535 times. A text constant
-is copied to UTF-16 once for each text of the pool, however many string
-entries and fields name it. An interface a class names more than once is
-added once. The file itself, which the JAR source caps at 4 MiB
-(`MAX_CLASS_BYTES`; the largest class of the test folder has 200 KB), is
-parsed before any of this, and a refused class holds a few times its
-size while it is.
+pool entry as well. The names of a class, its superclass, its interfaces
+and its source file are the `Arc` of their pool entries, not copies,
+since a class can name one interface of 65535 bytes 65535 times. A
+text constant is copied to UTF-16 once for each text of the pool,
+however many string entries and fields name it. An interface a class
+names more than once is added once. The file itself, which the JAR
+source caps at 4 MiB (`MAX_CLASS_BYTES`; the largest class of the test
+folder has 200 KB), is parsed before any of this, and a refused class
+holds a few times its size while it is. The classes that wait for it are charged already, so
+it is the only class outside the count.
 
 **Diagnostics.** Something a game needs that FastEmu lacks throws the
 usual error and is reported once to the diagnostics hook and the log, by
