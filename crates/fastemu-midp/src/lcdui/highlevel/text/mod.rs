@@ -46,14 +46,59 @@ fn array_index(ctx: &mut Ctx<'_>) -> Throw {
     )
 }
 
+/// A new editor for the constructors of `TextBox` and `TextField`, with
+/// the text of the Java string `initial`. The constructor is refused with
+/// `OutOfMemoryError` when the heap cannot hold the text, and the text
+/// is copied once.
+pub(crate) fn new_editor(
+    ctx: &mut Ctx<'_>,
+    initial: Option<ObjRef>,
+    max_size: i32,
+    constraints: i32,
+) -> JResult<TextEditor> {
+    let len = match initial {
+        Some(s) => ctx.string_utf16(s)?.len(),
+        None => 0,
+    };
+    ctx.check_alloc(len.saturating_mul(size_of::<u16>()))?;
+    let initial = match initial {
+        Some(s) => ctx.string_utf16(s)?,
+        None => &[],
+    };
+    TextEditor::new(initial, max_size, constraints).map_err(|why| throw(ctx, why))
+}
+
+/// Whether the heap has room for `typed`, text a person typed, on top of
+/// a text of `len` units. The runtime types it from the host without a
+/// game's call to refuse, so what does not fit is dropped.
+pub(crate) fn room_for(ctx: &Ctx<'_>, len: usize, typed: &str) -> bool {
+    let (limit, used) = ctx.heap_usage();
+    let bytes = len
+        .saturating_add(typed.len())
+        .saturating_mul(size_of::<u16>());
+    used.saturating_add(bytes) <= limit
+}
+
 /// Applies an API edit and reports it, or throws what it was refused for.
+/// `after` gives the length the text has once the edit is made, from the
+/// length it has now: an edit that makes the text longer is refused with
+/// `OutOfMemoryError` when the heap cannot hold a text that long, before
+/// anything is copied, and the text the edit leaves is counted against
+/// the heap. An edit that shortens it is never refused.
 fn edit<R>(
     ctx: &mut Ctx<'_>,
     this: ObjRef,
     access: Access,
+    after: impl FnOnce(usize) -> usize,
     f: impl FnOnce(&mut TextEditor) -> Result<R, EditError>,
 ) -> JResult<R> {
+    let len = (access.editor)(ctx, this)?.text().len();
+    let longer = after(len);
+    if longer > len {
+        ctx.check_alloc(longer.saturating_mul(size_of::<u16>()))?;
+    }
     let result = f((access.editor)(ctx, this)?);
+    ctx.recount(this);
     match result {
         Ok(value) => {
             (access.changed)(ctx, this)?;
@@ -89,7 +134,7 @@ pub(crate) fn methods(class: NativeClass, access: Access) -> NativeClass {
                 Some(s) => ctx.string_utf16(s)?.to_vec(),
                 None => Vec::new(),
             };
-            edit(ctx, this, access, |e| e.set_text(&text)).map(|()| Value::Void)
+            edit(ctx, this, access, |_| text.len(), |e| e.set_text(&text)).map(|()| Value::Void)
         })
         .method("getChars", "([C)I", move |ctx, a| {
             let this = ctx.non_null(a[0])?;
@@ -107,26 +152,28 @@ pub(crate) fn methods(class: NativeClass, access: Access) -> NativeClass {
                 Some(data) => char_range(ctx, data, a[2].int(), a[3].int())?,
                 None => Vec::new(),
             };
-            edit(ctx, this, access, |e| e.set_text(&text)).map(|()| Value::Void)
+            edit(ctx, this, access, |_| text.len(), |e| e.set_text(&text)).map(|()| Value::Void)
         })
         .method("insert", "(Ljava/lang/String;I)V", move |ctx, a| {
             let this = ctx.non_null(a[0])?;
             let src = ctx.non_null(a[1])?;
             let src = ctx.string_utf16(src)?.to_vec();
             let position = a[2].int();
-            edit(ctx, this, access, |e| e.insert(&src, position)).map(|()| Value::Void)
+            let after = |len: usize| len.saturating_add(src.len());
+            edit(ctx, this, access, after, |e| e.insert(&src, position)).map(|()| Value::Void)
         })
         .method("insert", "([CIII)V", move |ctx, a| {
             let this = ctx.non_null(a[0])?;
             let data = ctx.non_null(a[1])?;
             let src = char_range(ctx, data, a[2].int(), a[3].int())?;
             let position = a[4].int();
-            edit(ctx, this, access, |e| e.insert(&src, position)).map(|()| Value::Void)
+            let after = |len: usize| len.saturating_add(src.len());
+            edit(ctx, this, access, after, |e| e.insert(&src, position)).map(|()| Value::Void)
         })
         .method("delete", "(II)V", move |ctx, a| {
             let this = ctx.non_null(a[0])?;
             let (offset, length) = (a[1].int(), a[2].int());
-            edit(ctx, this, access, |e| e.delete(offset, length)).map(|()| Value::Void)
+            edit(ctx, this, access, |len| len, |e| e.delete(offset, length)).map(|()| Value::Void)
         })
         .method("getMaxSize", "()I", move |ctx, a| {
             let this = ctx.non_null(a[0])?;
@@ -135,7 +182,7 @@ pub(crate) fn methods(class: NativeClass, access: Access) -> NativeClass {
         .method("setMaxSize", "(I)I", move |ctx, a| {
             let this = ctx.non_null(a[0])?;
             let max = a[1].int();
-            edit(ctx, this, access, |e| e.set_max_size(max)).map(Value::Int)
+            edit(ctx, this, access, |len| len, |e| e.set_max_size(max)).map(Value::Int)
         })
         .method("size", "()I", move |ctx, a| {
             let this = ctx.non_null(a[0])?;
@@ -148,7 +195,8 @@ pub(crate) fn methods(class: NativeClass, access: Access) -> NativeClass {
         .method("setConstraints", "(I)V", move |ctx, a| {
             let this = ctx.non_null(a[0])?;
             let constraints = a[1].int();
-            edit(ctx, this, access, |e| e.set_constraints(constraints)).map(|()| Value::Void)
+            let set = |e: &mut TextEditor| e.set_constraints(constraints);
+            edit(ctx, this, access, |len| len, set).map(|()| Value::Void)
         })
         .method("getConstraints", "()I", move |ctx, a| {
             let this = ctx.non_null(a[0])?;

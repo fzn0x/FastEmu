@@ -177,12 +177,13 @@ impl Payload for ItemData {
     }
 
     /// What the item keeps on the host and a game makes large: the
-    /// elements of a choice group and the surface of a custom item. The
-    /// other kinds hold references (Java objects, which count as
-    /// themselves), flags and numbers.
+    /// elements of a choice group, the text of a text field and the
+    /// surface of a custom item. The other kinds hold references (Java
+    /// objects, which count as themselves), flags and numbers.
     fn heap_bytes(&self) -> usize {
         match &self.kind {
             Kind::Choice(s) => s.model.heap_bytes(),
+            Kind::Text(e) => e.heap_bytes(),
             Kind::Custom(s) => s.heap_bytes(),
             _ => 0,
         }

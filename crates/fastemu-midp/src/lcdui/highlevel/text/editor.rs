@@ -8,6 +8,8 @@
 
 use std::time::{Duration, Instant};
 
+use crate::lcdui::highlevel::trim;
+
 /// `TextField.ANY`.
 pub const ANY: i32 = 0;
 /// `TextField.EMAILADDR`.
@@ -204,6 +206,14 @@ impl TextEditor {
         &self.text
     }
 
+    /// The bytes the text takes on the host, which the heap counts
+    /// against the game: the room of the vector, not only its length, so
+    /// a text that grew by doubling counts what it holds. A box made with
+    /// a large `maxSize` and little text counts the little.
+    pub fn heap_bytes(&self) -> usize {
+        self.text.capacity() * size_of::<u16>()
+    }
+
     /// How many times the text changed.
     pub fn edits(&self) -> u64 {
         self.edits
@@ -339,6 +349,7 @@ impl TextEditor {
             ));
         }
         self.text.drain(range.clone());
+        trim(&mut self.text);
         self.edits += 1;
         if self.caret >= range.end {
             self.caret -= range.len();
@@ -363,6 +374,7 @@ impl TextEditor {
             ));
         }
         self.text.truncate(max);
+        trim(&mut self.text);
         self.max_size = max;
         self.caret = self.caret.min(self.text.len());
         self.pending = None;
@@ -378,7 +390,7 @@ impl TextEditor {
         let kind_changed = constraints & CONSTRAINT_MASK != self.kind();
         self.constraints = constraints;
         if !allowed(&self.text, constraints) {
-            self.text.clear();
+            self.text = Vec::new();
             self.edits += 1;
             self.caret = 0;
         }
@@ -464,6 +476,7 @@ impl TextEditor {
         self.pending = None;
         self.caret -= 1;
         self.text.remove(self.caret);
+        trim(&mut self.text);
         self.edits += 1;
         true
     }
@@ -748,6 +761,24 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_text_counts_the_room_it_takes_and_gives_it_back() {
+        let mut e = editor("", 100_000, ANY);
+        assert_eq!(e.heap_bytes(), 0);
+        e.insert(&[u16::from(b'a'); 10_000], 0).unwrap();
+        assert!(e.heap_bytes() >= 20_000, "{} bytes", e.heap_bytes());
+        e.delete(0, 9_990).unwrap();
+        assert!(
+            e.heap_bytes() <= 2 * 10 + 2 * 32,
+            "{} bytes",
+            e.heap_bytes()
+        );
+        e.set_max_size(4).unwrap();
+        assert_eq!(text(&e), "aaaa");
+        let big = TextEditor::new(&units("hi"), i32::MAX, ANY).unwrap();
+        assert!(big.heap_bytes() <= 16, "a large maxSize is not counted");
     }
 
     #[test]

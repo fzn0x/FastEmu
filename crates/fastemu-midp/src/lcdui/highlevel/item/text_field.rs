@@ -58,6 +58,9 @@ pub(super) fn paint(
 pub(super) fn key(ctx: &mut Ctx<'_>, item: ObjRef, event: KeyEvent) -> JResult<Handled> {
     let codes = env(ctx).profile.key_codes;
     let used = text::key(codes, editor_of(ctx, item)?, event);
+    if used == KeyUse::Edited {
+        ctx.recount(item);
+    }
     Ok(match used {
         KeyUse::Ignored => Handled::No,
         KeyUse::Moved => Handled::Yes,
@@ -67,7 +70,12 @@ pub(super) fn key(ctx: &mut Ctx<'_>, item: ObjRef, event: KeyEvent) -> JResult<H
 
 /// Text from a host keyboard.
 pub(super) fn text(ctx: &mut Ctx<'_>, item: ObjRef, typed: &str) -> JResult<Handled> {
+    let len = editor(ctx, item)?.text().len();
+    if !text::room_for(ctx, len, typed) {
+        return Ok(Handled::No);
+    }
     Ok(if editor_of(ctx, item)?.type_text(typed) {
+        ctx.recount(item);
         Handled::Changed
     } else {
         Handled::No
@@ -114,17 +122,11 @@ pub fn class() -> NativeClass {
             "(Ljava/lang/String;Ljava/lang/String;II)V",
             |ctx, a| {
                 let item = ctx.non_null(a[0])?;
-                let initial = match a[2].obj() {
-                    Some(s) => ctx.string_utf16(s)?.to_vec(),
-                    None => Vec::new(),
-                };
-                let e = match TextEditor::new(&initial, a[3].int(), a[4].int()) {
-                    Ok(e) => e,
-                    Err(why) => return Err(text::throw(ctx, why)),
-                };
+                let e = text::new_editor(ctx, a[2].obj(), a[3].int(), a[4].int())?;
                 let d = data_mut(ctx, item)?;
                 d.label = a[1].obj();
                 d.kind = Kind::Text(e);
+                ctx.recount(item);
                 Ok(Value::Void)
             },
         );

@@ -45,7 +45,11 @@ impl Default for TextBoxState {
     }
 }
 
-impl ScreenState for TextBoxState {}
+impl ScreenState for TextBoxState {
+    fn heap_bytes(&self) -> usize {
+        self.editor.heap_bytes()
+    }
+}
 
 fn text_box<'a>(ctx: &'a Ctx<'_>, obj: ObjRef) -> JResult<&'a TextBoxState> {
     match displayable::data(ctx, obj)?.state::<TextBoxState>() {
@@ -202,6 +206,9 @@ impl ScreenHandler for TextBoxHandler {
             return Ok(true);
         }
         let used = text::key(codes, editor_of(ctx, obj)?, event);
+        if used == KeyUse::Edited {
+            ctx.recount(obj);
+        }
         if used != KeyUse::Ignored {
             display::repaint(ctx, obj)?;
             super::wake_timer(ctx, obj);
@@ -228,8 +235,13 @@ impl ScreenHandler for TextBoxHandler {
     }
 
     fn text(&self, ctx: &mut Ctx<'_>, obj: ObjRef, typed: &str) -> JResult<bool> {
+        let len = text_box(ctx, obj)?.editor.text().len();
+        if !text::room_for(ctx, len, typed) {
+            return Ok(false);
+        }
         let typed_in = editor_of(ctx, obj)?.type_text(typed);
         if typed_in {
+            ctx.recount(obj);
             display::repaint(ctx, obj)?;
         }
         Ok(typed_in)
@@ -283,16 +295,10 @@ pub fn class() -> NativeClass {
             "(Ljava/lang/String;Ljava/lang/String;II)V",
             |ctx, a| {
                 let obj = ctx.non_null(a[0])?;
-                let initial = match a[2].obj() {
-                    Some(s) => ctx.string_utf16(s)?.to_vec(),
-                    None => Vec::new(),
-                };
-                let e = match TextEditor::new(&initial, a[3].int(), a[4].int()) {
-                    Ok(e) => e,
-                    Err(why) => return Err(text::throw(ctx, why)),
-                };
+                let e = text::new_editor(ctx, a[2].obj(), a[3].int(), a[4].int())?;
                 displayable::data_mut(ctx, obj)?.title = a[1].obj();
                 text_box_mut(ctx, obj)?.editor = e;
+                ctx.recount(obj);
                 Ok(Value::Void)
             },
         );
