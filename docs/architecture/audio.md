@@ -61,7 +61,13 @@ What one game can make the lock cost is bounded:
 - a MIDI file of a few frames plays once, a file sends at most 512
   messages for each call to render, and a file holds at most 65536
   events (see Formats);
-- listeners hear of a loop at most every 20 ms of output per player.
+- listeners hear of a loop at most every 20 ms of output per player;
+- in the apps, a game's sound takes on average at most its part of half
+  of real time to render, its oldest sound aside, and the sounds it
+  started last wait past that (see Render budget);
+- the audio thread hands the lock to a waiting call at the end of each
+  slice, so the call waits for the slice under way however short the
+  slices are, not for the next ones too.
 
 A seek in a MIDI file replays the controllers before the new position. It
 is up to 65536 events under the lock, about a millisecond. That stays a
@@ -136,6 +142,8 @@ the MIDP layer (see the mapping below):
   `MediaException` of a player that cannot start. A player that stopped,
   ended or closed gives its place back. `playTone` tones are not players
   and have their own cap.
+- In the apps a started player can also wait, silent, while its game's
+  sound is over its render budget (see Render budget).
 - Media time is in microseconds. `set_media_time` clamps to the media and
   returns the time set; it works while playing.
 - `set_level(0..=100)` clamps and returns the level. The scale follows
@@ -313,10 +321,103 @@ with; changing the SoundFont affects players created afterwards.
 - The gain of a voice is its level times its group's volume, zero when
   either is muted; it slides to a new value over 3 ms, and a start ramps
   up from silence over 3 ms.
-- Voices are summed in f32, scaled by a headroom of 0.7 and the master
-  volume, then limited: a peak limiter with instant attack and 150 ms
-  release holds peaks under 0.9, and a tanh soft clip above 0.9 keeps the
-  output inside -1 to 1 whatever hundreds of games do.
+- Voices are summed in f32, a game at a time and each game's in the
+  order they started, so a mix is the same from run to run. The sum is
+  scaled by a headroom of 0.7 and the master volume, then limited: a peak
+  limiter with instant attack and 150 ms release holds peaks under 0.9,
+  and a tanh soft clip above 0.9 keeps the output inside -1 to 1 whatever
+  hundreds of games do.
+
+## Render budget
+
+The player caps bound how many sounds a game plays, not what they cost.
+One game with 32 started MIDI players of 32 notes each takes 85 to 88
+percent of a fast core to render, and four such games 340 to 350
+percent, so the sound of every game breaks up. The render budget gives
+each game a part of the audio thread's time instead.
+
+- It is off unless set. The desktop and Android apps call
+  `engine.set_render_budget(Some(RenderBudget::DEFAULT))`. Tests and
+  offline runners, which render faster or slower than real time, leave it
+  off, and a headless run has no engine.
+- `RenderBudget::DEFAULT` gives all games together half of real time on
+  average (`share`, 0.5), and lets a game save 20 ms of render time
+  (`burst`).
+- Each slice of 128 frames, every game with a sound to play gets an equal
+  part of the share. A game that does not use its part saves it, up to
+  the burst, and what it would save past that goes to the games that
+  have saved less. A game with nothing to play gets nothing, so stopping
+  and starting gains it no time.
+- The mixer reads the clock before the first sound of a slice and after
+  each sound, charges the time to the sound's game, and keeps a running
+  average of what a frame of each sound costs. A render is charged at
+  most its slice, so a thread the system stopped in the middle charges no
+  more than that. A game's debt stops at the burst.
+- A game's sounds are offered in the order they started. Its oldest sound
+  always plays. A later one plays while its average cost, added to those
+  of the sounds before it, fits in the game's part of the slice, less an
+  eighth of any debt. A sound never measured counts at the cost of the
+  dearest sound of its game. A sound that waited needs an eighth of the
+  part to spare, and a sound that played may run an eighth past it, so the
+  sound at the edge does not flip with each small change in the measures.
+- Past the part, sounds that were playing go on while the game has
+  credit. One sound that waited may come back past the part, and only
+  once the game has saved half the burst, 10 ms. So a game over its part
+  plays the sounds that fit, and one more part of the time, which uses its
+  whole part on average. The first sound that does not play holds back
+  every sound started after it.
+- A start or a restart puts a sound at the back of its game's order, and
+  it must be let in as a sound that waited: a game that starts 31 sounds
+  at once gets the ones that fit and at most one more in that slice.
+- A sound that cannot play fades out over the 3 ms ramp, then waits,
+  silent, in place: it stays STARTED, its media time stands still, and it
+  sends no events, so its END_OF_MEDIA comes later. It fades back in when
+  it plays again. A `playTone` tone that waits does not end meanwhile;
+  they stay capped at 16 a game.
+- `Engine::budget_waits` counts the slices sounds waited, over all games.
+- The tests give the mixer a clock that their sounds move, so they never
+  read the time and behave the same on any machine.
+
+Measured in release on an i7-12700F, at 48 kHz in buffers of 512 frames
+(10.67 ms), twice, on a machine other work shared. A buffer is late when
+it takes longer than it lasts. The averages are of real time, and the
+late buffers are counted from the first buffer after the players start
+unless the case says "after 0.5 s":
+
+| Case | Without the budget | With it |
+| --- | --- | --- |
+| One game of 32 MIDI players x 32 notes, from its first buffer, 4 s | 85 to 86 percent, 1 to 12 buffers late, the first 13 to 14 ms | 50 percent, none late, the worst 6.9 ms |
+| The same, after 0.5 s | 85 percent | 50 percent, none late; 14 to 21 of its players play, 18.5 on average, and a player at the edge switches up to 3 times a second |
+| The same beside a game playing a corpus MIDI file, after 0.5 s, 8 s | 86 to 88 percent, 6 to 23 buffers late | 50 percent, none late; the light game plays every frame |
+| Four such games, from their first buffer, 4 s | 340 to 348 percent, every buffer late, the first 54 ms | 52 percent, none late, the worst 7.8 ms |
+| A fourth such game starts beside three held ones, 4 s | 341 to 376 percent, every buffer late | 51 percent, 1 buffer late by 0.4 ms in one run, none in the other |
+| A game playing one cheap sound starts 31 such players beside three held games, 4 s | 336 to 340 percent, every buffer late | 50 percent, none late |
+| Eight games, each playing the heaviest corpus MIDI file twice, after 0.5 s, 8 s | 11.4 percent | 11.5 to 11.6 percent, no sound waits |
+
+With the budget, four heavy games that have played for a while still
+take about 50 percent. In one run of that case 3 of 187 buffers were
+late, the worst 14.6 ms: about twice what the budget lets a buffer take,
+so the system paused the thread there.
+
+The heaviest MIDI file in the 305 games of the test corpus plays in about
+1 percent of real time, and with eight games each game's part is at least
+6.25 percent, so a game a phone could play never waits.
+
+What the budget does not do:
+
+- Each game's oldest sound plays whatever it costs, so a game can pass its
+  part by one sound. That sound is bounded by the other limits: 32
+  synthesizer voices, 512 MIDI messages and 8 s of MP3 catching up per
+  call.
+- It reads the system's clock, so time the system takes from the audio
+  thread is charged to the game whose sound was rendering. On a busy
+  computer a normal game's newer sounds can then wait.
+- A sound that waits holds its media time, so a game that waits for the
+  END_OF_MEDIA of a newer sound waits longer, and two players started
+  together for one tune drift apart. Only a game past its part is
+  affected.
+- A computer too slow to render even the oldest sound of every game in
+  time still stutters.
 
 ## Output
 
@@ -342,7 +443,7 @@ the engine's view of it.
 
 | Event                            | Engine call |
 | -------------------------------- | ----------- |
-| App start                        | `Engine::default()`, then `AudioOutput::open(&engine)` or `NullOutput::start(&engine)`; `engine.set_soundfont(...)` if the user chose one |
+| App start                        | `Engine::default()` and `engine.set_render_budget(Some(RenderBudget::DEFAULT))`, then `AudioOutput::open(&engine)` or `NullOutput::start(&engine)`; `engine.set_soundfont(...)` if the user chose one |
 | Instance launch                  | `let group = engine.create_group(); group.set_volume(settings.volume)`; the MIDP media module sets the group's listener on first use and reads events on its own thread, so nothing else subscribes |
 | `Instance::set_volume(v)`        | `group.set_volume(v)` (0.0 also mutes) |
 | `Instance::pause` / `resume`     | `group.set_paused(true)` / `false`, besides `pauseApp` and `startApp` |
