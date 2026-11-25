@@ -177,8 +177,10 @@ impl Default for Composer {
 }
 
 impl Payload for Composer {
+    /// The room of the list of notes, which a game fills without making
+    /// a Java object.
     fn heap_bytes(&self) -> usize {
-        self.notes.len() * 8
+        self.notes.capacity() * size_of::<(i32, i32)>()
     }
 }
 
@@ -204,28 +206,38 @@ fn composer<'a>(ctx: &'a mut Ctx<'_>, this: Value) -> JResult<&'a mut Composer> 
 }
 
 fn compose(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
+    let this = ctx.non_null(a[0])?;
     let notes = ctx.non_null(a[1])?;
-    let notes: Vec<i32> = ctx.array::<i32>(notes)?.to_vec();
-    let bpm = a[2].int();
-    let c = composer(ctx, a[0])?;
-    c.bpm = bpm;
-    c.notes = notes
+    let notes: Vec<(i32, i32)> = ctx
+        .array::<i32>(notes)?
         .as_chunks::<2>()
         .0
         .iter()
         .map(|&[note, length]| (note, length))
         .take(MAX_NOTES)
         .collect();
+    let bpm = a[2].int();
+    let c = ctx.payload_mut::<Composer>(this)?;
+    c.bpm = bpm;
+    c.notes = notes;
+    // The heap judges the notes when the native returns.
+    ctx.recount(this);
     Ok(Value::Void)
 }
 
 fn append_note(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let (note, length) = (a[1].int(), a[2].int());
-    let c = composer(ctx, a[0])?;
+    let this = ctx.non_null(a[0])?;
+    let c = ctx.payload_mut::<Composer>(this)?;
     if c.notes.len() >= MAX_NOTES {
         return ctx.throw("java/lang/Exception", "the melody is full");
     }
+    let room = c.notes.capacity();
     c.notes.push((note, length));
+    // The list grows by doubling, so its size changes only then.
+    if c.notes.capacity() != room {
+        ctx.recount(this);
+    }
     Ok(Value::Void)
 }
 
@@ -304,7 +316,10 @@ fn composer_class() -> NativeClass {
         .method("appendNote", "(II)V", append_note)
         .method("getMelody", "()Lcom/siemens/mp/game/Melody;", get_melody)
         .method("resetMelody", "()V", |ctx, a| {
-            *composer(ctx, a[0])? = Composer::default();
+            let this = ctx.non_null(a[0])?;
+            *ctx.payload_mut::<Composer>(this)? = Composer::default();
+            // The notes are gone, and so is their room.
+            ctx.recount(this);
             Ok(Value::Void)
         })
         .method("length", "()I", |ctx, a| {
