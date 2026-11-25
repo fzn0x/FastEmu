@@ -339,9 +339,10 @@ mod tests {
         let mut ended = Command::new("cmd").args(["/C", "exit 0"]).spawn().unwrap();
         let ended_pid = ended.id();
         ended.wait().unwrap();
-        // The child is waited for and its handle closed: its id names no
-        // running process now.
-        drop(ended);
+        // The child has exited, and `ended` keeps its handle open until
+        // the sample is taken, so Windows cannot give its id to a new
+        // process meanwhile: the id names an ended process, as when a game
+        // ends between two samples.
         let mut sampler = Sampler::start(&dir).expect("the sampler starts");
         assert!(sampler.rate > 0.0);
         let asked = [std::process::id().to_string(), ended_pid.to_string()];
@@ -366,6 +367,7 @@ mod tests {
             }
         );
         assert!(sample.kernel >= sample.idle);
+        drop(ended);
         drop(sampler);
         let _ = std::fs::remove_dir_all(&dir);
     }
