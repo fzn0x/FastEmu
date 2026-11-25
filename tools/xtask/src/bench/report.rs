@@ -1239,15 +1239,30 @@ pub fn markdown(report: &Report) -> String {
     out.push_str("## Load\n\n");
     let _ = writeln!(
         out,
-        "Baseline of the idle machine: {} ms/s. A measurement is noisy when the \
-         other load during it passes the baseline by more than {NOISE_MARGIN:.0} ms/s, \
-         and a number is noisy when its runs spread more than {:.0} percent from \
-         the median.\n",
+        "Baseline of the idle machine: {} ms/s. The other load is the whole \
+         system's busy time less that of the measured processes, the sampler \
+         and the Windows audio engine, all as Windows counts them by the clock \
+         tick. A measurement is noisy when the other load during it passes the \
+         baseline by more than {NOISE_MARGIN:.0} ms/s, and a number is noisy when \
+         its runs spread more than {:.0} percent from the median.\n",
         report
             .baseline
             .map_or_else(|| "n/a".into(), |b| format!("{b:.0}")),
         MAX_SPREAD * 100.0
     );
+    let loads = |f: fn(&Measurement) -> Option<f64>| {
+        let values: Vec<f64> = report.measurements.iter().filter_map(f).collect();
+        Stat::of(&values).map_or_else(|| "n/a".into(), |s| format!("{} ms/s", s.text(0)))
+    };
+    if report.measurements.iter().any(|m| m.other.is_some()) {
+        let _ = writeln!(
+            out,
+            "The other load was {} during the measurements, and {} just \
+             before them.\n",
+            loads(|m| m.other),
+            loads(|m| m.quiet)
+        );
+    }
     let sampler: Vec<f64> = report
         .measurements
         .iter()
@@ -1602,6 +1617,11 @@ mod tests {
                 .iter()
                 .any(|p| p.contains("noisy, other load 400 ms/s")),
             "{found:?}"
+        );
+        let md = markdown(&noisy);
+        assert!(
+            md.contains("The other load was 400 ms/s during the measurements, and n/a just"),
+            "{md}"
         );
         assert!(
             found
