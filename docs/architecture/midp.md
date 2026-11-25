@@ -323,7 +323,9 @@ print only what comes out of it. The link:
   other control character below U+0020 but the tab, U+007F and U+0080 to
   U+009F becomes U+FFFD. ESC is one, so no sequence that clears a screen,
   sets a title or writes to the clipboard reaches a terminal, and no line
-  can pass for a message of FastEmu's;
+  can pass for a message of FastEmu's. The bidirectional embeddings,
+  overrides and isolates (U+202A to U+202E, U+2066 to U+2069) become
+  U+FFFD too, so a line shows its text in the order it has;
 - keeps at most 10000 lines and 1 MiB of text between two `drain_log`
   calls, dropping the oldest first. A line is at most 4096 bytes, so the
   megabyte holds at least 256 of them.
