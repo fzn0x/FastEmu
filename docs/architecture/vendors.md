@@ -106,6 +106,7 @@ end.
   what came before it and `TONE_REPEAT_MARK` what followed the last
   `TONE_MARK`, `TONE_STOP` ends the melody; `TONE_REPEV` and `TONE_REPON`,
   which no source explains, are skipped. One melody plays at a time.
+  A composer holds at most 32767 notes, and the heap counts them.
 - **Bitmaps** (`vendor/siemens/bitmap.rs`) are packed rows, the left pixel
   in the high bit: one bit per pixel (set is black) with an optional mask
   (clear is transparent), or two bits per pixel (0 transparent, 1 white, 2

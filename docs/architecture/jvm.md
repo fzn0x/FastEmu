@@ -401,7 +401,7 @@ neither. A change that adds a payload adds a row.
 | `StoreHandle`, `EnumState` | listeners and the ids of an enumeration | `heap_bytes`; the size of a record store by #40 |
 | `GraphicData` (Siemens sprites and backgrounds) | frames and tiles | `heap_bytes`; the constructors call `check_alloc` before cutting the pictures and recount |
 | `UiImage`, `ExtendedData`, `LayerData` (Siemens) | pictures, tile grids and sprite sequences | bitmaps, copies, tile layers and sprite sequences: `check_alloc` before building, `recount` on change (#32) |
-| `Composer`, `MelodyData` (Siemens) | notes and MIDI bytes | `heap_bytes`; a note added to a `Composer` is not recounted yet |
+| `Composer`, `MelodyData` (Siemens) | notes and MIDI bytes | `heap_bytes`; a `Composer` counts the room of its notes and is recounted when notes are added, set or reset |
 | `ManagerData` (`LayerManager`), `Manager` (Siemens layers) | a list of layer references | bounded: a layer is in the list once |
 | `Manager` (Siemens graphic objects) | a list of object references | `heap_bytes` at the room of the list, recounted on each change; `addObject` keeps an object once, `insertObject` may repeat one and counts it |
 | `CommandData`, `FontData`, `GraphicsData`, `AlertTypeData`, `TickerData`, `ControlData`, `Message`, `InfoPayload`, `ConnectionPayload` | references, flags, numbers; `GraphicsData` shares the surface of its target | fixed |
