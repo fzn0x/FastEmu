@@ -74,8 +74,14 @@ impl Ctx<'_> {
         r
     }
 
-    /// Makes a global root for `obj`.
+    /// Makes a global root for `obj`. The slot of a handle dropped since
+    /// is used again before the table grows, so a native that makes a
+    /// handle and drops it at once, as one does for a task it has no room
+    /// to queue, never makes the table grow, collection or none.
     pub fn new_global(&mut self, obj: ObjRef) -> GlobalRef {
+        if self.state.free_globals.is_empty() {
+            self.release_dropped_globals();
+        }
         let index = match self.state.free_globals.pop() {
             Some(i) => {
                 self.state.globals[i as usize] = Some(obj);
@@ -115,5 +121,41 @@ impl Ctx<'_> {
             self.state.globals[index as usize] = None;
             self.state.free_globals.push(index);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::{MemorySource, Vm, VmConfig};
+
+    #[test]
+    fn a_handle_dropped_at_once_gives_its_slot_back_without_a_collection() {
+        let vm = Vm::new(
+            VmConfig::default(),
+            Arc::new(MemorySource::new()),
+            Vec::new(),
+        );
+        vm.attach("test", |ctx| {
+            let object = ctx.find_class("java/lang/Object").expect("Object");
+            let obj = ctx.new_object(object).expect("an object");
+            for _ in 0..100_000 {
+                drop(ctx.new_global(obj));
+            }
+            assert!(
+                ctx.state.globals.len() <= 2,
+                "{} slots",
+                ctx.state.globals.len()
+            );
+            // Handles that are kept take a slot each, and the slots of
+            // the ones dropped serve the next.
+            let kept: Vec<_> = (0..10).map(|_| ctx.new_global(obj)).collect();
+            let slots = ctx.state.globals.len();
+            drop(kept);
+            let again: Vec<_> = (0..10).map(|_| ctx.new_global(obj)).collect();
+            assert_eq!(ctx.state.globals.len(), slots);
+            assert!(again.iter().all(|g| g.get(ctx) == obj));
+        });
     }
 }
