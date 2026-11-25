@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use crate::event::{EventCallback, EventQueue, PlayerEvent, PlayerEventKind, PlayerId};
+use crate::group::GroupLimits;
 use crate::voice::{PlayerState, Reached, Voice};
 
 /// Starts, stops and volume changes slide over this long.
@@ -30,6 +31,8 @@ pub(crate) struct GroupState {
     pub muted: bool,
     pub paused: bool,
     pub listener: Option<EventCallback>,
+    /// How many players and how much sound the group may hold.
+    pub limits: GroupLimits,
 }
 
 impl GroupState {

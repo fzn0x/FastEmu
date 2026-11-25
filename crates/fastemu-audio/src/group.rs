@@ -10,7 +10,7 @@ use crate::event::{EventCallback, PlayerEvent, PlayerEventKind, PlayerId};
 use crate::format::Format;
 use crate::gain::unit_gain;
 use crate::media;
-use crate::mixer::{GroupId, GroupState, Slot};
+use crate::mixer::{GroupId, GroupState, Mixer, Slot};
 use crate::nokia;
 use crate::player::Player;
 use crate::tone::ToneEvent;
@@ -19,6 +19,92 @@ use crate::voice::{PlayerState, Voice};
 /// A group keeps at most this many `playTone` tones at once; a new one
 /// replaces the oldest. Games call `playTone` in tight loops.
 const MAX_TONES: usize = 16;
+
+/// What one game's sound may take, set per group with
+/// [`Group::set_limits`]. Games on a phone made a few dozen players and
+/// kept a few megabytes of sound.
+///
+/// Both limits count what the group holds now, so closing a player makes
+/// room for another. They bound the host's memory for a game whose Java
+/// heap never sees its sound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupLimits {
+    /// Bytes of sound the group's players hold together: decoded samples,
+    /// the file of an MP3, parsed MIDI events (see
+    /// [`Source::memory_bytes`](crate::source::Source::memory_bytes)).
+    pub max_bytes: usize,
+    /// Players the group holds, playing or not. `playTone` tones are
+    /// capped on their own.
+    pub max_players: usize,
+}
+
+impl GroupLimits {
+    /// 32 MiB of sound and 128 players, twice and a few times what the
+    /// games tried hold.
+    pub const DEFAULT: Self = Self {
+        max_bytes: 32 * 1024 * 1024,
+        max_players: 128,
+    };
+}
+
+impl Default for GroupLimits {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// The bytes of sound `group` holds now, and its players, `playTone`
+/// tones left out.
+fn held(mixer: &Mixer, group: GroupId) -> (usize, usize) {
+    mixer
+        .slots
+        .values()
+        .filter(|slot| slot.group == group)
+        .fold((0, 0), |(bytes, players), slot| {
+            (
+                bytes + slot.voice.source.memory_bytes(),
+                players + usize::from(!slot.voice.one_shot),
+            )
+        })
+}
+
+/// Checks that `group` has room for `adding` more bytes of sound, with
+/// `freeing` of what it holds given back (a source being replaced), and
+/// for one more player when `new_player`.
+///
+/// A sound bigger than the whole budget is [`AudioError::TooLarge`]: it
+/// can never fit. Anything else the group has no room for is
+/// [`AudioError::OutOfMemory`], which a closed or collected player can
+/// cure.
+pub(crate) fn admit(
+    mixer: &Mixer,
+    group: GroupId,
+    adding: usize,
+    freeing: usize,
+    new_player: bool,
+) -> Result<(), AudioError> {
+    let limits = mixer.groups.get(&group).ok_or(AudioError::Closed)?.limits;
+    if adding > limits.max_bytes {
+        return Err(AudioError::TooLarge(format!(
+            "a sound of {adding} bytes, when a game may hold {} bytes of sound",
+            limits.max_bytes
+        )));
+    }
+    let (bytes, players) = held(mixer, group);
+    if new_player && players >= limits.max_players {
+        return Err(AudioError::OutOfMemory(format!(
+            "a game may hold {} players",
+            limits.max_players
+        )));
+    }
+    if bytes.saturating_sub(freeing).saturating_add(adding) > limits.max_bytes {
+        return Err(AudioError::OutOfMemory(format!(
+            "a game holds {bytes} bytes of sound already, and may hold {}",
+            limits.max_bytes
+        )));
+    }
+    Ok(())
+}
 
 /// The players of one instance. Cloning it is cheap; when the last clone
 /// is dropped, or [`Group::close`] is called, every player in it stops
@@ -166,12 +252,44 @@ impl Group {
             .collect()
     }
 
-    /// Adds a voice to the group and returns its id.
+    /// What the group may hold; the default until [`Group::set_limits`].
+    pub fn limits(&self) -> GroupLimits {
+        self.with(|group| group.limits).unwrap_or_default()
+    }
+
+    /// Changes what the group may hold, for the players made from now on:
+    /// players it holds already stay, even past a lowered limit. The
+    /// limits of one game are the host's to set; a game cannot.
+    pub fn set_limits(&self, limits: GroupLimits) {
+        self.with(|group| group.limits = limits);
+    }
+
+    /// The bytes of sound the group's players hold now, counted as
+    /// [`GroupLimits::max_bytes`] counts them.
+    pub fn memory_bytes(&self) -> usize {
+        held(&self.inner.engine.lock(), self.inner.id).0
+    }
+
+    /// Fails now if the group is closed or has no room for another
+    /// player, so a sound it could not take is not decoded first.
+    fn check_room(&self) -> Result<(), AudioError> {
+        admit(&self.inner.engine.lock(), self.inner.id, 0, 0, true)
+    }
+
+    /// Adds a voice to the group and returns its id. Every player any
+    /// call makes goes through here, so the limits hold for them all:
+    /// MMAPI players, tone players, and the Nokia, Samsung and Siemens
+    /// sounds.
     fn insert(&self, voice: Voice) -> Result<PlayerId, AudioError> {
         let engine = &self.inner.engine;
         let mut mixer = engine.lock();
-        if !mixer.groups.contains_key(&self.inner.id) {
-            return Err(AudioError::Closed);
+        if voice.one_shot {
+            // A `playTone` tone: a few bytes, and at most MAX_TONES.
+            if !mixer.groups.contains_key(&self.inner.id) {
+                return Err(AudioError::Closed);
+            }
+        } else {
+            admit(&mixer, self.inner.id, voice.source.memory_bytes(), 0, true)?;
         }
         let id = PlayerId(engine.next_id());
         mixer.slots.insert(
@@ -201,6 +319,7 @@ impl Group {
     /// Creates a player for data in a known format, such as a Nokia
     /// ringing tone from `com.nokia.mid.sound.Sound`.
     pub fn create_player_as(&self, data: &[u8], format: Format) -> Result<Player, AudioError> {
+        self.check_room()?;
         let engine = &self.inner.engine;
         let soundfont = engine.soundfont();
         let source = media::open(data, format, engine.sample_rate(), soundfont.as_ref())?;

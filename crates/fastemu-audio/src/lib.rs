@@ -59,7 +59,7 @@ pub use engine::{Engine, EngineConfig};
 pub use error::AudioError;
 pub use event::{EventCallback, PlayerEvent, PlayerEventKind, PlayerId};
 pub use format::{Format, SUPPORTED_CONTENT_TYPES};
-pub use group::Group;
+pub use group::{Group, GroupLimits};
 pub use midi::soundfont::SoundFont;
 pub use mixer::GroupId;
 pub use output::NullOutput;

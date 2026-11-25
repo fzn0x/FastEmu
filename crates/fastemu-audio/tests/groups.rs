@@ -4,7 +4,7 @@
 mod common;
 
 use common::{constant_wav, engine, kinds, peak, render};
-use fastemu_audio::{AudioError, PlayerEventKind, PlayerState};
+use fastemu_audio::{AudioError, GroupLimits, PlayerEventKind, PlayerState};
 
 #[test]
 fn muting_one_group_leaves_the_others_playing() {
@@ -273,4 +273,109 @@ fn listeners_owning_handles_are_dropped_without_deadlock() {
             .recv_timeout(std::time::Duration::from_secs(10))
             .is_ok()
     );
+}
+
+/// The limits of a game with room for 64 KiB of sound and 4 players.
+fn small() -> GroupLimits {
+    GroupLimits {
+        max_bytes: 64 * 1024,
+        max_players: 4,
+    }
+}
+
+#[test]
+fn a_group_holds_only_so_many_players() {
+    let engine = engine(8000);
+    let group = engine.create_group();
+    assert_eq!(group.limits(), GroupLimits::default());
+    assert_eq!(group.limits().max_players, 128);
+    assert_eq!(group.limits().max_bytes, 32 * 1024 * 1024);
+    group.set_limits(small());
+    assert_eq!(group.limits(), small());
+    let sound = constant_wav(8000, 100, 1);
+    let players: Vec<_> = (0..4)
+        .map(|_| group.create_player(&sound, None).unwrap())
+        .collect();
+    // A fifth player of any kind is refused, and nothing is left of it.
+    let refused = group.create_player(&sound, None).unwrap_err();
+    assert!(matches!(refused, AudioError::OutOfMemory(_)), "{refused}");
+    assert!(matches!(
+        group.create_tone_player(),
+        Err(AudioError::OutOfMemory(_))
+    ));
+    assert!(matches!(
+        group.create_beep_player(440, 100),
+        Err(AudioError::OutOfMemory(_))
+    ));
+    assert_eq!(engine.player_count(), 4);
+    // `playTone` tones have no handle and a cap of their own.
+    group.play_tone(69, 100, 100).unwrap();
+    // Another game in the engine has its own room.
+    let other = engine.create_group();
+    let _others = other.create_player(&sound, None).unwrap();
+    // Closing one player makes room for one.
+    players[0].close();
+    let _again = group.create_player(&sound, None).unwrap();
+    assert_eq!(group.player_count(), 4);
+}
+
+#[test]
+fn a_group_holds_only_so_much_sound_and_closing_frees_it() {
+    let engine = engine(8000);
+    let group = engine.create_group();
+    group.set_limits(small());
+    // 20000 samples are 40000 bytes of the 65536.
+    let sound = constant_wav(8000, 20_000, 1);
+    let first = group.create_player(&sound, None).unwrap();
+    assert_eq!(group.memory_bytes(), 40_000);
+    let refused = group.create_player(&sound, None).unwrap_err();
+    assert!(matches!(refused, AudioError::OutOfMemory(_)), "{refused}");
+    assert_eq!(group.memory_bytes(), 40_000);
+    assert_eq!(group.player_count(), 1);
+    // A sound that could never fit says so.
+    let huge = constant_wav(8000, 40_000, 1);
+    let refused = group.create_player(&huge, None).unwrap_err();
+    assert!(matches!(refused, AudioError::TooLarge(_)), "{refused}");
+    // Closing the first gives its bytes back, and the second then fits.
+    first.close();
+    assert_eq!(group.memory_bytes(), 0);
+    let second = group.create_player(&sound, None).unwrap();
+    assert_eq!(group.memory_bytes(), 40_000);
+    // So does dropping a player, or closing the whole group.
+    drop(second);
+    assert_eq!(group.memory_bytes(), 0);
+    let third = group.create_player(&sound, None).unwrap();
+    group.close();
+    assert_eq!(
+        group.create_player(&sound, None).unwrap_err(),
+        AudioError::Closed
+    );
+    drop(third);
+}
+
+#[test]
+fn every_kind_of_sound_counts_what_it_holds() {
+    let engine = engine(8000);
+    let group = engine.create_group();
+    let mp3 = include_bytes!("data/sine-440hz-1s.mp3");
+    let player = group.create_player(mp3, None).unwrap();
+    // The file stays, and the frames are decoded as they play.
+    assert!(
+        group.memory_bytes() >= mp3.len() / 2,
+        "{}",
+        group.memory_bytes()
+    );
+    drop(player);
+    let events = [0x00, 0x90, 60, 100, 0x60, 0x80, 60, 0];
+    let player = group
+        .create_player(&common::midi(96, &events), None)
+        .unwrap();
+    assert!(group.memory_bytes() > 0);
+    drop(player);
+    let player = group
+        .create_player(&[0xFE, 1, 69, 16, 71, 16], None)
+        .unwrap();
+    assert!(group.memory_bytes() > 0);
+    drop(player);
+    assert_eq!(group.memory_bytes(), 0);
 }

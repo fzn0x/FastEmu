@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::event::EventQueue;
 use crate::gain::unit_gain;
-use crate::group::Group;
+use crate::group::{Group, GroupLimits};
 use crate::midi::soundfont::SoundFont;
 use crate::mixer::{GroupId, GroupState, Mixer};
 use crate::voice::PlayerState;
@@ -132,6 +132,7 @@ impl Engine {
                 muted: false,
                 paused: false,
                 listener: None,
+                limits: GroupLimits::default(),
             },
         );
         Group::new(self.clone(), id)
