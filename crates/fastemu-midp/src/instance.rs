@@ -32,14 +32,14 @@
 //! there is a MIDlet, then ends it as [`InstanceStatus::Crashed`].
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
 use fastemu_audio::Group;
 use fastemu_core::{Frame, InputEvent, Instance, InstanceId, InstanceStatus, LogLevel, LogLine};
 use fastemu_jvm::{Ctx, HeapStats, JResult, Vm};
 
-use crate::host::{Control, HostLink};
+use crate::host::{Control, ControlQueue, HostLink};
 use crate::lcdui;
 use crate::midlet::{self, Lifecycle};
 
@@ -159,8 +159,8 @@ struct Controller {
     vm: Vm,
     host: HostLink,
     group: Option<Group>,
-    rx: mpsc::Receiver<Control>,
-    /// A message taken from the channel while gathering input, handled
+    queue: ControlQueue,
+    /// A message taken from the queue while gathering input, handled
     /// next.
     held: Option<Control>,
     /// Whether the VM is paused.
@@ -175,7 +175,11 @@ struct Controller {
 
 impl Controller {
     fn run(mut self) {
-        while let Some(message) = self.held.take().or_else(|| self.rx.recv().ok()) {
+        loop {
+            let message = match self.held.take() {
+                Some(message) => message,
+                None => self.queue.recv(),
+            };
             match message {
                 Control::Input(event) => self.input(event),
                 Control::Pause => self.pause(),
@@ -199,7 +203,7 @@ impl Controller {
     /// stopping, is dropped.
     fn input(&mut self, first: InputEvent) {
         let mut events = vec![first];
-        while let Ok(message) = self.rx.try_recv() {
+        while let Some(message) = self.queue.try_recv() {
             if let Control::Input(event) = message {
                 events.push(event);
             } else {
@@ -308,6 +312,15 @@ impl Controller {
     }
 }
 
+impl Drop for Controller {
+    /// Messages that still wait when the control thread ends, by a return
+    /// or a panic, are dropped, and so are those that come later, as they
+    /// were with a channel whose receiver is gone.
+    fn drop(&mut self) {
+        self.queue.close();
+    }
+}
+
 /// One running MIDlet in its own virtual machine.
 pub struct MidpInstance {
     id: InstanceId,
@@ -315,8 +328,8 @@ pub struct MidpInstance {
     host: HostLink,
     vm: Vm,
     group: Option<Group>,
-    /// The control thread's channel. Sending on it never blocks.
-    control: mpsc::Sender<Control>,
+    /// The control thread's queue. Sending on it never blocks.
+    control: ControlQueue,
 }
 
 impl std::fmt::Debug for MidpInstance {
@@ -339,13 +352,13 @@ impl MidpInstance {
         title: String,
         class_name: String,
     ) -> std::io::Result<Arc<Self>> {
-        let (tx, rx) = mpsc::channel();
-        host.set_control(tx.clone());
+        let queue = ControlQueue::default();
+        host.set_control(queue.clone());
         let controller = Controller {
             vm: vm.clone(),
             host: host.clone(),
             group: group.clone(),
-            rx,
+            queue: queue.clone(),
             held: None,
             frozen: false,
             next_turn: 1,
@@ -361,7 +374,7 @@ impl MidpInstance {
         }
         if let Err(e) = vm.spawn("MIDlet", move |ctx| midlet::launch(ctx, &class_name)) {
             // The control thread owns a clone of the VM: let it end both.
-            let _ = tx.send(Control::Stop);
+            queue.send(Control::Stop);
             return Err(e);
         }
         Ok(Arc::new(Self {
@@ -370,12 +383,12 @@ impl MidpInstance {
             host,
             vm,
             group,
-            control: tx,
+            control: queue,
         }))
     }
 
     fn send_control(&self, message: Control) {
-        let _ = self.control.send(message);
+        self.control.send(message);
     }
 
     /// Exceptions the game let escape and internal errors since launch.
@@ -460,7 +473,7 @@ impl Instance for MidpInstance {
 
 impl Drop for MidpInstance {
     /// An instance the app lets go of stops: the VM's own references to
-    /// the control channel would otherwise keep it running.
+    /// the control queue would otherwise keep it running.
     fn drop(&mut self) {
         self.send_control(Control::Stop);
     }
