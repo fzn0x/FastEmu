@@ -104,11 +104,24 @@ The bench counts the processor time of every thread, so that cost shows.
 | Frames a second | Each emulator's own count | Frames between the two samples |
 | Processor time | Windows, per process | Cycles from `QueryProcessCycleTime`, at the rate of a busy thread |
 | Memory | Windows, per process | Peak working set, working set and private bytes, at the second sample |
-| Other load | Windows, whole system | `GetSystemTimes`, minus the measured processes |
+| Other load | Windows, whole system | `GetSystemTimes`, minus the measured processes' `GetProcessTimes` |
 
 The bench reads processor time as cycles because Windows counts its
 usual CPU times by the clock tick, and misses most of the short bursts
 that game threads run in.
+
+The other load is the one exception. Windows gives the whole system's
+busy time only by the clock tick. So the bench takes away the time of
+the measured processes, the sampler and the audio engine as Windows
+counts it the same way. Their cycles would not do. In one kernel run,
+FastEmu ran 984 ms a second by its cycles but only 637 by the tick, so
+taking its cycles away hid about 350 ms a second of other load.
+
+The tick also misses part of a busy thread's time when it moves between
+processors. On the computer it was tried on, a busy loop added about
+1000 ms a second of other load when held on one processor, and about
+700 when Windows moved it between processors. Either is far over the
+margin below.
 
 Start to first frame has no window in it. The app's window and its
 graphics start are not counted.
@@ -155,7 +168,8 @@ processor time a second. It waits a minute at most and records the
 load. Each number is the median of the runs, with the smallest and the
 largest. A measurement is flagged as noisy when the other load during
 it passed that threshold, and a number when its runs spread more than
-15 percent from the median.
+15 percent from the median. `bench.md` gives the other load during the
+measurements and just before them.
 
 For the run, the computer is on mains power, in its best performance
 mode, with browsers, editors, chat, OneDrive and Windows Update paused,
