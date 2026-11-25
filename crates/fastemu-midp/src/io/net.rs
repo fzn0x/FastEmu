@@ -36,14 +36,77 @@ pub(crate) const IO_TIMEOUT: Duration = Duration::from_secs(30);
 /// instance's network policy is `Deny`.
 pub(crate) const NETWORK_OFF: &str = "network access is off for this game";
 
+/// How many client connections a game may have open at once: sockets,
+/// secure sockets, sockets its server accepted and HTTP connections. A
+/// phone had a handful.
+pub(crate) const MAX_CONNECTIONS: usize = 64;
+
+/// How many server sockets a game may have open at once.
+pub(crate) const MAX_SERVERS: usize = 8;
+
+/// How many datagram connections a game may have open at once.
+pub(crate) const MAX_DATAGRAMS: usize = 16;
+
 /// How many bytes of request bodies a game's HTTP connections may hold
 /// at once, before the requests go out.
 pub(crate) const MAX_PENDING_BYTES: usize = 8 << 20;
 
-/// What a game has open, shared by its [`Pending`]s.
+/// The kinds of connection a game's count of open ones is kept for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Kind {
+    /// A client socket, a secure socket, an accepted socket or an HTTP
+    /// connection.
+    Connection,
+    /// A listening socket.
+    Server,
+    /// A UDP socket.
+    Datagram,
+}
+
+impl Kind {
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    fn limit(self) -> usize {
+        match self {
+            Kind::Connection => MAX_CONNECTIONS,
+            Kind::Server => MAX_SERVERS,
+            Kind::Datagram => MAX_DATAGRAMS,
+        }
+    }
+
+    /// What the game reads when the limit is reached.
+    fn refusal(self) -> &'static str {
+        match self {
+            Kind::Connection => "too many open connections",
+            Kind::Server => "too many open server sockets",
+            Kind::Datagram => "too many open datagram sockets",
+        }
+    }
+}
+
+/// What a game has open, shared by its [`Slot`]s and [`Pending`]s.
 #[derive(Default)]
 struct Counts {
+    open: [AtomicUsize; 3],
     pending: AtomicUsize,
+}
+
+impl Counts {
+    /// Takes a place for a `kind` connection, if the game has one left.
+    fn take(self: &Arc<Self>, kind: Kind) -> Option<Slot> {
+        let counter = &self.open[kind.index()];
+        counter
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < kind.limit()).then_some(n + 1)
+            })
+            .ok()?;
+        Some(Slot {
+            counts: Arc::clone(self),
+            kind,
+        })
+    }
 }
 
 /// The counts of the instance, kept in the VM as an extension. They hold
@@ -60,6 +123,41 @@ fn counts(ctx: &mut Ctx<'_>) -> Arc<Counts> {
     let counts = Arc::clone(&slots.0);
     ctx.set_extension(slots);
     counts
+}
+
+/// One of a game's open connections. It is given back when it is dropped,
+/// so a connection keeps it until its socket is closed, and one the game
+/// never closes gives it back when the collector frees the connection.
+pub(crate) struct Slot {
+    counts: Arc<Counts>,
+    kind: Kind,
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.counts.open[self.kind.index()].fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Takes a place for a `kind` connection, or throws `IOException` when
+/// the game holds all it may.
+///
+/// A game that holds its limit gets one collection and a second try. On a
+/// phone the collector freed a connection nobody referenced, and games
+/// rely on it: they open one for each request and close the stream but
+/// not the connection, and nothing on the Java heap grows enough to start
+/// a collection of its own. A game that really holds them is refused
+/// again. Call it before the native makes any object it does not root.
+pub(crate) fn acquire(ctx: &mut Ctx<'_>, kind: Kind) -> JResult<Slot> {
+    let counts = counts(ctx);
+    if let Some(slot) = counts.take(kind) {
+        return Ok(slot);
+    }
+    ctx.gc();
+    if let Some(slot) = counts.take(kind) {
+        return Ok(slot);
+    }
+    super::throw_io(ctx, kind.refusal())
 }
 
 /// Request bytes a connection holds until its request goes out, counted

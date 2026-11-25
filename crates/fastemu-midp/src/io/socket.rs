@@ -34,6 +34,9 @@ struct Holds {
     input_opened: bool,
     output_opened: bool,
     open_streams: u32,
+    /// The connection's place among the game's open ones, given back
+    /// when it and its streams are closed.
+    slot: Option<net::Slot>,
 }
 
 /// One TCP connection, shared by the connection object and its streams.
@@ -44,12 +47,15 @@ struct SocketShared {
 }
 
 impl SocketShared {
-    /// A connection over `link`, opened with `options`.
-    fn new(link: Link, options: Options) -> Self {
+    /// A connection over `link`, opened with `options`, that holds `slot`.
+    fn new(link: Link, options: Options, slot: net::Slot) -> Self {
         Self {
             link,
             options,
-            holds: Mutex::new(Holds::default()),
+            holds: Mutex::new(Holds {
+                slot: Some(slot),
+                ..Holds::default()
+            }),
         }
     }
 
@@ -58,37 +64,49 @@ impl SocketShared {
         self.options.timeouts.then_some(IO_TIMEOUT)
     }
 
-    /// Shuts the socket once the connection and its streams are closed.
-    fn release_if_done(&self, holds: &Holds) {
+    /// Shuts the socket and gives back the slot once the connection and
+    /// its streams are closed.
+    fn release_if_done(&self, holds: &mut Holds) {
         if holds.closed && holds.open_streams == 0 {
+            holds.slot = None;
             self.link.shutdown();
         }
     }
 }
 
-/// The payload of a socket connection object.
+/// The payload of a socket connection object. `close` lets go of the
+/// socket, so the system frees it when the last stream is closed rather
+/// than when the collector frees the connection object.
 #[derive(Default)]
-struct SocketPayload(Option<Arc<SocketShared>>);
+struct SocketPayload {
+    shared: Option<Arc<SocketShared>>,
+    closed: bool,
+}
 
 impl Payload for SocketPayload {}
 
 /// The socket of connection `conn`, or `IOException` once it is closed.
 fn open_socket(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<Arc<SocketShared>> {
-    let shared = match &ctx.payload::<SocketPayload>(conn)?.0 {
-        Some(s) => Arc::clone(s),
-        None => return throw_io(ctx, "the connection was not opened with Connector.open"),
-    };
-    if lock(&shared.holds).closed {
+    let payload = ctx.payload::<SocketPayload>(conn)?;
+    let (shared, closed) = (payload.shared.clone(), payload.closed);
+    if closed {
         return throw_io(ctx, "connection is closed");
     }
-    Ok(shared)
+    match shared {
+        Some(shared) => Ok(shared),
+        None => throw_io(ctx, "the connection was not opened with Connector.open"),
+    }
 }
 
 /// A new connection object of class `class` over `shared`.
 fn new_connection(ctx: &mut Ctx<'_>, class: &str, shared: SocketShared) -> JResult<ObjRef> {
     let class = ctx.find_class(class)?;
     let conn = ctx.new_object(class)?;
-    ctx.set_payload(conn, SocketPayload(Some(Arc::new(shared))));
+    let payload = SocketPayload {
+        shared: Some(Arc::new(shared)),
+        closed: false,
+    };
+    ctx.set_payload(conn, payload);
     Ok(conn)
 }
 
@@ -107,11 +125,12 @@ pub(crate) fn open(ctx: &mut Ctx<'_>, rest: &str, name: &str, options: Options) 
         return ctx.throw("java/lang/IllegalArgumentException", &message);
     };
     net::check_network(ctx)?;
+    let slot = net::acquire(ctx, net::Kind::Connection)?;
     let socket = net::connect(ctx, &host, port)?;
     new_connection(
         ctx,
         SOCKET_IMPL,
-        SocketShared::new(Link::plain(socket), options),
+        SocketShared::new(Link::plain(socket), options, slot),
     )
 }
 
@@ -131,8 +150,9 @@ pub(crate) fn open_secure(
         return ctx.throw("java/lang/IllegalArgumentException", &message);
     };
     net::check_network(ctx)?;
+    let slot = net::acquire(ctx, net::Kind::Connection)?;
     let link = tls::connect(ctx, &host, port)?;
-    new_connection(ctx, SECURE_IMPL, SocketShared::new(link, options))
+    new_connection(ctx, SECURE_IMPL, SocketShared::new(link, options, slot))
 }
 
 /// What reads from a socket connection's input stream.
@@ -163,7 +183,7 @@ impl Input for SocketInput {
         if !self.closed.swap(true, Ordering::AcqRel) {
             let mut holds = lock(&self.shared.holds);
             holds.open_streams -= 1;
-            self.shared.release_if_done(&holds);
+            self.shared.release_if_done(&mut holds);
         }
         Ok(())
     }
@@ -195,7 +215,7 @@ impl Output for SocketOutput {
         let flushed = self.flush(ctx);
         let mut holds = lock(&self.shared.holds);
         holds.open_streams -= 1;
-        self.shared.release_if_done(&holds);
+        self.shared.release_if_done(&mut holds);
         flushed
     }
 }
@@ -316,10 +336,12 @@ fn client_class(name: &str, interface: &str) -> NativeClass {
         .implements(interface)
         .payload::<SocketPayload>()
         .method("close", "()V", |ctx, a| {
-            if let Some(shared) = ctx.payload::<SocketPayload>(this(a))?.0.clone() {
+            let payload = ctx.payload_mut::<SocketPayload>(this(a))?;
+            payload.closed = true;
+            if let Some(shared) = payload.shared.take() {
                 let mut holds = lock(&shared.holds);
                 holds.closed = true;
-                shared.release_if_done(&holds);
+                shared.release_if_done(&mut holds);
             }
             Ok(Value::Void)
         })
@@ -409,6 +431,9 @@ fn port_value(ctx: &mut Ctx<'_>, port: io::Result<u16>) -> JResult<Value> {
 /// frees the connection object.
 struct ServerShared {
     listener: Mutex<Option<TcpListener>>,
+    /// The listener's place among the game's server sockets, given back
+    /// by `close` with the listener.
+    slot: Mutex<Option<net::Slot>>,
     options: Options,
 }
 
@@ -429,6 +454,7 @@ struct ServerPayload(Option<Arc<ServerShared>>);
 impl Payload for ServerPayload {}
 
 fn open_server(ctx: &mut Ctx<'_>, port: u16, options: Options) -> JResult<ObjRef> {
+    let slot = net::acquire(ctx, net::Kind::Server)?;
     let listener = match TcpListener::bind(("0.0.0.0", port)) {
         Ok(l) => l,
         Err(e) => return Err(net::io_exception(ctx, &e)),
@@ -441,6 +467,7 @@ fn open_server(ctx: &mut Ctx<'_>, port: u16, options: Options) -> JResult<ObjRef
     let conn = ctx.new_object(class)?;
     let shared = ServerShared {
         listener: Mutex::new(Some(listener)),
+        slot: Mutex::new(Some(slot)),
         options,
     };
     ctx.set_payload(conn, ServerPayload(Some(Arc::new(shared))));
@@ -461,6 +488,8 @@ fn server(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<Arc<ServerShared>> {
 /// `acceptAndOpen`: waits for a client and returns its connection.
 fn accept(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<ObjRef> {
     let shared = server(ctx, conn)?;
+    // A game at its limit leaves clients waiting in the listener's queue.
+    let slot = net::acquire(ctx, net::Kind::Connection)?;
     let deadline = net::deadline(shared.options.timeouts.then_some(IO_TIMEOUT));
     let socket = net::block_on(ctx, deadline, || {
         // The listener does not block, so `close` waits for this lock
@@ -487,7 +516,7 @@ fn accept(ctx: &mut Ctx<'_>, conn: ObjRef) -> JResult<ObjRef> {
     new_connection(
         ctx,
         SOCKET_IMPL,
-        SocketShared::new(Link::plain(socket), shared.options),
+        SocketShared::new(Link::plain(socket), shared.options, slot),
     )
 }
 
@@ -498,6 +527,7 @@ fn server_class() -> NativeClass {
         .method("close", "()V", |ctx, a| {
             if let Some(shared) = &ctx.payload::<ServerPayload>(this(a))?.0 {
                 lock(&shared.listener).take();
+                lock(&shared.slot).take();
             }
             Ok(Value::Void)
         })

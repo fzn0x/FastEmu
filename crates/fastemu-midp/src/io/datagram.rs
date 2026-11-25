@@ -36,6 +36,9 @@ struct UdpShared {
     /// connection object. A send or receive works on its own handle, so a
     /// thread waiting for a datagram never holds up another one's send.
     socket: Mutex<Option<Arc<UdpSocket>>>,
+    /// The socket's place among the game's datagram connections, given
+    /// back by `close` with the socket.
+    slot: Mutex<Option<net::Slot>>,
     /// For a client, the address the name gave, as text and resolved.
     target: Option<(String, SocketAddr)>,
     options: Options,
@@ -85,6 +88,7 @@ pub(crate) fn open(ctx: &mut Ctx<'_>, rest: &str, name: &str, options: Options) 
         (None, _) => None,
     };
     net::check_network(ctx)?;
+    let slot = net::acquire(ctx, net::Kind::Datagram)?;
     let (bind, target) = match client {
         Some((host, port)) => {
             let addr = net::resolve(ctx, &host, port)?;
@@ -113,6 +117,7 @@ pub(crate) fn open(ctx: &mut Ctx<'_>, rest: &str, name: &str, options: Options) 
     let conn = ctx.new_object(class)?;
     let shared = UdpShared {
         socket: Mutex::new(Some(Arc::new(socket))),
+        slot: Mutex::new(Some(slot)),
         target,
         options,
     };
@@ -298,6 +303,7 @@ fn connection_class() -> NativeClass {
         .method("close", "()V", |ctx, a| {
             if let Some(shared) = &ctx.payload::<UdpPayload>(this(a))?.0 {
                 lock(&shared.socket).take();
+                lock(&shared.slot).take();
             }
             Ok(Value::Void)
         })

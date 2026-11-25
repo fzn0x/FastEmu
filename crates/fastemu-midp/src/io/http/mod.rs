@@ -79,6 +79,9 @@ struct State {
     /// The body's share of what the game's connections may hold; given
     /// back when the request goes out.
     pending: Option<net::Pending>,
+    /// This connection's place among the game's open ones, given back
+    /// when it and its streams are closed.
+    slot: Option<net::Slot>,
     phase: Phase,
     /// `close` was called.
     closed: bool,
@@ -106,6 +109,7 @@ impl State {
     /// closed.
     fn release_if_done(&mut self) {
         if self.closed && self.open_streams == 0 {
+            self.slot = None;
             self.exchange = None;
             if let Some(link) = self.link.take() {
                 link.shutdown();
@@ -251,6 +255,7 @@ pub(crate) fn open(
         Err(message) => return ctx.throw("java/lang/IllegalArgumentException", &message),
     };
     net::check_network(ctx)?;
+    let slot = net::acquire(ctx, net::Kind::Connection)?;
     let pending = net::pending(ctx);
     let class = ctx.find_class(if scheme == "https" {
         HTTPS_IMPL
@@ -267,6 +272,7 @@ pub(crate) fn open(
         header_bytes: 0,
         body: Vec::new(),
         pending: Some(pending),
+        slot: Some(slot),
         phase: Phase::Setup,
         closed: false,
         input_opened: false,
