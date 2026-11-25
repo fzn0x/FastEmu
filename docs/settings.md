@@ -108,10 +108,10 @@ you trust, since a game with network access can send data out.
 
 Network access means the whole network, not only the internet. A game
 with network access can reach programs on your own computer, devices on
-your local network and link-local addresses. It can also listen for connections on
-every network interface of your computer, and learn your computer's
-address on the local network. Leave it off for games that do not need
-it.
+your local network and link-local addresses. It can also listen for
+connections on every network interface of your computer, and learn your
+computer's address on the local network. Leave it off for games that do
+not need it.
 
 Text messages are never sent, with or without network access. A game
 that sends an SMS, often a paid one, is told the send failed, and the
