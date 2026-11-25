@@ -295,6 +295,25 @@ fn declared_bmp(width: i32, height: i32) -> Vec<u8> {
     bmp
 }
 
+/// A GIF of 34 bytes with a screen of one pixel whose first frame declares
+/// 8192 by 4096 pixels and whose image data ends at once. Decoded whole,
+/// the frame and its index would hold 160 MiB.
+fn gif_frame_bomb() -> Vec<u8> {
+    let mut gif = b"GIF89a".to_vec();
+    // The screen, 1 by 1 with a palette of two colours, and the palette.
+    gif.extend_from_slice(&[1, 0, 1, 0, 0x80, 0, 0]);
+    gif.extend_from_slice(&[0, 0, 0, 255, 255, 255]);
+    // The frame at 0, 0.
+    gif.push(0x2C);
+    gif.extend_from_slice(&[0, 0, 0, 0]);
+    gif.extend_from_slice(&8192_u16.to_le_bytes());
+    gif.extend_from_slice(&4096_u16.to_le_bytes());
+    // No palette of its own; LZW code size 2; one data block that holds
+    // only a clear code and the end code; the trailer.
+    gif.extend_from_slice(&[0, 2, 1, 0x2C, 0, 0x3B]);
+    gif
+}
+
 /// A PNG of `width` by `height` transparent black pixels, which deflate to
 /// a few kilobytes.
 fn blank_png(width: u32, height: u32) -> Vec<u8> {
@@ -370,9 +389,13 @@ fn a_file_that_declares_more_pixels_than_the_heap_holds_is_refused_before_it_is_
     let bmp = declared_bmp(16384, 2048);
     assert_eq!(fastemu_gfx::probe_size(&png), Some((16384, 2048)));
     assert_eq!(fastemu_gfx::probe_size(&bmp), Some((16384, 2048)));
+    let gif = gif_frame_bomb();
+    assert_eq!(gif.len(), 34);
+    assert_eq!(fastemu_gfx::probe_size(&gif), Some((1, 1)));
     let resources = [
         ("bomb.png", png),
         ("bomb.bmp", bmp),
+        ("bomb.gif", gif),
         ("dot.png", support::test_png()),
     ];
     let Some(jar) = suite("image-file", &resources) else {
@@ -387,12 +410,24 @@ fn a_file_that_declares_more_pixels_than_the_heap_holds_is_refused_before_it_is_
             assert!(run.has(&line), "no {line:?}; the log:\n{log}");
         }
     }
+    // The GIF's image is one pixel, but its first frame would hold 160 MiB
+    // while it decodes, which the heap cannot: a file that does not decode,
+    // by the exception each way names for one.
+    for (how, error) in [
+        ("by name", "IOException"),
+        ("by bytes", "IllegalArgumentException"),
+        ("by stream", "IOException"),
+    ] {
+        let line = format!("/bomb.gif {how} {error}");
+        assert!(run.has(&line), "no {line:?}; the log:\n{log}");
+    }
     // A real image still loads, the three ways.
     for how in ["by name", "by bytes", "by stream"] {
         let line = format!("/dot.png {how} ok 2x2");
         assert!(run.has(&line), "no {line:?}; the log:\n{log}");
     }
-    // Six files that declare 128 MiB each were read, and none was decoded.
+    // Six files that declare 128 MiB each were read, and none was decoded,
+    // and no GIF frame was decoded at its own size.
     assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
 }
 
@@ -564,7 +599,7 @@ fn custom_items_count_their_surfaces_and_screens_not_shown_give_their_buffers_ba
 #[test]
 fn siemens_bitmaps_and_tiled_layers_the_heap_cannot_hold_are_refused_before_they_are_made() {
     let alone = Alone::new();
-    let Some(jar) = suite("siemens-bitmaps", &[]) else {
+    let Some(jar) = suite("siemens-bitmaps", &[("bomb.gif", gif_frame_bomb())]) else {
         return;
     };
     // The packed bitmap is 1 MiB, so the heap is 2 MiB.
@@ -574,6 +609,13 @@ fn siemens_bitmaps_and_tiled_layers_the_heap_cannot_hold_are_refused_before_they
     // 32 MiB of pixels and 64 MiB of cells.
     assert!(run.has("siemens bitmap OutOfMemoryError"), "{log}");
     assert!(run.has("siemens layer OutOfMemoryError"), "{log}");
+    // A GIF whose first frame would hold 160 MiB to decode is a file that
+    // does not decode, by Siemens' loaders too.
+    assert!(run.has("siemens gif by name IOException"), "{log}");
+    assert!(
+        run.has("siemens gif by bytes IllegalArgumentException"),
+        "{log}"
+    );
     assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
 }
 
