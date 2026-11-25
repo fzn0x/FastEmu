@@ -95,13 +95,7 @@ impl<'a> Chunks<'a> {
         let mut palette = None;
         let mut transparency = None;
         let mut image = Vec::new();
-        let mut pos = SIGNATURE.len();
-        while let Some(head) = data.get(pos..pos + 8) {
-            let len = u32::from_be_bytes([head[0], head[1], head[2], head[3]]) as usize;
-            let kind = [head[4], head[5], head[6], head[7]];
-            let start = pos + 8;
-            let end = start.saturating_add(len);
-            let body = &data[start..end.min(data.len())];
+        for (kind, body) in walk(data) {
             match &kind {
                 b"IHDR" => {
                     header.get_or_insert(body);
@@ -116,10 +110,6 @@ impl<'a> Chunks<'a> {
                 b"IEND" => break,
                 _ => {}
             }
-            if end >= data.len() {
-                break;
-            }
-            pos = end + 4;
         }
         let header = header.ok_or_else(|| failed("PNG", "no IHDR chunk"))?;
         if image.is_empty() {
@@ -148,6 +138,23 @@ impl<'a> Chunks<'a> {
         write_chunk(&mut out, *b"IEND", &[])?;
         Ok(out)
     }
+}
+
+/// Every chunk of a file as its type and body, in file order: a length
+/// that runs past the end of the data cuts the body short and ends the
+/// walk, and checksums are not looked at.
+fn walk(data: &[u8]) -> impl Iterator<Item = ([u8; 4], &[u8])> {
+    let mut next = Some(SIGNATURE.len());
+    std::iter::from_fn(move || {
+        let pos = next?;
+        let head = data.get(pos..pos + 8)?;
+        let len = u32::from_be_bytes([head[0], head[1], head[2], head[3]]) as usize;
+        let kind = [head[4], head[5], head[6], head[7]];
+        let start = pos + 8;
+        let end = start.saturating_add(len);
+        next = (end < data.len()).then(|| end + 4);
+        Some((kind, &data[start..end.min(data.len())]))
+    })
 }
 
 fn write_chunk(out: &mut Vec<u8>, kind: [u8; 4], body: &[u8]) -> Result<()> {
