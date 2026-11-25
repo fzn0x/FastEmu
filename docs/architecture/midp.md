@@ -134,6 +134,9 @@ Natives that read resources by name use `env(ctx).source` (the same
 `JarSource`) inside `Ctx::without_lock`. `Image.createImage(String)`
 treats every name as absolute.
 
+[SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists the
+limits of a suite with every other limit a game meets.
+
 ## Launching
 
 `MidpLauncher::new(audio)` takes an optional `fastemu_audio::Engine`: the
