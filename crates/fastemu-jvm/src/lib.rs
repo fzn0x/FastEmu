@@ -40,7 +40,7 @@ pub use ctx::{ArrayElem, Ctx, FieldId, GlobalRef, JResult, StaticFieldId, Throw,
 pub use heap::{HeapStats, Payload, Tracer};
 pub use limits::{VmLimits, cut_log_text};
 pub use native::{FieldConstant, NativeClass, NativeField, NativeFn, NativeMethod};
-pub use source::{ClassSource, DirSource, MemorySource};
+pub use source::{ClassSource, DirSource, MemorySource, ResourceRead};
 pub use thread::ThreadId;
 pub use value::{ObjRef, Value};
 pub use vm::{Diagnostic, DiagnosticSink, LogSink, Task, Vm, VmConfig, WeakVm};

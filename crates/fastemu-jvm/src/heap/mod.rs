@@ -222,6 +222,12 @@ impl Heap {
         bytes > self.limit || self.used.saturating_add(bytes) > self.limit.saturating_mul(2)
     }
 
+    /// The most bytes `refuses` lets through now.
+    pub(crate) fn room(&self) -> usize {
+        self.limit
+            .min(self.limit.saturating_mul(2).saturating_sub(self.used))
+    }
+
     /// Estimated bytes of an array of `len` elements of `elem_bytes` each.
     pub(crate) fn array_bytes(len: usize, elem_bytes: usize) -> usize {
         (12usize.saturating_add(len.saturating_mul(elem_bytes))).next_multiple_of(8)
@@ -650,6 +656,30 @@ mod tests {
         sized(&mut heap, 60_000);
         assert!(heap.refuses(64 * 1024), "120 KB and 64 KB are over 128 KB");
         assert!(!heap.refuses(1000));
+    }
+
+    #[test]
+    fn the_room_is_the_most_the_heap_lets_through() {
+        let mut heap = Heap::new(64 * 1024);
+        // Whatever the heap counts, `room` is where `refuses` turns.
+        for used in [0, 60_000, 6_000] {
+            sized(&mut heap, used);
+            let room = heap.room();
+            assert!(
+                !heap.refuses(room),
+                "{room} bytes with {} counted",
+                heap.used
+            );
+            assert!(
+                heap.refuses(room + 1),
+                "{room} bytes with {} counted",
+                heap.used
+            );
+        }
+        assert!(heap.room() < 64 * 1024, "less than the heap once it fills");
+        sized(&mut heap, 200_000);
+        assert_eq!(heap.room(), 0, "a heap past twice its limit has no room");
+        assert!(heap.refuses(1));
     }
 
     #[test]

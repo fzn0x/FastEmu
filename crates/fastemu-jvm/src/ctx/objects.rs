@@ -1,5 +1,7 @@
 //! Objects, strings, arrays, fields, payloads and classes, for natives.
 
+use std::sync::Arc;
+
 use fastemu_core::LogLevel;
 
 use super::{Ctx, JResult, Throw};
@@ -7,6 +9,7 @@ use crate::class::{ArrayType, ClassId, ClassKind, LoadError};
 use crate::heap::{Body, Heap, HeapObject, Payload};
 use crate::lang;
 use crate::limits::VmLimits;
+use crate::source::ResourceRead;
 use crate::value::{ObjRef, Value};
 use crate::vm::{Diagnostic, MAX_REPORTED_NAME, VmState};
 
@@ -287,6 +290,25 @@ impl Ctx<'_> {
             return Err(self.out_of_memory());
         }
         Ok(())
+    }
+
+    /// The bytes of the resource `path` of the game's source (its JAR), for
+    /// a native that hands them to the game: `None` when there is none.
+    ///
+    /// A resource of more than [`Ctx::check_alloc`] would let through now
+    /// throws `OutOfMemoryError` without being read: the source stops
+    /// reading at that size, so a small file that expands a thousand times
+    /// costs the room of the heap and no more. The read runs with the VM
+    /// lock released. What this returns is a host buffer the heap does not
+    /// count yet: the native counts it as it makes it an object.
+    pub fn read_resource(&mut self, path: &str) -> JResult<Option<Vec<u8>>> {
+        let max = self.state.heap.room();
+        let source = Arc::clone(self.state.classes.source());
+        match self.without_lock(|| source.resource_within(path, max)) {
+            ResourceRead::Found(bytes) => Ok(Some(bytes)),
+            ResourceRead::Missing => Ok(None),
+            ResourceRead::TooLarge => Err(self.out_of_memory()),
+        }
     }
 
     fn check_array_len(&mut self, len: i32, elem_bytes: usize) -> JResult<usize> {

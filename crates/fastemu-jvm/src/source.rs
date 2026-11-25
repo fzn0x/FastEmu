@@ -16,6 +16,35 @@ pub trait ClassSource: Send + Sync {
     /// The bytes of the resource at `path`, relative to the root and
     /// without a leading `/` (such as `images/title.png`).
     fn resource(&self, path: &str) -> Option<Vec<u8>>;
+
+    /// The resource at `path` when it has at most `max` bytes. A resource
+    /// of more says so without being read whole: a source over a
+    /// compressed archive stops inflating at `max`, so a small file that
+    /// expands a thousand times costs `max` bytes and not a thousand times
+    /// its size. Natives that hand a resource to a game ask through
+    /// [`Ctx::read_resource`](crate::Ctx::read_resource), which sets `max`
+    /// to what the heap can hold.
+    ///
+    /// The default reads the whole resource with [`ClassSource::resource`]
+    /// and measures it, for sources that hold their resources in memory.
+    fn resource_within(&self, path: &str, max: usize) -> ResourceRead {
+        match self.resource(path) {
+            Some(bytes) if bytes.len() > max => ResourceRead::TooLarge,
+            Some(bytes) => ResourceRead::Found(bytes),
+            None => ResourceRead::Missing,
+        }
+    }
+}
+
+/// What [`ClassSource::resource_within`] found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResourceRead {
+    /// The resource, which is no longer than the limit.
+    Found(Vec<u8>),
+    /// The source has no such resource.
+    Missing,
+    /// The resource is longer than the limit.
+    TooLarge,
 }
 
 /// Classes and resources in a directory tree, as `javac -d` writes them.
@@ -56,6 +85,21 @@ impl ClassSource for DirSource {
             None
         }
     }
+
+    fn resource_within(&self, path: &str, max: usize) -> ResourceRead {
+        let Some(file) = self.path(path) else {
+            return ResourceRead::Missing;
+        };
+        match std::fs::metadata(&file) {
+            Ok(meta) if meta.is_file() && meta.len() > max as u64 => ResourceRead::TooLarge,
+            Ok(meta) if meta.is_file() => match std::fs::read(file) {
+                Ok(bytes) if bytes.len() > max => ResourceRead::TooLarge,
+                Ok(bytes) => ResourceRead::Found(bytes),
+                Err(_) => ResourceRead::Missing,
+            },
+            _ => ResourceRead::Missing,
+        }
+    }
 }
 
 /// Classes and resources held in memory, for tests and for hosts that
@@ -94,6 +138,14 @@ impl ClassSource for MemorySource {
     fn resource(&self, path: &str) -> Option<Vec<u8>> {
         self.resources.get(path).cloned()
     }
+
+    fn resource_within(&self, path: &str, max: usize) -> ResourceRead {
+        match self.resources.get(path) {
+            Some(bytes) if bytes.len() > max => ResourceRead::TooLarge,
+            Some(bytes) => ResourceRead::Found(bytes.clone()),
+            None => ResourceRead::Missing,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -109,6 +161,24 @@ mod tests {
         assert_eq!(source.class_bytes("a/B"), Some(vec![1, 2]));
         assert_eq!(source.resource("res/x.bin"), Some(vec![3]));
         assert_eq!(source.class_bytes("a/C"), None);
+    }
+
+    #[test]
+    fn a_resource_over_the_limit_is_too_large_and_not_missing() {
+        let mut source = MemorySource::new();
+        source.add_resource("res/x.bin", vec![3; 10]);
+        assert_eq!(
+            source.resource_within("res/x.bin", 10),
+            ResourceRead::Found(vec![3; 10])
+        );
+        assert_eq!(
+            source.resource_within("res/x.bin", 9),
+            ResourceRead::TooLarge
+        );
+        assert_eq!(
+            source.resource_within("res/y.bin", 9),
+            ResourceRead::Missing
+        );
     }
 
     #[test]
