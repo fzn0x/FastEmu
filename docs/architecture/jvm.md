@@ -804,9 +804,9 @@ MiB, a method of 64 KiB of code 1.3 MiB, and a method table of 30000
 methods 960 KB for each subclass, so about 20, 100 and 130 of them
 load.
 
-What the loader builds before it knows the size is bounded by the class
-file, so a class that is then refused costs little. A method keeps two
-numbers of its descriptor and not its parse, since a descriptor can name
+What the loader builds before it knows the size stays within a small
+multiple of the class file and of the classes already loaded, so a class
+that is then refused costs little. A method keeps two numbers of its descriptor and not its parse, since a descriptor can name
 tens of thousands of parameters and every method can share it. A text
 constant is copied to UTF-16 once for each text of the pool, however many
 string entries and fields name it. An interface a class names more than
