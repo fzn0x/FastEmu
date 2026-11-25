@@ -188,3 +188,22 @@ fn sprites_made_from_one_picture_count_against_the_heap() {
         ["kept sprites: oom", "dropped sprites: ok", "done"]
     );
 }
+
+#[test]
+fn composers_count_their_notes_against_the_heap() {
+    // A heap of 1 MiB, where a composer full of notes keeps 256 KiB.
+    let Some(output) = run_on("SiemensComposers", &profile(SIEMENS), None, 1 << 20) else {
+        return;
+    };
+    assert_eq!(output.err, Vec::<String>::new());
+    assert_eq!(
+        output.out,
+        [
+            "kept composed: oom",
+            "dropped composed: ok",
+            "kept appended: oom",
+            "reset appended: ok",
+            "done"
+        ]
+    );
+}
