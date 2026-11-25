@@ -1,6 +1,7 @@
 //! The library sidebar: adding games by picker or drop, reading their
 //! icons, removing and launching them.
 
+use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -31,25 +32,30 @@ struct Inspected {
     icon: Option<Bgra>,
 }
 
+/// What the library shows for a file whose reading panicked.
+const UNREADABLE: &str = "FastEmu could not read this file";
+
+/// Reads the suite at `path` and decodes its icon. A suite is a game's
+/// file, so the readers must not panic on it; but one that does must not
+/// take the app down, since this runs on a background task for each library
+/// entry at start and for each file added. The panic is caught and the file
+/// shows as broken, with a fixed text.
 fn inspect(launcher: &dyn Launcher, path: PathBuf) -> Inspected {
-    match launcher.inspect(&path) {
+    let read = panic::catch_unwind(AssertUnwindSafe(|| match launcher.inspect(&path) {
         Ok(info) => {
             let icon = info
                 .icon
                 .as_deref()
                 .and_then(|png| icon_bgra(png, ICON_PIXELS));
-            Inspected {
-                path,
-                info: Ok(info),
-                icon,
-            }
+            (Ok(info), icon)
         }
-        Err(err) => Inspected {
-            path,
-            info: Err(err.to_string()),
-            icon: None,
-        },
-    }
+        Err(err) => (Err(err.to_string()), None),
+    }));
+    let (info, icon) = read.unwrap_or_else(|_| {
+        log::error!("reading {path:?} panicked; it is shown as broken");
+        (Err(UNREADABLE.to_owned()), None)
+    });
+    Inspected { path, info, icon }
 }
 
 impl FastEmuView {
@@ -496,5 +502,50 @@ impl FastEmuView {
                         ),
                 ),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use fastemu_core::{Instance, LaunchError, LaunchRequest};
+
+    use super::*;
+
+    /// Reads a file named like a panic as a panic, and others as suites.
+    struct PanickyLauncher;
+
+    impl fastemu_core::Launcher for PanickyLauncher {
+        fn inspect(&self, suite: &Path) -> Result<SuiteInfo, LaunchError> {
+            let name = suite.file_name().map(|n| n.to_string_lossy().into_owned());
+            match name.as_deref() {
+                Some("panics.jar") => panic!("a reader that trusts the file"),
+                Some("broken.jar") => Err(LaunchError::InvalidSuite("no manifest".into())),
+                _ => Ok(SuiteInfo {
+                    name: "Fine".into(),
+                    ..SuiteInfo::default()
+                }),
+            }
+        }
+
+        fn launch(&self, _: LaunchRequest) -> Result<Arc<dyn Instance>, LaunchError> {
+            Err(LaunchError::Unsupported("not here".into()))
+        }
+    }
+
+    #[test]
+    fn a_reader_that_panics_makes_a_broken_entry_not_a_dead_app() {
+        let found: Vec<Inspected> = ["a.jar", "panics.jar", "broken.jar", "b.jar"]
+            .into_iter()
+            .map(|name| inspect(&PanickyLauncher, PathBuf::from(name)))
+            .collect();
+        let info = |i: usize| found[i].info.as_ref().map(|i| i.name.as_str());
+        assert_eq!(info(0), Ok("Fine"));
+        assert_eq!(info(1), Err(&UNREADABLE.to_owned()));
+        assert!(found[1].icon.is_none());
+        assert_eq!(found[1].path, Path::new("panics.jar"));
+        assert!(info(2).is_err_and(|e| e.contains("no manifest")));
+        assert_eq!(info(3), Ok("Fine"), "the entries after it are read");
     }
 }

@@ -128,6 +128,8 @@ impl Launcher for FakeLauncher {
         if name.starts_with("broken") {
             return Err(LaunchError::InvalidSuite("no manifest".into()));
         }
+        // A reader that trusts the file too much.
+        assert!(!name.starts_with("panics"), "the reader panicked on {name}");
         Ok(SuiteInfo {
             name: name.to_uppercase(),
             vendor: "Test".into(),
@@ -1051,6 +1053,50 @@ fn entries_removed_during_a_library_scan_stay_gone(cx: &mut TestAppContext) {
         !h.read(|v| v.broken.contains_key(&id) || v.icons.contains_key(&id)),
         "the scan's late result must not bring back state for the entry"
     );
+}
+
+#[gpui::test]
+fn a_suite_that_makes_the_reader_panic_shows_as_broken(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    // Adding: the file is reported, the others are added.
+    h.add(&["snake.jar", "panics.jar", "tetris.jar"]);
+    let (names, notices) = h.read(|v| {
+        (
+            v.library
+                .entries()
+                .iter()
+                .map(|e| e.name.clone())
+                .collect::<Vec<_>>(),
+            v.notices
+                .iter()
+                .map(|n| n.text.to_string())
+                .collect::<Vec<_>>(),
+        )
+    });
+    assert_eq!(names, vec!["SNAKE", "TETRIS"]);
+    assert!(
+        notices
+            .iter()
+            .any(|n| n == "Could not add panics.jar: FastEmu could not read this file"),
+        "{notices:?}"
+    );
+
+    // Refreshing: an entry whose file now makes the reader panic is marked
+    // broken, and the entries after it are still read.
+    let path = h.dir.path().join("panics.jar");
+    let id = h.view.update_in(h.cx, |v, window, cx| {
+        let id = v.library.add(path, &SuiteInfo::default());
+        v.refresh_library(window, cx);
+        id
+    });
+    h.cx.run_until_parked();
+    assert_eq!(
+        h.read(|v| v.broken.get(&id).cloned()).as_deref(),
+        Some("FastEmu could not read this file")
+    );
+    let others = h.read(|v| v.library.entries().len());
+    assert_eq!(others, 3);
+    assert_eq!(h.read(|v| v.broken.len()), 1, "only that one is broken");
 }
 
 #[gpui::test]
