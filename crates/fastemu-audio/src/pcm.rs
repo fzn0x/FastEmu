@@ -2,7 +2,29 @@
 
 use std::sync::Arc;
 
+use crate::error::AudioError;
+use crate::format::Format;
 use crate::source::Source;
+
+/// The most memory one decoded sound may take, 16 MiB or 8 million
+/// samples: ten minutes of 8 kHz speech is 9.6 MB, and a minute and a
+/// half of 44.1 kHz stereo fills it. Phones kept a few megabytes of
+/// sound. A decoder that would pass it returns [`AudioError::TooLarge`]
+/// before it allocates, so a file cannot cost more than this.
+pub const MAX_DECODED_BYTES: usize = 16 * 1024 * 1024;
+
+/// Refuses a sound of `format` that would decode to `samples` 16-bit
+/// samples, when that is more than [`MAX_DECODED_BYTES`].
+pub(crate) fn check_decoded(format: Format, samples: u64) -> Result<(), AudioError> {
+    if samples.saturating_mul(2) > MAX_DECODED_BYTES as u64 {
+        return Err(AudioError::TooLarge(format!(
+            "a {} sound that decodes to more than {} MiB",
+            format.name(),
+            MAX_DECODED_BYTES >> 20
+        )));
+    }
+    Ok(())
+}
 
 /// Decoded sound: interleaved 16-bit samples, one or two channels.
 ///

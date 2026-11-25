@@ -65,5 +65,6 @@ pub use mixer::GroupId;
 pub use output::NullOutput;
 #[cfg(feature = "output")]
 pub use output::{AudioOutput, OutputError, OutputInfo};
+pub use pcm::MAX_DECODED_BYTES;
 pub use player::Player;
 pub use voice::PlayerState;

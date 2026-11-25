@@ -4,13 +4,18 @@
 //! wrong sizes: a RIFF size that ignores the file, a data size of zero or
 //! past the end, odd chunks without their pad byte. The decoder takes the
 //! bytes that are there instead of trusting the sizes.
+//!
+//! A file decodes to at most four times its size (two 4-bit codes of
+//! ADPCM become 4 bytes of samples), so what it will decode to is worked
+//! out from the bytes there are, before anything is allocated, and a
+//! sound of more than [`MAX_DECODED_BYTES`] is refused.
 
 mod adpcm;
 mod g711;
 
 use crate::error::AudioError;
 use crate::format::Format;
-use crate::pcm::Pcm;
+use crate::pcm::{MAX_DECODED_BYTES, Pcm, check_decoded};
 
 const PCM: u16 = 0x0001;
 const MS_ADPCM: u16 = 0x0002;
@@ -145,7 +150,23 @@ fn parse_format(body: &[u8]) -> Result<FormatChunk, AudioError> {
     Ok(format)
 }
 
+/// The most samples `decode_samples` makes from `data`, counted before
+/// any folding to stereo. It never trusts a size the header claims: only
+/// the bytes there are decoded.
+fn decoded_samples(format: &FormatChunk, data: &[u8]) -> u64 {
+    let len = data.len() as u64;
+    match format.tag {
+        PCM | IEEE_FLOAT => len / container_bytes(format).max(1) as u64,
+        MU_LAW | A_LAW => len,
+        // A byte holds two 4-bit codes, and a block header gives a sample
+        // or two from its first bytes.
+        IMA_ADPCM | MS_ADPCM => len * 2,
+        _ => 0,
+    }
+}
+
 fn decode_samples(format: &FormatChunk, data: &[u8]) -> Result<Pcm, AudioError> {
+    check_decoded(Format::Wav, decoded_samples(format, data))?;
     let channels = usize::from(format.channels);
     let samples = match format.tag {
         PCM => decode_pcm(format, data)?,
@@ -319,6 +340,46 @@ pub(crate) mod tests {
         assert_eq!(pcm.rate, 22050);
         assert_eq!(pcm.channels, 2);
         assert_eq!(pcm.samples, vec![1, -1, 1000, -1000]);
+    }
+
+    /// A mu-law file of `bytes` bytes, which decodes to twice that.
+    fn mu_law_wav(bytes: usize) -> Vec<u8> {
+        wav_bytes(MU_LAW, 1, 8000, 8, 1, &[], &vec![0xFF; bytes])
+    }
+
+    #[test]
+    fn sound_that_decodes_past_the_cap_is_refused_before_it_decodes() {
+        let half = MAX_DECODED_BYTES / 2;
+        // Exactly the cap decodes; one byte more does not.
+        let pcm = decode(&mu_law_wav(half)).unwrap();
+        assert_eq!(pcm.samples.len() * 2, MAX_DECODED_BYTES);
+        drop(pcm);
+        let error = decode(&mu_law_wav(half + 1)).unwrap_err();
+        assert!(matches!(error, AudioError::TooLarge(_)), "{error}");
+        // 8-bit PCM and A-law widen to 16 bits the same way.
+        let bytes = vec![0x80; half + 1];
+        let wav = wav_bytes(PCM, 1, 8000, 8, 1, &[], &bytes);
+        assert!(matches!(decode(&wav), Err(AudioError::TooLarge(_))));
+        let wav = wav_bytes(A_LAW, 1, 8000, 8, 1, &[], &bytes);
+        assert!(matches!(decode(&wav), Err(AudioError::TooLarge(_))));
+        // ADPCM makes four bytes of samples from each byte.
+        let codes = vec![0; MAX_DECODED_BYTES / 4 + 1];
+        let extra = [0xF9, 0x01]; // 505 samples a block
+        let wav = wav_bytes(IMA_ADPCM, 1, 8000, 4, 256, &extra, &codes);
+        assert!(matches!(decode(&wav), Err(AudioError::TooLarge(_))));
+        let extra = [0xF4, 0x01, 0x07, 0x00];
+        let wav = wav_bytes(MS_ADPCM, 1, 8000, 4, 256, &extra, &codes);
+        assert!(matches!(decode(&wav), Err(AudioError::TooLarge(_))));
+    }
+
+    #[test]
+    fn a_header_that_claims_billions_of_frames_decodes_only_the_bytes_there() {
+        let mut wav = pcm16_wav(8000, 2, &[1, 2, 3, 4]);
+        // The data chunk says it holds 4 billion bytes of stereo.
+        let at = wav.windows(4).position(|w| w == b"data").unwrap();
+        wav[at + 4..at + 8].copy_from_slice(&u32::MAX.to_le_bytes());
+        let pcm = decode(&wav).unwrap();
+        assert_eq!(pcm.samples, vec![1, 2, 3, 4]);
     }
 
     #[test]
