@@ -97,6 +97,8 @@ vm.spawn("main", |ctx| {
   which allocation throws `OutOfMemoryError`. Objects are counted at
   about the size a phone's VM would give them.
 - `max_frames` (4096): Java frames per thread before `StackOverflowError`.
+  The slots the frames declare are limited as well (see
+  [Limits](#limits)).
 - `max_native_depth` (256): how many times native code may call back into
   Java on one thread, nested, before `StackOverflowError`. A native that
   calls another native (`Vector.toString` on a vector that holds a
@@ -324,6 +326,17 @@ the fields are only read while the VM runs.
 | `max_log_line_bytes` | 4096 | bytes of one log line | #30 |
 | `max_reported` | 256 | different diagnostics reported | #30 |
 | `max_posted` | 10000 | posted tasks not yet run | #30 |
+
+`max_stack_slots` counts what a thread's frames reserve: the
+`max_locals` and `max_stack` that the class file declares, and 2 more,
+whether the method uses them or not. Each slot is 16 bytes and a thread
+keeps what it grew to until it ends, so the default of 131072 slots is at
+most 2 MiB a thread: 4096 frames of 32 slots, where the largest method in
+the test corpus declares about a hundred in all. A call that would pass
+the limit throws `StackOverflowError`, which a game can catch, whether
+the caller is bytecode or a native that calls into Java. A class that
+declares frames of 65535 locals and 65535 stack slots cannot run a
+single call.
 
 ### Payloads and the heap
 
@@ -717,6 +730,11 @@ handle constants (lambdas) throw `IncompatibleClassChangeError`; J2ME
 code has none. Exception messages follow HotSpot's where it matters
 (`/ by zero`, `Index 5 out of bounds for length 3`), and stack traces
 print as HotSpot prints them, with line numbers from `LineNumberTable`.
+
+A thread's frames may hold 131072 slots in all (see [Limits](#limits)),
+so a recursion of large frames ends in `StackOverflowError` long before
+`max_frames`. A handler that catches an exception counts toward the
+safepoint budget (see [Threads and the VM lock](#threads-and-the-vm-lock)).
 
 Speed, from the benchmark (`cargo test -p fastemu-jvm --release --test
 bench -- --ignored --nocapture`): about 590 million bytecodes per second
