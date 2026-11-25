@@ -8,14 +8,14 @@
 //! A file decodes to at most four times its size (two 4-bit codes of
 //! ADPCM become 4 bytes of samples), so what it will decode to is worked
 //! out from the bytes there are, before anything is allocated, and a
-//! sound of more than [`MAX_DECODED_BYTES`] is refused.
+//! sound of more than [`crate::MAX_DECODED_BYTES`] is refused.
 
 mod adpcm;
 mod g711;
 
 use crate::error::AudioError;
 use crate::format::Format;
-use crate::pcm::{MAX_DECODED_BYTES, Pcm, check_decoded};
+use crate::pcm::{Pcm, check_decoded};
 
 const PCM: u16 = 0x0001;
 const MS_ADPCM: u16 = 0x0002;
@@ -292,6 +292,7 @@ fn fold_to_stereo(rate: u32, channels: usize, samples: Vec<i16>) -> Pcm {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::pcm::MAX_DECODED_BYTES;
 
     /// Builds a WAV file from a format tag, its fields and raw data.
     pub(crate) fn wav_bytes(
