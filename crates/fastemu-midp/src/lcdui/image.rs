@@ -67,6 +67,36 @@ pub(crate) fn reserve_pixels(ctx: &mut Ctx<'_>, width: i64, height: i64) -> JRes
     ctx.check_alloc(usize::try_from(bytes).unwrap_or(usize::MAX))
 }
 
+/// [`reserve_pixels`] for the image `data` declares in its header, read
+/// without decoding it. A file whose size cannot be read goes to the
+/// decoder, which refuses it for the same reason. A small file can declare
+/// an image of 128 MiB, so the decoder must not be the first to look.
+pub(crate) fn reserve_decoded(ctx: &mut Ctx<'_>, data: &[u8]) -> JResult<()> {
+    match fastemu_gfx::probe_size(data) {
+        Some((width, height)) => reserve_pixels(ctx, width.into(), height.into()),
+        None => Ok(()),
+    }
+}
+
+/// [`reserve_decoded`] for the part of `data` that `Image.createImage(byte[],
+/// int, int)` reads. A range outside the array passes: the decoder refuses
+/// it with the exception MIDP names.
+pub(crate) fn reserve_decoded_range(
+    ctx: &mut Ctx<'_>,
+    data: &[u8],
+    offset: i32,
+    length: i32,
+) -> JResult<()> {
+    let range = usize::try_from(offset)
+        .ok()
+        .zip(usize::try_from(length).ok())
+        .and_then(|(offset, length)| data.get(offset..offset.checked_add(length)?));
+    match range {
+        Some(range) => reserve_decoded(ctx, range),
+        None => Ok(()),
+    }
+}
+
 /// Turns a decode or size error of `createImage(String)` and
 /// `createImage(InputStream)` into the `IOException` MIDP names, keeping
 /// `OutOfMemoryError` as it is.
@@ -95,6 +125,7 @@ fn create_from_resource(ctx: &mut Ctx<'_>, name: Value) -> JResult<Value> {
             &format!("resource not found: {name}"),
         );
     };
+    reserve_decoded(ctx, &bytes)?;
     match decode(ctx, bytes) {
         Ok(surface) => Ok(new_image(ctx, surface)?.into()),
         Err(e) => Err(as_io_error(ctx, &e)),
@@ -127,6 +158,7 @@ fn read_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<Vec<u8>> {
 fn create_from_stream(ctx: &mut Ctx<'_>, stream: Value) -> JResult<Value> {
     let stream = ctx.non_null(stream)?;
     let bytes = read_stream(ctx, stream)?;
+    reserve_decoded(ctx, &bytes)?;
     match decode(ctx, bytes) {
         Ok(surface) => Ok(new_image(ctx, surface)?.into()),
         Err(e) => Err(as_io_error(ctx, &e)),
@@ -137,6 +169,7 @@ fn create_from_bytes(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let data = ctx.non_null(a[0])?;
     let (offset, length) = (a[1].int(), a[2].int());
     let bytes: Vec<u8> = ctx.array::<i8>(data)?.iter().map(|&b| b as u8).collect();
+    reserve_decoded_range(ctx, &bytes, offset, length)?;
     let result = ctx.without_lock(move || Surface::decode_range(&bytes, offset, length));
     match result {
         Ok(surface) => Ok(new_image(ctx, surface)?.into()),
