@@ -89,8 +89,8 @@ named.
   bytes, or with a bracket or a control character, is no class, so that
   MIDlet is dropped before it reaches the loader and a suite whose list
   comes to nothing shows the error for a suite that lists no MIDlet.
-  With no `MIDlet-<n>` at all, the classes that extend `MIDlet` (found
-  by walking superclasses in the JAR) are offered.
+  When no `MIDlet-<n>` gives a MIDlet, the classes that extend `MIDlet`
+  (found by walking superclasses in the JAR) are offered.
 - **The search for MIDlet classes.** It reads each `.class` entry up to
   4 MiB, looks at 8192 of them at most, and stops when 32 MiB have been
   inflated in all. A read that went over its 4 MiB counts the 4 MiB. So
@@ -102,7 +102,7 @@ named.
   it holds that bound the work of entries that share it. The largest JAR
   of the test folder has 1046 classes of 4 MB in all, and its largest
   class has 200 KB. A MIDlet class past the budget is missed, which only
-  a suite with no `MIDlet-1` can lose. A class file names itself, so the
+  a suite with no `MIDlet-<n>` that gives a MIDlet can lose. A class file names itself, so the
   search holds the name of a class and of its superclass to the rule of a
   `MIDlet-<n>` entry: a class that fails it is no MIDlet and no link of a
   chain to one.
@@ -125,7 +125,7 @@ named.
   the source for the resource with a limit, which is what `check_alloc`
   would let through at that moment, never more than the heap. The JAR
   source stops inflating there, and a bigger resource is an
-  `OutOfMemoryError` before its bytes exist, as it was after. One
+  `OutOfMemoryError` once the read passes that size, as it was after. One
   resource inflates at a time for each game, so the buffers of its
   threads never add up: the host holds at most one buffer of the heap's
   size beyond what the heap counts.
@@ -183,8 +183,8 @@ apps pass one with output, the headless runner and tests pass none.
   a `startApp` that never returns; the calls still waiting then give up.
   Each waiting call is a Java thread, and a game that pauses and resumes
   itself in a loop from a `startApp` that never returns would make one for
-  every request. An instance keeps at most 8 lifecycle threads alive:
-  later pause and resume calls are dropped, with one warning in the log,
+  every request. An instance keeps at most 8 lifecycle threads alive, besides the
+  one that runs the first `startApp`: later pause and resume calls are dropped, with one warning in the log,
   but `destroyApp` never is. Lifecycle threads count against the machine's
   limit on threads too (`max_threads`, 64, and 16 more for the host). The
   bound of 8 keeps room in that limit for `destroyApp`, the event thread
@@ -729,7 +729,8 @@ sequence, the transform, the reference pixel, the collision rectangle),
   than the heap holds, is an `OutOfMemoryError` and a game that keeps
   layers in a list ends in one. A layer holds at most 32767 animated
   tiles, as the Siemens layer does; `createAnimatedTile` past that throws
-  `OutOfMemoryError`. Each animated tile is counted when it is made, as it
+  `OutOfMemoryError`, where the Siemens layer throws
+  `IllegalArgumentException`. Each animated tile is counted when it is made, as it
   makes no Java object. A `Sprite` counts its frame sequence the same way,
   and a snapshot of a mutable image that a sprite, a screen or an item
   keeps is checked against the heap before the copy is made.
