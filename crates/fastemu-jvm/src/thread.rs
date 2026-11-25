@@ -206,21 +206,27 @@ fn unregister(state: &mut VmState, tid: ThreadId) {
 fn run(shared: &Arc<VmShared>, tid: ThreadId, body: ThreadBody) {
     let guard = shared.state.lock();
     let mut ctx = Ctx::enter(shared, guard, tid);
-    let outcome = catch_unwind(AssertUnwindSafe(|| body(&mut ctx)));
-    match outcome {
-        Ok(Ok(()) | Err(Throw::Stop)) => {}
-        Ok(Err(Throw::Exception(e))) => lang::throwable::report_uncaught(&mut ctx, e),
-        Err(panic) => {
-            let message = panic_message(&*panic);
-            shared.log(
-                LogLevel::Err,
-                format!("internal error in the virtual machine: {message}; stopping it"),
-            );
-            shared
-                .stopping
-                .store(true, std::sync::atomic::Ordering::Release);
-        }
+    let mut outcome = catch_unwind(AssertUnwindSafe(|| body(&mut ctx)));
+    if let Ok(Err(Throw::Exception(e))) = outcome {
+        // Bytecode can throw an object that is not a Throwable, which the
+        // report cannot read. That ends the thread like any other panic.
+        outcome = catch_unwind(AssertUnwindSafe(|| {
+            lang::throwable::report_uncaught(&mut ctx, e);
+            Ok(())
+        }));
     }
+    if let Err(panic) = outcome {
+        let message = panic_message(&*panic);
+        shared.log(
+            LogLevel::Err,
+            format!("internal error in the virtual machine: {message}; stopping it"),
+        );
+        shared
+            .stopping
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+    // Always: it releases the monitors the thread holds and wakes whoever
+    // waits for it.
     ctx.finish();
 }
 

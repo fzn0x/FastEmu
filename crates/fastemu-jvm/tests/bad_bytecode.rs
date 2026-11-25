@@ -4,7 +4,9 @@
 
 mod support;
 
+use fastemu_core::LogLevel;
 use std::sync::Arc;
+use std::time::Duration;
 
 use fastemu_jvm::{Throw, Value, Vm, VmConfig};
 use support::{ClassBuilder, Handler, PUBLIC, STATIC, idx};
@@ -270,4 +272,47 @@ fn a_return_leaves_the_slots_the_method_declares() {
     assert_eq!(call_around_a_return(&second_half), Value::Int(5));
     // iconst_3; ireturn
     assert_eq!(call_around_a_return(&[0x06, 0xac]), Value::Int(5));
+}
+
+#[test]
+fn a_thread_that_throws_an_object_that_is_not_a_throwable_ends() {
+    // new Object; dup; invokespecial Object.<init>; athrow. Reporting the
+    // uncaught exception reads fields that the object does not have.
+    let mut c = ClassBuilder::new("Thr", "java/lang/Object", 49, 0);
+    let [oh, ol] = idx(c.class("java/lang/Object"));
+    let [ih, il] = idx(c.method_ref("java/lang/Object", "<init>", "()V"));
+    let code = [0xbb, oh, ol, 0x59, 0xb7, ih, il, 0xbf];
+    c.method(
+        PUBLIC | STATIC,
+        "main",
+        "([Ljava/lang/String;)V",
+        2,
+        1,
+        &code,
+        &[],
+    );
+    let (log, lines) = support::capture();
+    let config = VmConfig {
+        log,
+        ..VmConfig::default()
+    };
+    let vm = Vm::new(
+        config,
+        Arc::new(support::source(&[("Thr", c.build())])),
+        Vec::new(),
+    );
+    vm.run_main("Thr", &[]).unwrap();
+    assert!(
+        vm.wait_finished(Some(Duration::from_secs(3))),
+        "the thread is still registered"
+    );
+    assert_eq!(vm.thread_count(), 0);
+    assert!(vm.is_stopping(), "the game is not stopped");
+    let errors = support::lines_at(&lines, LogLevel::Err);
+    assert!(
+        errors
+            .iter()
+            .any(|l| l.starts_with("internal error in the virtual machine")),
+        "{errors:?}"
+    );
 }
