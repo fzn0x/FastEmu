@@ -104,6 +104,13 @@ connection then fails the way it would on a phone with no signal. Turn
 **Allow network access** on for a game that needs it. Only allow games
 you trust, since a game with network access can send data out.
 
+Network access means the whole network, not only the internet. A game
+allowed it can reach programs on your own computer (loopback) and
+devices on your local network. It can also listen for connections on
+every network interface of your computer, and learn your computer's
+address on the local network. Leave it off for games that do not need
+it.
+
 Text messages are never sent, with or without network access. A game
 that sends an SMS, often a paid one, is told the send failed, and the
 attempt shows in its log.
