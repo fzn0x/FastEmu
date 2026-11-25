@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use fastemu_jvm::{Ctx, JResult, ObjRef, Value, Wake};
 
+use super::canvas;
 use super::display::{self, notify_size};
 use super::displayable::{self, Kind};
 use super::input;
@@ -223,10 +224,11 @@ fn apply_requested(ctx: &mut Ctx<'_>) -> JResult<()> {
     let result = notify_size(ctx, next);
     release(ctx);
     result?;
-    if let Some(old) = old
-        && !state(ctx).background
-    {
-        notify(ctx, old, false)?;
+    if let Some(old) = old {
+        if !state(ctx).background {
+            notify(ctx, old, false)?;
+        }
+        canvas::release_screen_buffer(ctx, old)?;
     }
     reset_input(ctx);
     let st = state(ctx);
