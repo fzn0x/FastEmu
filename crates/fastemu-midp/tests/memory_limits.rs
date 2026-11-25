@@ -125,7 +125,9 @@ MIDlet-4: Tiles, , m.Tiles\r\n\
 MIDlet-5: Sprites, , m.Sprites\r\n\
 MIDlet-6: Canvases, , m.Canvases\r\n\
 MIDlet-7: GameBuffer, , m.GameBuffer\r\n\
-MIDlet-8: Customs, , m.Customs\r\n";
+MIDlet-8: Customs, , m.Customs\r\n\
+MIDlet-9: SiemensBitmaps, , m.SiemensBitmaps\r\n\
+MIDlet-10: SiemensLayers, , m.SiemensLayers\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 mod midlet {
@@ -137,6 +139,8 @@ mod midlet {
     pub const CANVASES: usize = 5;
     pub const GAME_BUFFER: usize = 6;
     pub const CUSTOMS: usize = 7;
+    pub const SIEMENS_BITMAPS: usize = 8;
+    pub const SIEMENS_LAYERS: usize = 9;
 }
 
 /// What the back buffer of a shown canvas takes of the heap on the default
@@ -154,6 +158,7 @@ fn classes() -> Option<&'static Path> {
             tests.join("memory_java").join("stubs"),
             tests.join("java").join("stubs"),
             tests.join("screens_java").join("stubs"),
+            tests.join("vendor_stubs"),
         ])
         .expect("joining the stub folders");
         let out = scratch("memory-classes");
@@ -229,6 +234,19 @@ fn launch(jar: &Path, midlet: usize, heap: u64) -> Running {
     Running::launch_on(jar, midlet, profile)
 }
 
+/// Starts MIDlet `midlet` on a Siemens phone, whose classes it uses, with a
+/// heap of `heap` bytes.
+fn siemens(jar: &Path, midlet: usize, heap: u64) -> Running {
+    let profile = fastemu_core::DeviceProfile {
+        heap_bytes: heap,
+        ..fastemu_core::builtin_profiles()
+            .into_iter()
+            .find(|p| p.id.starts_with("siemens"))
+            .expect("a built-in Siemens profile")
+    };
+    Running::launch_on(jar, midlet, profile)
+}
+
 /// A PNG whose header declares `width` by `height` pixels and whose data
 /// is one row: a few hundred bytes for an image the decoder would give
 /// 128 MiB.
@@ -280,8 +298,7 @@ fn numbers(line: &str, prefix: &str) -> Vec<i64> {
 }
 
 #[test]
-fn images_are_refused_before_their_pixels_and_kept_ones_end_at_the_heap()
- {
+fn images_are_refused_before_their_pixels_and_kept_ones_end_at_the_heap() {
     let alone = Alone::new();
     let Some(jar) = suite("big-image", &[]) else {
         return;
@@ -504,4 +521,35 @@ fn custom_items_count_their_surfaces_and_screens_not_shown_give_their_buffers_ba
         counted < 2 * SCREEN_BYTES && counted >= SCREEN_BYTES,
         "{log}"
     );
+}
+
+#[test]
+fn siemens_bitmaps_and_tiled_layers_the_heap_cannot_hold_are_refused_before_they_are_made() {
+    let alone = Alone::new();
+    let Some(jar) = suite("siemens-bitmaps", &[]) else {
+        return;
+    };
+    // The packed bitmap is 1 MiB, so the heap is 2 MiB.
+    let mut run = siemens(&jar, midlet::SIEMENS_BITMAPS, 2 * HEAP);
+    run.wait_log("done");
+    let log = run.dump();
+    // 32 MiB of pixels and 64 MiB of cells.
+    assert!(run.has("siemens bitmap OutOfMemoryError"), "{log}");
+    assert!(run.has("siemens layer OutOfMemoryError"), "{log}");
+    assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
+}
+
+#[test]
+fn siemens_layers_count_their_animated_tiles() {
+    let _alone = Alone::new();
+    let Some(jar) = suite("siemens-layers", &[]) else {
+        return;
+    };
+    // Each layer's 32767 animated tiles are 131 KB the heap is told about.
+    let mut run = siemens(&jar, midlet::SIEMENS_LAYERS, HEAP);
+    let kept = run.wait_log("siemens layers ");
+    let log = run.dump();
+    assert!(kept.ends_with("then OutOfMemoryError"), "{log}");
+    let count = numbers(&kept, "siemens layers ")[0];
+    assert!((1..12).contains(&count), "{log}");
 }
