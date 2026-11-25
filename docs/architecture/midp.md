@@ -36,12 +36,30 @@ named.
   keeps names as raw bytes, matches them exactly and then without ASCII
   case, takes the first of duplicates, and keeps what inflated of a
   deflate stream that breaks part way.
+- **Archive limits.** The index holds at most 65535 entries and 4 MiB of
+  names (the JAR of the test folder with most names has 60 KB). A file
+  with no central directory is walked to the same limits and no further.
+  Entries may overlap, since damaged real JARs do, so every read says how
+  much it may inflate: `read_limited(entry, max)` stops inflating at
+  `max` and gives `ZipError::TooLarge`, `read_prefix` keeps the first
+  `max` bytes, and `read` is `read_limited` at 64 MiB. An entry that
+  expands a thousand times costs `max`, whatever its header says.
 - **Attributes.** The manifest (found without case, `MANIFEST.FM` too)
   and the JAD share one parser: a BOM is stripped, lines split on CR, LF
   or CR LF, a line starting with a space continues the previous value
   with exactly one space removed, the first of repeated keys wins, and no
   bad line rejects the file. JAD attributes come first in
   `SuiteInfo::properties`, so lookups give the JAD's value.
+- **Attribute limits.** The parser reads the first 1 MiB of a file (the
+  largest manifest of the test folder has 1.7 KB) and keeps 4096
+  attributes. A line is a slice of the text, and only a line that others
+  continue is copied, once, so a parse takes time linear in the text.
+  Repeated keys are found in a set. The manifest is read with
+  `read_prefix` at 1 MiB, so a manifest that inflates to more costs 1 MiB.
+  The suite's name, vendor, version and MIDlet names in `SuiteInfo` are
+  cut at 100 characters and the description at 500, for the tiles and
+  the launcher; `SuiteInfo::properties` keep every value whole, so
+  `getAppProperty` is unchanged. An icon over 1 MiB is not kept.
 - **The JAR of a JAD.** `MIDlet-Jar-URL` as a relative path, then its
   last segment, then the JAD's own name with `.jar`. A JAR picks up a JAD
   of the same name beside it.
@@ -67,17 +85,43 @@ named.
   1 MiB, the JAD is left out with a note and the JAR still opens. The JAR
   stays in the one buffer it was read into.
 - **MIDlets.** `MIDlet-1` up to the first gap; class after the last
-  comma, name before the first, icon in between. With no `MIDlet-<n>` at
-  all, the classes that extend `MIDlet` (found by walking superclasses in
-  the JAR) are offered.
+  comma, name before the first, icon in between. A class name of over 255
+  bytes, or with a bracket or a control character, is no class, so that
+  MIDlet is dropped before it reaches the loader and a suite whose list
+  comes to nothing shows the error for a suite that lists no MIDlet.
+  With no `MIDlet-<n>` at all, the classes that extend `MIDlet` (found
+  by walking superclasses in the JAR) are offered.
+- **The search for MIDlet classes.** It reads each `.class` entry up to
+  4 MiB, looks at 8192 of them at most, and stops when 32 MiB have been
+  inflated in all. A read that went over its 4 MiB counts the 4 MiB. So
+  a JAR whose entries all point at one compressed bomb costs about 8
+  inflates, not one for each entry. The largest JAR of the test folder has
+  1046 classes of 4 MB in all, and its largest class has 200 KB. A MIDlet
+  class past the budget is missed, which only a suite with no `MIDlet-1`
+  can lose.
 - **Resources.** The VM resolves a name relative to the package of the
   class it is called on; `JarSource` then turns `\` into `/`, collapses
   slashes and `.` segments, strips leading slashes, matches exactly and
-  without case, and finally drops leading directories one at a time. Each
-  miss is logged once at `LogLevel::Warn`, with the name cut to 255
+  without case, and finally drops leading directories one at a time. A
+  name of over 1024 bytes or 64 segments is a miss at once, before that
+  walk (the deepest name in the JARs of the test folder has 8 segments).
+  Each miss is logged once at `LogLevel::Warn`, with the name cut to 255
   characters. After 256 different misses the source logs once that it
   stops, and keeps no more names; what the JAR has still loads. Classes
-  under `java/` and `javax/` never load from the JAR.
+  under `java/` and `javax/` never load from the JAR, and a class file of
+  over 4 MiB does not load either: the log says so once, and the game
+  gets the error for a missing class.
+- **Reading a resource.** A native that hands a resource to the game
+  calls `Ctx::read_resource` (`Class.getResourceAsStream`, which the
+  media `Manager` uses for its locators, `Image.createImage(String)`,
+  the Samsung `AudioClip(String)` and the Siemens bitmap loader). It asks
+  the source for the resource with a limit, which is what `check_alloc`
+  would let through at that moment, never more than the heap. The JAR
+  source stops inflating there, and a bigger resource is an
+  `OutOfMemoryError` before its bytes exist, as it was after. One
+  resource inflates at a time for each game, so the buffers of its
+  threads never add up: the host holds at most one buffer of the heap's
+  size beyond what the heap counts.
 
 Natives that read resources by name use `env(ctx).source` (the same
 `JarSource`) inside `Ctx::without_lock`. `Image.createImage(String)`
