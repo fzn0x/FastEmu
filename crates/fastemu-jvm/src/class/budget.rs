@@ -57,6 +57,10 @@ const HANDLER: usize = 8 + 16;
 const LINE: usize = 4;
 /// A class id in a list of superclasses or interfaces.
 const CLASS_ID: usize = size_of::<ClassId>();
+/// An interface a class file names: the `Arc` of its name that the class
+/// holds for each time it names it, until it links. A class can name one
+/// interface 65535 times.
+const INTERFACE_NAME: usize = size_of::<Arc<str>>();
 /// An entry of a method table: the pointer in the vtable, and the entry of
 /// the map from selectors to it.
 const VTABLE_ENTRY: usize = size_of::<usize>() + 24;
@@ -186,7 +190,7 @@ impl ClassTable {
             }
         }
 
-        sum.add(def.interfaces.len(), CLASS_ID);
+        sum.add(def.interfaces.len(), INTERFACE_NAME);
         if def.access & access::INTERFACE == 0 {
             sum.add(overridable, VTABLE_ENTRY);
         }
@@ -447,6 +451,20 @@ mod tests {
         let many = t.class_file_bytes(&def, Some(&object), &[iface; 11], 2);
         assert_eq!(few, none + CLASS_ID);
         assert_eq!(many - few, 10 * CLASS_ID);
+    }
+
+    #[test]
+    fn an_interface_counts_each_time_the_class_names_it() {
+        // Until it links, a class holds an `Arc` of the name of an
+        // interface, 16 bytes, for each time it names it, and a class file
+        // can name one interface 65535 times.
+        let mut t = table();
+        let base = cost(&mut t, &def());
+        let mut named = def();
+        named.interfaces = vec!["a/I".into(); 1000];
+        assert_eq!(cost(&mut t, &named) - base, 1000 * size_of::<Arc<str>>());
+        let own = ClassTable::own_class_bytes(&named) - ClassTable::own_class_bytes(&def());
+        assert_eq!(own, 1000 * size_of::<Arc<str>>());
     }
 
     #[test]
