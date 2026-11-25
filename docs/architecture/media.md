@@ -99,6 +99,9 @@ once the game has closed others. Before `OutOfMemoryError` the game gets
 one collection and a second try (`make_sound`): games make a player for
 each sound and drop it unclosed, and a phone's collector freed those.
 
+[SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists these
+limits with every other limit a game meets.
+
 | Call | What happens |
 | --- | --- |
 | `getState` | UNREALIZED (100) before `realize`, then the track's state: REALIZED 200, PREFETCHED 300, STARTED 400; CLOSED 0 after `close` or when the instance's group closed. Never throws. |
