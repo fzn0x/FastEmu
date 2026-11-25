@@ -3,6 +3,9 @@
 //! killed without losing the others. It launches the game with the real
 //! launcher and no sound device, plays the key script from the first
 //! frame, and writes [`Record`]s to its standard output as things happen.
+//!
+//! A game whose screen stood still for the last [`STALL`] of its run is
+//! asked whether it waits, as on an About page, or is stuck ([`probe`]).
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -12,7 +15,8 @@ use fastemu_core::{
     Frame, Instance, InstanceSettings, InstanceStatus, LaunchRequest, Launcher, LogLevel,
     builtin_profiles,
 };
-use fastemu_midp::MidpLauncher;
+use fastemu_jvm::Activity;
+use fastemu_midp::{MidpInstance, MidpLauncher};
 
 use super::script::{self, Player};
 use super::wire::Record;
@@ -20,9 +24,127 @@ use super::wire::Record;
 /// How long a stopping game gets to wind down.
 const STOP_WAIT: Duration = Duration::from_secs(5);
 /// A game that presents no new frame for this long by the end of its run,
-/// though the key script pressed keys, counts as hung: a player sees a
-/// frozen screen.
+/// though the key script pressed keys, has a still screen. It counts as
+/// running only when it shows that it waits ([`probe`]), threw no
+/// exception and did not pause itself ([`still_end`]); otherwise it is
+/// hung: a player sees a frozen screen.
 const STALL: Duration = Duration::from_secs(10);
+/// How long a game whose screen stood still gets to show that it waits:
+/// its event thread answers a ping and every thread waits.
+const PROBE_WAIT: Duration = Duration::from_secs(5);
+/// How often the probe looks again.
+const PROBE_STEP: Duration = Duration::from_millis(20);
+
+/// What the probe of a still screen found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Probe {
+    /// The event thread answered, and then every thread waited.
+    Waits,
+    /// The event thread did not answer within [`PROBE_WAIT`].
+    Silent,
+    /// A thread held the VM lock: the ping or a look could not get it.
+    Locked,
+    /// The event thread answered, but at the last look threads ran,
+    /// waited for a lock, or tasks waited for the event thread.
+    Busy {
+        running: usize,
+        blocked: usize,
+        posted: usize,
+    },
+}
+
+impl Probe {
+    /// Why the game waits or is stuck, for the detail of its result.
+    fn why(self) -> String {
+        match self {
+            Probe::Waits => "its threads wait and its event thread answers".into(),
+            Probe::Silent => format!(
+                "its event thread did not answer in {} s",
+                PROBE_WAIT.as_secs()
+            ),
+            Probe::Locked => "a thread kept the virtual machine locked".into(),
+            Probe::Busy { running, .. } if running > 0 => {
+                format!("{running} of its threads kept running")
+            }
+            Probe::Busy { blocked, .. } if blocked > 0 => {
+                format!("{blocked} of its threads waited for a lock")
+            }
+            Probe::Busy { posted: 1, .. } => "a task waited for its event thread".into(),
+            Probe::Busy { posted, .. } if posted > 1 => {
+                format!("{posted} tasks waited for its event thread")
+            }
+            Probe::Busy { .. } => "its threads ended".into(),
+        }
+    }
+}
+
+/// Asks a game whose screen stood still whether it waits: pings its event
+/// thread, then looks at its threads until they all wait or
+/// [`PROBE_WAIT`] passes.
+fn probe(instance: &MidpInstance) -> Probe {
+    let deadline = Instant::now() + PROBE_WAIT;
+    let ping = instance.ping();
+    watch(deadline, || ping.answered(), || instance.activity())
+}
+
+/// The verdict of a probe from whether the event thread `answered` and
+/// what a `look` at the threads finds (`None` when a thread holds the VM
+/// lock): [`Probe::Waits`] at the first idle look after an answer,
+/// otherwise what the last look found once `deadline` passes. Without an
+/// answer, the ping may have been dropped because a thread held the VM
+/// lock, so one look tells [`Probe::Locked`] from [`Probe::Silent`].
+fn watch(
+    deadline: Instant,
+    answered: impl Fn() -> bool,
+    mut look: impl FnMut() -> Option<Activity>,
+) -> Probe {
+    let mut seen = None;
+    loop {
+        if answered() {
+            seen = Some(match look() {
+                Some(a) if a.is_idle() => return Probe::Waits,
+                Some(a) => Probe::Busy {
+                    running: a.running(),
+                    blocked: a.blocked,
+                    posted: a.posted,
+                },
+                None => Probe::Locked,
+            });
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(PROBE_STEP);
+    }
+    seen.unwrap_or_else(|| match look() {
+        Some(_) => Probe::Silent,
+        None => Probe::Locked,
+    })
+}
+
+/// The status and detail of a run whose last new frame came at `at`
+/// seconds, [`STALL`] or more before its end, after `errors` exceptions.
+/// The game runs when it waits on its still screen, threw nothing and is
+/// not paused; otherwise it is hung, and the detail says why. An escaped
+/// exception may be what stopped the game, and a game that paused itself
+/// waits to be resumed, which the run never does.
+fn still_end(at: f64, probe: Probe, errors: u64, paused: bool) -> (&'static str, String) {
+    let why = probe.why();
+    if probe == Probe::Waits && errors == 0 && !paused {
+        return ("runs", format!("a still screen from {at:.1} s: {why}"));
+    }
+    let threw = match (probe, errors) {
+        (Probe::Waits, 0) => String::new(),
+        (Probe::Waits, 1) => ", but it threw an exception".into(),
+        (Probe::Waits, n) => format!(", but it threw {n} exceptions"),
+        _ => String::new(),
+    };
+    let paused = if paused { "; the game is paused" } else { "" };
+    (
+        "hung",
+        format!("no new frame after {at:.1} s; {why}{threw}{paused}"),
+    )
+}
 
 /// What one run is asked to do.
 pub struct Options {
@@ -199,7 +321,13 @@ pub fn run(options: &Options, out: &mut impl Write) -> Result<(), String> {
         }
         std::thread::sleep(Duration::from_millis(5));
     };
-    emit(out, &Record::Errors(instance.error_count()));
+    let stalled = finished.is_none()
+        && last_frame.is_some_and(|at| options.seconds - at >= STALL.as_secs_f64());
+    let probed = stalled.then(|| probe(&instance));
+    // The errors are counted after the probe, so they match its verdict.
+    drain(&*instance, out);
+    let errors = instance.error_count();
+    emit(out, &Record::Errors(errors));
     if let Some(frame) = instance.frame() {
         match save_png(&frame, &options.screenshot) {
             Ok(()) => emit(
@@ -232,10 +360,11 @@ pub fn run(options: &Options, out: &mut impl Write) -> Result<(), String> {
         None if serial == 0 => end(out, "hung", format!("no frame in {} s", options.seconds)),
         None => {
             let at = last_frame.unwrap_or_default();
-            let paused = if paused { "; the game is paused" } else { "" };
-            if options.seconds - at >= STALL.as_secs_f64() {
-                end(out, "hung", format!("no new frame after {at:.1} s{paused}"));
+            if let Some(probe) = probed {
+                let (status, detail) = still_end(at, probe, errors, paused);
+                end(out, status, detail);
             } else {
+                let paused = if paused { "; the game is paused" } else { "" };
                 end(
                     out,
                     "runs",
@@ -245,4 +374,143 @@ pub fn run(options: &Options, out: &mut impl Write) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    fn activity(threads: usize, waiting: usize, blocked: usize, posted: usize) -> Activity {
+        Activity {
+            threads,
+            waiting,
+            blocked,
+            posted,
+        }
+    }
+
+    fn busy(running: usize, blocked: usize, posted: usize) -> Probe {
+        Probe::Busy {
+            running,
+            blocked,
+            posted,
+        }
+    }
+
+    #[test]
+    fn a_still_screen_that_waits_runs() {
+        let (status, detail) = still_end(4.4, Probe::Waits, 0, false);
+        assert_eq!(status, "runs");
+        assert_eq!(
+            detail,
+            "a still screen from 4.4 s: its threads wait and its event thread answers"
+        );
+    }
+
+    #[test]
+    fn a_still_screen_after_an_exception_stays_hung() {
+        let (status, detail) = still_end(0.2, Probe::Waits, 1, false);
+        assert_eq!(status, "hung");
+        assert_eq!(
+            detail,
+            "no new frame after 0.2 s; its threads wait and its event thread answers, \
+             but it threw an exception"
+        );
+        let (status, detail) = still_end(0.2, Probe::Waits, 3, false);
+        assert_eq!(status, "hung");
+        assert!(detail.ends_with(", but it threw 3 exceptions"), "{detail}");
+    }
+
+    #[test]
+    fn a_still_screen_of_a_game_that_paused_itself_stays_hung() {
+        let (status, detail) = still_end(4.4, Probe::Waits, 0, true);
+        assert_eq!(status, "hung");
+        assert_eq!(
+            detail,
+            "no new frame after 4.4 s; its threads wait and its event thread answers; \
+             the game is paused"
+        );
+    }
+
+    #[test]
+    fn a_stuck_game_stays_hung_and_says_why() {
+        let cases = [
+            (Probe::Silent, "its event thread did not answer in 5 s"),
+            (Probe::Locked, "a thread kept the virtual machine locked"),
+            (busy(1, 0, 0), "1 of its threads kept running"),
+            (busy(2, 1, 1), "2 of its threads kept running"),
+            (busy(0, 2, 0), "2 of its threads waited for a lock"),
+            (busy(0, 0, 1), "a task waited for its event thread"),
+            (busy(0, 0, 3), "3 tasks waited for its event thread"),
+            (busy(0, 0, 0), "its threads ended"),
+        ];
+        for (probe, why) in cases {
+            // Exceptions add nothing to a game that is stuck anyway.
+            let (status, detail) = still_end(4.4, probe, 2, false);
+            assert_eq!(status, "hung", "{probe:?}");
+            assert_eq!(detail, format!("no new frame after 4.4 s; {why}"));
+        }
+        let (status, detail) = still_end(4.4, Probe::Silent, 0, true);
+        assert_eq!(status, "hung");
+        assert_eq!(
+            detail,
+            "no new frame after 4.4 s; its event thread did not answer in 5 s; \
+             the game is paused"
+        );
+    }
+
+    #[test]
+    fn a_probe_that_gets_no_answer_tells_a_locked_machine_from_a_silent_one() {
+        // The deadline has passed: one look decides.
+        let now = Instant::now();
+        let idle = activity(3, 3, 0, 0);
+        assert_eq!(watch(now, || false, || Some(idle)), Probe::Silent);
+        assert_eq!(watch(now, || false, || None), Probe::Locked);
+    }
+
+    #[test]
+    fn a_probe_after_an_answer_says_what_the_last_look_found() {
+        let now = Instant::now();
+        assert_eq!(
+            watch(now, || true, || Some(activity(2, 2, 0, 0))),
+            Probe::Waits
+        );
+        assert_eq!(watch(now, || true, || None), Probe::Locked);
+        assert_eq!(
+            watch(now, || true, || Some(activity(3, 1, 1, 0))),
+            busy(1, 1, 0)
+        );
+        assert_eq!(
+            watch(now, || true, || Some(activity(2, 2, 0, 1))),
+            busy(0, 0, 1)
+        );
+        assert_eq!(
+            watch(now, || true, || Some(activity(0, 0, 0, 0))),
+            busy(0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn a_probe_waits_for_the_answer_and_the_first_idle_look() {
+        // Far off, so only the looks end the probe, however slow the machine.
+        let deadline = Instant::now() + Duration::from_secs(600);
+        let asked = Cell::new(0);
+        let looked = Cell::new(0);
+        let answered = || {
+            asked.set(asked.get() + 1);
+            asked.get() > 2
+        };
+        let look = || {
+            looked.set(looked.get() + 1);
+            match looked.get() {
+                1 => Some(activity(2, 1, 0, 0)),
+                2 => None,
+                _ => Some(activity(2, 2, 0, 0)),
+            }
+        };
+        assert_eq!(watch(deadline, answered, look), Probe::Waits);
+        assert_eq!((asked.get(), looked.get()), (5, 3));
+    }
 }

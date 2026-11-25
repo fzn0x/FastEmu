@@ -174,10 +174,14 @@ pub fn markdown(options: &Options, games: &[Game]) -> String {
     );
     out.push_str(
         "A game **runs** when it still presented new frames in the last 10 s of its run, \
+         or when its screen stood still that long but it waits, as on an About page: its \
+         event thread answered, every thread waited, it threw no exception and it did not \
+         pause itself. It \
          **crashed** when the runtime ended it, **exited** when it ended itself, and is \
-         **hung** when it presented no frame, no new frame in its last 10 s, or its runner \
-         had to be killed. Missing lists every class and member the game asked for and \
-         FastEmu lacks; games probe for optional APIs, so not every one is a fault.\n\n",
+         **hung** when it presented no frame, stood still without showing that it waits \
+         (the detail says why), or its runner had to be killed. Missing lists every class \
+         and member the game asked for and FastEmu lacks; games probe for optional APIs, \
+         so not every one is a fault.\n\n",
     );
     let count = |status: &str| games.iter().filter(|g| g.status == status).count();
     let _ = writeln!(

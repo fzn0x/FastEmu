@@ -92,6 +92,14 @@ exception, a screenshot and its log:
 cargo xtask compat path/to/games --seconds 20
 ```
 
+A game that draws nothing new for the last 10 seconds of its run is
+asked whether it waits. It counts as running when its event thread
+answers and all its threads wait, as on an About page or a menu that
+waits for a key. It counts as hung when its event thread is stuck in
+the game's code, a thread keeps running without drawing, threads wait
+for each other's locks, it threw an exception, or it paused itself. The
+report says which.
+
 ## Why a game may misbehave
 
 Most problems come from one of four things:
