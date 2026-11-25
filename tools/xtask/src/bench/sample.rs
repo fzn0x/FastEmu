@@ -5,9 +5,9 @@
 //! threads run in, and turns cycles into milliseconds at the rate a busy
 //! thread runs them.
 //!
-//! The other load is the exception. Windows gives the whole system's busy
-//! time only by the clock tick, so the bench takes away the measured
-//! processes' tick based times too. Their cycles can be far more: in a
+//! The other load is the exception. GetSystemTimes counts the whole
+//! system's busy time by the clock tick, so the bench takes away the
+//! measured processes' tick based times too. Their cycles can be far more: in a
 //! kernel run FastEmu ran 984 ms a second by its cycles and 637 by the
 //! tick, and taking its cycles away read the other load about 350 ms a
 //! second too low.

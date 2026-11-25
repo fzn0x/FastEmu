@@ -110,18 +110,22 @@ The bench reads processor time as cycles because Windows counts its
 usual CPU times by the clock tick, and misses most of the short bursts
 that game threads run in.
 
-The other load is the one exception. Windows gives the whole system's
-busy time only by the clock tick. So the bench takes away the time of
-the measured processes, the sampler and the audio engine as Windows
-counts it the same way. Their cycles would not do. In one kernel run,
-FastEmu ran 984 ms a second by its cycles but only 637 by the tick, so
-taking its cycles away hid about 350 ms a second of other load.
+The other load is the one exception. `GetSystemTimes` counts the whole
+system's busy time by the clock tick. So the bench takes away the time
+of the measured processes, the sampler and the audio engine as Windows
+counts it the same way, with `GetProcessTimes`. Their cycles would not
+do. In one kernel run, FastEmu ran 984 ms a second by its cycles but
+only 637 by the tick, so taking its cycles away hid about 350 ms a
+second of other load.
 
 The tick also misses part of a busy thread's time when it moves between
-processors. On the computer it was tried on, a busy loop added about
-1000 ms a second of other load when held on one processor, and about
-700 when Windows moved it between processors. Either is far over the
-margin below.
+processors, and most of a load that runs in short bursts. On the
+computer it was tried on, a busy loop added about 1000 ms a second of
+other load when held on one processor. When Windows moved it between
+processors, it added from about 250 to 700, on different runs. Each is
+over the margin below. But eight threads that each ran 1 ms in every
+10 ms used about 510 ms a second by their cycles, and under 100 by the
+tick. The flag can miss a load like that.
 
 Start to first frame has no window in it. The app's window and its
 graphics start are not counted.
