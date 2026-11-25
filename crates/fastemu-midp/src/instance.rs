@@ -31,11 +31,12 @@
 //! throwing, an internal error of the VM) calls `destroyApp(true)` if
 //! there is a MIDlet, then ends it as [`InstanceStatus::Crashed`].
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
 use fastemu_audio::Group;
-use fastemu_core::{Frame, InputEvent, Instance, InstanceId, InstanceStatus, LogLine};
+use fastemu_core::{Frame, InputEvent, Instance, InstanceId, InstanceStatus, LogLevel, LogLine};
 use fastemu_jvm::{Ctx, HeapStats, JResult, Vm};
 
 use crate::host::{Control, HostLink};
@@ -48,6 +49,16 @@ const LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// How long a stopping instance waits for its threads to unwind.
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// How many lifecycle threads may be alive at once, waiting for their turn
+/// or running. A `startApp` that never returns (a game that runs its loop
+/// in it) keeps every call after it waiting, and each waiter is a Java
+/// thread, so a game that pauses and resumes again and again would fill
+/// the machine's threads with them. The threads are the host's, and the
+/// machine counts them against its limit; this bound keeps them from using
+/// the room that `destroyApp`, the event thread and the media thread need.
+/// `destroyApp` is not held to it, since it runs at once.
+const MAX_LIFECYCLE_THREADS: usize = 8;
 
 /// A flag a Java thread raises when it finishes, however it finishes.
 #[derive(Default)]
@@ -83,14 +94,41 @@ impl Drop for RaiseOnDrop {
     }
 }
 
+/// Counts a lifecycle thread for as long as the thread, or the closure it
+/// was to run, lives.
+struct Alive(Arc<AtomicUsize>);
+
+impl Alive {
+    fn new(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::Relaxed);
+        Self(Arc::clone(count))
+    }
+}
+
+impl Drop for Alive {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 /// Starts a lifecycle thread running `which` as call `turn` (see
 /// [`midlet::lifecycle`]) and waits up to `timeout` for it. Returns
-/// whether the thread started.
-fn run_lifecycle(vm: &Vm, which: Lifecycle, turn: u64, timeout: Duration) -> bool {
+/// whether the thread started: it did not when the machine has no room for
+/// another thread or is wedged. `alive` counts the instance's lifecycle
+/// threads.
+fn run_lifecycle(
+    vm: &Vm,
+    which: Lifecycle,
+    turn: u64,
+    timeout: Duration,
+    alive: &Arc<AtomicUsize>,
+) -> bool {
     let done = Arc::new(Done::default());
     let raise = RaiseOnDrop(Arc::clone(&done));
+    let counted = Alive::new(alive);
     let spawned = vm.spawn("MIDlet", move |ctx| {
         let _raise = raise;
+        let _counted = counted;
         midlet::lifecycle(ctx, which, turn)
     });
     if spawned.is_err() {
@@ -129,6 +167,10 @@ struct Controller {
     frozen: bool,
     /// The turn the next lifecycle call takes; the launch took 0.
     next_turn: u64,
+    /// The lifecycle threads alive now (see [`MAX_LIFECYCLE_THREADS`]).
+    alive: Arc<AtomicUsize>,
+    /// Whether a lifecycle call was dropped, and the log says so.
+    dropped: bool,
 }
 
 impl Controller {
@@ -207,7 +249,16 @@ impl Controller {
     /// Starts `startApp` or `pauseApp` in its turn, after the calls before
     /// it, and waits up to `timeout` for it.
     fn call(&mut self, which: Lifecycle, timeout: Duration) {
-        if run_lifecycle(&self.vm, which, self.next_turn, timeout) {
+        if self.alive.load(Ordering::Relaxed) >= MAX_LIFECYCLE_THREADS {
+            if !std::mem::replace(&mut self.dropped, true) {
+                self.host.log(LogLine {
+                    level: LogLevel::Warn,
+                    text: "too many lifecycle calls are waiting; later ones are dropped".to_owned(),
+                });
+            }
+            return;
+        }
+        if run_lifecycle(&self.vm, which, self.next_turn, timeout, &self.alive) {
             self.next_turn += 1;
         }
     }
@@ -230,7 +281,13 @@ impl Controller {
         self.thaw();
         // destroyApp takes no turn: it runs even beside a startApp that
         // never returns.
-        run_lifecycle(&self.vm, Lifecycle::Destroy, 0, LIFECYCLE_TIMEOUT);
+        run_lifecycle(
+            &self.vm,
+            Lifecycle::Destroy,
+            0,
+            LIFECYCLE_TIMEOUT,
+            &self.alive,
+        );
     }
 
     /// Ends every thread of the VM and the instance's sound.
@@ -292,6 +349,8 @@ impl MidpInstance {
             held: None,
             frozen: false,
             next_turn: 1,
+            alive: Arc::default(),
+            dropped: false,
         };
         let control = std::thread::Builder::new()
             .name(format!("instance {} control", host.id()))
