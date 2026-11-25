@@ -154,6 +154,14 @@ pub(crate) fn hold(ctx: &mut Ctx<'_>, serial: u64, obj: ObjRef) {
     }
 }
 
+/// Lets go of the object of entry `serial` after a start that failed: no
+/// event will end a run that never began, so none would release it.
+pub(crate) fn release(ctx: &mut Ctx<'_>, serial: u64) {
+    if let Some(entry) = media(ctx).and_then(|state| state.entries.get_mut(&serial)) {
+        entry.hold = None;
+    }
+}
+
 /// Routes the events of engine player `id` to entry `serial`.
 pub(crate) fn link(ctx: &mut Ctx<'_>, id: PlayerId, serial: u64) {
     if let Some(state) = media(ctx) {

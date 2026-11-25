@@ -303,6 +303,9 @@ fn start(ctx: &mut Ctx<'_>, this: ObjRef) -> JResult<()> {
     let serial = data(ctx, this)?.track.serial();
     events::hold(ctx, serial, this);
     let result = data(ctx, this)?.track.start(Instant::now());
+    if result.is_err() {
+        events::release(ctx, serial);
+    }
     events::wake(ctx);
     result.or_else(|e| throw_audio(ctx, e))
 }
