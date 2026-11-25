@@ -19,7 +19,7 @@
 
 use super::insn::{Handler, Insn, Switch};
 use crate::classfile::{Constant, ConstantPool};
-use crate::descriptor::{MethodDescriptor, kind_of};
+use crate::descriptor::{kind_of, method_shape};
 
 /// The height of an instruction not reached yet.
 pub(crate) const UNREACHED: u32 = u32::MAX;
@@ -43,12 +43,12 @@ fn method_slots(cp: &ConstantPool, index: u16, receiver: bool) -> Result<(usize,
     match cp.get(index) {
         Some(Constant::MethodRef { .. } | Constant::InterfaceMethodRef { .. }) => {
             let m = cp.member_ref(index).map_err(|e| e.0)?;
-            let desc = MethodDescriptor::parse(m.descriptor)
+            // One walk of the text, keeping nothing: a descriptor can name
+            // 65532 parameters, and a copy of each would cost far more
+            // than the call it sizes.
+            let (params, ret) = method_shape(m.descriptor)
                 .ok_or_else(|| format!("constant pool entry {index} has a bad descriptor"))?;
-            Ok((
-                desc.param_slots() + usize::from(receiver),
-                desc.ret_kind().slots(),
-            ))
+            Ok((params + usize::from(receiver), ret.slots()))
         }
         _ => Err(format!(
             "constant pool entry {index} is not a method reference"
