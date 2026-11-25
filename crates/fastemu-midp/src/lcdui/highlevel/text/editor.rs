@@ -767,7 +767,7 @@ mod tests {
     fn the_text_counts_the_room_it_takes_and_gives_it_back() {
         let mut e = editor("", 100_000, ANY);
         assert_eq!(e.heap_bytes(), 0);
-        e.insert(&[u16::from(b'a'); 10_000], 0).unwrap();
+        e.insert(&units(&"a".repeat(10_000)), 0).unwrap();
         assert!(e.heap_bytes() >= 20_000, "{} bytes", e.heap_bytes());
         e.delete(0, 9_990).unwrap();
         assert!(
