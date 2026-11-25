@@ -8,34 +8,85 @@
 //! its first colon, trims both sides, and keeps the first value of a key
 //! that repeats. No line ever rejects the whole file.
 
+use std::borrow::Cow;
+use std::collections::HashSet;
+
 use fastemu_core::MidletInfo;
 
+/// The most bytes of an attribute file the parser reads. Real manifests
+/// and descriptors are a few KB; the largest in the test folder is 1.7 KB.
+/// The rest of a bigger file is ignored, so the time and memory of a parse
+/// are bounded by the file's size, not by how much a JAR can inflate to.
+pub const MAX_ATTRIBUTE_BYTES: usize = 1024 * 1024;
+
+/// The most attributes the parser keeps; the 4097th key is ignored. A
+/// manifest in the test folder holds 52 at most.
+pub const MAX_ATTRIBUTES: usize = 4096;
+
+
 /// The attributes of one file, in file order, without repeated keys.
+///
+/// At most [`MAX_ATTRIBUTE_BYTES`] of `bytes` are read and at most
+/// [`MAX_ATTRIBUTES`] attributes kept. A line is a slice of `bytes`, and
+/// only a line that others continue is copied, once, into the text it
+/// joins; a key repeated is found in a set, so the work is linear.
 pub fn parse(bytes: &[u8]) -> Vec<(String, String)> {
+    let bytes = cut_utf8(bytes, MAX_ATTRIBUTE_BYTES);
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
-    let mut logical: Vec<Vec<u8>> = Vec::new();
+    let mut attributes: Vec<(String, String)> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut logical: Option<Cow<'_, [u8]>> = None;
     for line in split_lines(bytes) {
         if let Some(rest) = line.strip_prefix(b" ")
-            && let Some(last) = logical.last_mut()
+            && let Some(last) = logical.as_mut()
         {
-            last.extend_from_slice(rest);
+            last.to_mut().extend_from_slice(rest);
             continue;
         }
-        logical.push(line.to_vec());
+        if let Some(done) = logical.replace(Cow::Borrowed(line)) {
+            keep(&done, &mut attributes, &mut seen);
+        }
+        if attributes.len() >= MAX_ATTRIBUTES {
+            return attributes;
+        }
     }
-    let mut attributes: Vec<(String, String)> = Vec::new();
-    for line in logical {
-        let text = decode(&line);
-        let Some((key, value)) = text.split_once(':') else {
-            continue;
-        };
-        let key = key.trim();
-        if key.is_empty() || attributes.iter().any(|(k, _)| k == key) {
-            continue;
-        }
-        attributes.push((key.to_owned(), value.trim().to_owned()));
+    if let Some(done) = logical {
+        keep(&done, &mut attributes, &mut seen);
     }
     attributes
+}
+
+/// Adds the attribute that the logical line `line` holds, unless it has
+/// no key, repeats one, or the list is full.
+fn keep(line: &[u8], attributes: &mut Vec<(String, String)>, seen: &mut HashSet<String>) {
+    if attributes.len() >= MAX_ATTRIBUTES {
+        return;
+    }
+    let text = decode(line);
+    let Some((key, value)) = text.split_once(':') else {
+        return;
+    };
+    let key = key.trim();
+    if key.is_empty() || seen.contains(key) {
+        return;
+    }
+    seen.insert(key.to_owned());
+    attributes.push((key.to_owned(), value.trim().to_owned()));
+}
+
+/// The first `max` bytes of `bytes`, less the bytes of a UTF-8 character
+/// the cut would split.
+fn cut_utf8(bytes: &[u8], max: usize) -> &[u8] {
+    if bytes.len() <= max {
+        return bytes;
+    }
+    let mut end = max;
+    // A continuation byte is `10xxxxxx`; back up to the start of its
+    // character, which is at most 3 bytes back in UTF-8.
+    while end > max.saturating_sub(3) && bytes[end] & 0xC0 == 0x80 {
+        end -= 1;
+    }
+    &bytes[..end]
 }
 
 /// Splits on CR, LF and CR LF, dropping lines that are empty or blank.
@@ -46,11 +97,11 @@ fn split_lines(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
 }
 
 /// UTF-8 when the line is valid UTF-8, else Latin-1, which maps every byte
-/// to one character so nothing is lost.
-fn decode(line: &[u8]) -> String {
+/// to one character so nothing is lost. A valid line is borrowed.
+fn decode(line: &[u8]) -> Cow<'_, str> {
     match std::str::from_utf8(line) {
-        Ok(s) => s.to_owned(),
-        Err(_) => line.iter().map(|&b| char::from(b)).collect(),
+        Ok(s) => Cow::Borrowed(s),
+        Err(_) => Cow::Owned(line.iter().map(|&b| char::from(b)).collect()),
     }
 }
 
@@ -204,6 +255,72 @@ mod tests {
         let parsed = parse(text);
         assert_eq!(parsed[0].1, "\u{C8}\u{E3}\u{F0}\u{E0}");
         assert_eq!(parsed[1].1, "\u{E9}");
+    }
+
+    #[test]
+    fn forty_thousand_keys_keep_the_first_4096() {
+        use std::fmt::Write;
+        let mut text = String::new();
+        for i in 0..40_000 {
+            write!(text, "K{i:07}: v{i}\r\n").unwrap();
+        }
+        let parsed = parse(text.as_bytes());
+        assert_eq!(parsed.len(), MAX_ATTRIBUTES);
+        assert_eq!(parsed[0], ("K0000000".to_owned(), "v0".to_owned()));
+        assert_eq!(parsed[4095].0, "K0004095");
+    }
+
+    #[test]
+    fn a_key_repeated_a_hundred_thousand_times_is_kept_once() {
+        let text = "A: b\n".repeat(100_000);
+        assert_eq!(parse(text.as_bytes()), pairs(&[("A", "b")]));
+    }
+
+    #[test]
+    fn text_past_a_mebibyte_is_not_read() {
+        // Distinct keys would hit the attribute limit first, so the filler
+        // repeats one key and the last line is what the cut removes.
+        let mut text = String::from("First: 1\n");
+        while text.len() < 2 * MAX_ATTRIBUTE_BYTES {
+            text.push_str("Filler: x\n");
+        }
+        text.push_str("Last: 2\n");
+        let parsed = parse(text.as_bytes());
+        assert!(parsed.iter().any(|(k, _)| k == "First"));
+        assert!(parsed.iter().all(|(k, _)| k != "Last"));
+
+        // One value of two mebibytes keeps its first mebibyte.
+        let big = format!("Big: {}\nAfter: 1\n", "x".repeat(2 * MAX_ATTRIBUTE_BYTES));
+        let parsed = parse(big.as_bytes());
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].1.len(), MAX_ATTRIBUTE_BYTES - "Big: ".len());
+    }
+
+    #[test]
+    fn a_cut_inside_a_character_drops_the_character_and_not_the_encoding() {
+        // "K: " and then two byte characters: the cut at 1 MiB falls in the
+        // middle of one of them.
+        let text = format!("K: {}", "\u{e9}".repeat(MAX_ATTRIBUTE_BYTES));
+        let parsed = parse(text.as_bytes());
+        let value = &parsed[0].1;
+        assert!(value.chars().all(|c| c == '\u{e9}'), "decoded as UTF-8");
+        assert_eq!(value.len(), MAX_ATTRIBUTE_BYTES - 4);
+    }
+
+    #[test]
+    fn a_value_continued_over_a_hundred_thousand_lines_is_joined() {
+        let text = format!("Long: a\n{}", " b\n".repeat(100_000));
+        let parsed = parse(text.as_bytes());
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].1.len(), 1 + 100_000);
+    }
+
+    #[test]
+    fn a_continuation_of_a_dropped_line_is_dropped_with_it() {
+        let text = b"no colon\n here\nA: 1\n";
+        assert_eq!(parse(text), pairs(&[("A", "1")]));
+        // A first line that starts with a space has nothing to continue.
+        assert_eq!(parse(b" B: 2\nA: 1\n"), pairs(&[("B", "2"), ("A", "1")]));
     }
 
     #[test]
