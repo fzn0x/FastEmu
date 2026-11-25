@@ -108,7 +108,9 @@ pub(crate) fn push_frame(ctx: &mut Ctx<'_>, method: &Arc<Method>, bp: usize) -> 
         return Err(Fault::StackOverflow);
     }
     let locals_end = bp + code.max_locals as usize;
-    t.reserve(locals_end + code.max_stack as usize + 2);
+    if t.reserve(locals_end + code.max_stack as usize + 2).is_err() {
+        return Err(Fault::StackOverflow);
+    }
     t.slots[bp + method.arg_slots as usize..locals_end].fill(Value::Void);
     t.frames.push(Frame {
         method: Arc::clone(method),

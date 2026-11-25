@@ -43,16 +43,24 @@ pub(crate) struct ThreadStack {
     /// Native code calling into Java, nested.
     pub(crate) native_depth: u32,
     pub(crate) max_native_depth: u32,
+    /// The most slots the thread may have ([`crate::VmLimits::max_stack_slots`]);
+    /// `slots` never grows past it.
+    pub(crate) max_slots: usize,
 }
 
+/// A frame asked for more slots than the thread may have.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct StackFull;
+
 impl ThreadStack {
-    pub(crate) fn new(max_native_depth: u32) -> Self {
+    pub(crate) fn new(max_native_depth: u32, max_slots: usize) -> Self {
         Self {
-            slots: vec![Value::Void; 256],
+            slots: vec![Value::Void; 256.min(max_slots)],
             frames: Vec::with_capacity(32),
             locals: Vec::new(),
             native_depth: 0,
             max_native_depth,
+            max_slots,
         }
     }
 
@@ -64,6 +72,7 @@ impl ThreadStack {
             locals: Vec::new(),
             native_depth: 0,
             max_native_depth: 0,
+            max_slots: 0,
         }
     }
 
@@ -73,13 +82,23 @@ impl ThreadStack {
         self.frames.last().map_or(0, |f| f.sp as usize)
     }
 
-    /// Makes sure slots up to `needed` exist.
+    /// Makes sure slots up to `needed` exist, or says the thread may not
+    /// have that many. The stack keeps what it grew to, so a thread that
+    /// once recursed deep holds up to `max_slots` slots (16 bytes each)
+    /// until it ends.
     #[inline]
-    pub(crate) fn reserve(&mut self, needed: usize) {
-        if self.slots.len() < needed {
-            let len = needed.max(self.slots.len() * 2);
-            self.slots.resize(len, Value::Void);
+    pub(crate) fn reserve(&mut self, needed: usize) -> Result<(), StackFull> {
+        // `slots` is never longer than `max_slots`, so this is also the
+        // answer for a request that is within the limit.
+        if self.slots.len() >= needed {
+            return Ok(());
         }
+        if needed > self.max_slots {
+            return Err(StackFull);
+        }
+        let len = needed.max(self.slots.len() * 2).min(self.max_slots);
+        self.slots.resize(len, Value::Void);
+        Ok(())
     }
 }
 
@@ -149,7 +168,10 @@ fn register(shared: &VmShared, state: &mut VmState, java_thread: ObjRef, name: S
         ThreadEntry {
             java_thread,
             name,
-            stack: Box::new(ThreadStack::new(shared.config.max_native_depth)),
+            stack: Box::new(ThreadStack::new(
+                shared.config.max_native_depth,
+                shared.config.limits.max_stack_slots,
+            )),
             interrupted: false,
             notified: false,
         },
@@ -255,5 +277,35 @@ impl Ctx<'_> {
             lang::system::flush_lines(self.shared, &mut self.state);
         }
         self.shared.cond.notify_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reserve_doubles_the_stack_up_to_the_limit() {
+        let mut stack = ThreadStack::new(16, 1000);
+        assert_eq!(stack.slots.len(), 256);
+        assert_eq!(stack.reserve(200), Ok(()));
+        assert_eq!(stack.slots.len(), 256);
+        assert_eq!(stack.reserve(300), Ok(()));
+        assert_eq!(stack.slots.len(), 512);
+        // Doubling would make 1024: the limit cuts it.
+        assert_eq!(stack.reserve(600), Ok(()));
+        assert_eq!(stack.slots.len(), 1000);
+        assert_eq!(stack.reserve(1000), Ok(()));
+        assert_eq!(stack.reserve(1001), Err(StackFull));
+        assert_eq!(stack.slots.len(), 1000);
+    }
+
+    #[test]
+    fn a_stack_never_holds_more_slots_than_its_limit() {
+        let mut stack = ThreadStack::new(16, 3);
+        assert_eq!(stack.slots.len(), 3);
+        assert_eq!(stack.reserve(3), Ok(()));
+        assert_eq!(stack.reserve(4), Err(StackFull));
+        assert_eq!(ThreadStack::placeholder().reserve(1), Err(StackFull));
     }
 }

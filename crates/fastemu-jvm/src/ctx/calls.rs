@@ -46,7 +46,9 @@ impl Ctx<'_> {
             );
             return Err(self.new_exception("java/lang/InternalError", Some(&message)));
         }
-        self.thread.reserve(top + slots);
+        if self.thread.reserve(top + slots).is_err() {
+            return Err(self.new_exception("java/lang/StackOverflowError", None));
+        }
         let mut i = top;
         for &a in args {
             self.thread.slots[i] = a;
