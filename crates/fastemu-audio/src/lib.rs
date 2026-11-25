@@ -57,7 +57,7 @@ mod wav;
 
 pub use engine::{Engine, EngineConfig};
 pub use error::AudioError;
-pub use event::{EventCallback, PlayerEvent, PlayerEventKind, PlayerId};
+pub use event::{EventCallback, EventClass, MAX_QUEUED, PlayerEvent, PlayerEventKind, PlayerId};
 pub use format::{Format, SUPPORTED_CONTENT_TYPES};
 pub use group::{Group, GroupLimits};
 pub use midi::soundfont::SoundFont;

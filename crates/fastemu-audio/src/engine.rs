@@ -152,6 +152,12 @@ impl Engine {
         }
     }
 
+    /// How many events were dropped because listeners were far behind: the
+    /// queue holds at most [`MAX_QUEUED`](crate::MAX_QUEUED) of them.
+    pub fn dropped_events(&self) -> u64 {
+        self.shared.events.dropped()
+    }
+
     /// How many players exist, playing or not, across every group.
     pub fn player_count(&self) -> usize {
         self.lock()
