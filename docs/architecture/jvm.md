@@ -343,6 +343,13 @@ few times the heap limit, and the host never holds much more than that.
 count. The `OutOfMemoryError` itself is made without a check, so it can
 always be thrown.
 
+The count follows a phone, not the host. An object counts 8 bytes and 4
+or 8 for each field, while the host gives it a slab entry and 16 bytes a
+field, so a game made of very many tiny objects can hold up to about ten
+times its heap in real memory. The heap lives as long as the machine: a
+game that has ended keeps its memory until the host lets go of its `Vm`,
+which the apps do when its tile is closed.
+
 ### Limits
 
 `VmConfig::limits` is a `VmLimits`: one struct for every limit on what a
