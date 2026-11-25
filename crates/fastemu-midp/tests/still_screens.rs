@@ -2,16 +2,17 @@
 //! `MidpInstance::ping` asks the event thread whether it would take a key,
 //! and `MidpInstance::activity` says what the game's threads are doing. A
 //! game that waits answers and has every thread waiting; a thread that
-//! spins keeps it busy; an event thread stuck in a callback never answers,
+//! spins keeps it busy; an event thread stuck in a callback, or kept from
+//! the callback lock by a game thread stuck in a paint, never answers,
 //! even while every thread sleeps; and a thread that keeps the VM locked
 //! lets no look in.
 //!
-//! The MIDlets are `t.StillMenu`, `t.StuckKey` and `t.StopLoop` of the
-//! shared test programs, in suites of their own. Without a JDK the tests
-//! print why and pass, unless `FASTEMU_REQUIRE_JAVA=1` is set (CI sets
-//! it). No test depends on how fast the machine is: each waits as long as
-//! it takes for a state that comes, and checks a state that never changes
-//! as often as it likes.
+//! The MIDlets are `t.StillMenu`, `t.StuckKey`, `t.StuckPaint` and
+//! `t.StopLoop` of the shared test programs, in suites of their own.
+//! Without a JDK the tests print why and pass, unless
+//! `FASTEMU_REQUIRE_JAVA=1` is set (CI sets it). No test depends on how
+//! fast the machine is: each waits as long as it takes for a state that
+//! comes, and checks a state that never changes as often as it likes.
 
 mod support;
 
@@ -117,6 +118,31 @@ fn an_event_thread_stuck_in_a_callback_never_answers() {
         activity.is_none_or(|a| a.posted == 1 && !a.is_idle()),
         "{activity:?}"
     );
+}
+
+#[test]
+fn a_game_thread_stuck_in_a_paint_keeps_the_ping_from_answering() {
+    let Some(jar) = suite("stuck-paint", "StuckPaint", "") else {
+        return;
+    };
+    let mut run = Running::launch(&jar, 0);
+    run.wait_log("stuck in paint");
+    // The painter sleeps and the event thread waits for work, so the
+    // threads alone would call it idle.
+    wait_until(&mut run, "idle", |run| {
+        run.instance.activity().is_some_and(|a| a.is_idle())
+    });
+    // The event thread takes the ping between callbacks...
+    let ping = run.instance.ping();
+    wait_until(&mut run, "the ping taken", |run| {
+        run.instance.activity().is_some_and(|a| a.posted == 0)
+    });
+    // ...but the painter keeps the callback lock past the ping's second,
+    // as it would keep a key from its callback.
+    for _ in 0..200 {
+        assert!(!ping.answered());
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]
