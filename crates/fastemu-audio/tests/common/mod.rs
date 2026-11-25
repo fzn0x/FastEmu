@@ -43,6 +43,17 @@ pub fn midi(division: u16, events: &[u8]) -> Vec<u8> {
     out
 }
 
+/// A MIDI file of `controllers` volume changes at tick 0, then one note
+/// half a second long, at 480 ticks per quarter and 120 beats a minute.
+pub fn controller_midi(controllers: usize) -> Vec<u8> {
+    let mut events = Vec::with_capacity(controllers * 4 + 16);
+    for i in 0..controllers {
+        events.extend_from_slice(&[0x00, 0xB0 | (i % 16) as u8, 7, (i % 128) as u8]);
+    }
+    events.extend_from_slice(&[0x00, 0x90, 60, 100, 0x83, 0x60, 0x80, 60, 0]);
+    midi(480, &events)
+}
+
 pub fn engine(rate: u32) -> Engine {
     Engine::new(EngineConfig { sample_rate: rate })
 }

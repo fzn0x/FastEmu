@@ -2042,6 +2042,7 @@ version = "0.1.0"
 dependencies = [
  "amr-nb",
  "cpal",
+ "parking_lot",
  "rustysynth",
  "symphonia-bundle-mp3",
  "symphonia-core",

@@ -2,8 +2,10 @@
 //! players for each running instance.
 
 use std::fmt;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+use parking_lot::{Mutex, MutexGuard};
 
 use crate::event::EventQueue;
 use crate::gain::unit_gain;
@@ -64,13 +66,13 @@ impl Engine {
         }
     }
 
-    /// Locks the mixer. A panic while it was held (a bug) leaves it
-    /// usable rather than silencing every game.
+    /// Locks the mixer. The lock is fair: a caller that has waited a
+    /// moment is next, so a thread that takes it again and again cannot
+    /// keep the audio thread or another game's calls out. It has no
+    /// poison either: a panic while it was held leaves the mixer usable
+    /// rather than silencing every game.
     pub(crate) fn lock(&self) -> MutexGuard<'_, Mixer> {
-        self.shared
-            .mixer
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.shared.mixer.lock()
     }
 
     pub(crate) fn next_id(&self) -> u64 {
@@ -106,19 +108,11 @@ impl Engine {
     /// Sets the SoundFont MIDI players created from now on use, or `None`
     /// for the built-in synthesizer. Players already created keep theirs.
     pub fn set_soundfont(&self, soundfont: Option<SoundFont>) {
-        *self
-            .shared
-            .soundfont
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = soundfont;
+        *self.shared.soundfont.lock() = soundfont;
     }
 
     pub fn soundfont(&self) -> Option<SoundFont> {
-        self.shared
-            .soundfont
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.shared.soundfont.lock().clone()
     }
 
     /// Makes a group for one instance's players. Dropping every clone of
