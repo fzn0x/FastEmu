@@ -206,11 +206,12 @@ pub(crate) fn now_millis() -> i64 {
 // The functions below do file work: callers hold the file lock.
 
 /// Lists an owner's stores, once per virtual machine. The list of another
-/// suite is kept only when it holds a store and fewer than
-/// [`MAX_OTHER_OWNERS`] others are kept already; any other time it is read
-/// again at the next call, which is one directory read. So a game that
-/// asks for the stores of thousands of suites that are not there, or of
-/// more suites than it has any use for, does not grow the map.
+/// suite is kept only when it holds a store, and for [`MAX_OTHER_OWNERS`]
+/// suites at most. A folder with no store is read again at the next call,
+/// which is one directory read, so a game that asks for the stores of
+/// thousands of suites that are not there does not grow the map. A suite
+/// with stores that would be one too many throws `RecordStoreException`:
+/// its stores are there, so the game must not be told they are missing.
 pub(crate) fn scan(ctx: &mut Ctx<'_>, owner: &Owner) -> JResult<()> {
     let dir = {
         let rms = rms(ctx);
@@ -222,13 +223,19 @@ pub(crate) fn scan(ctx: &mut Ctx<'_>, owner: &Owner) -> JResult<()> {
     match ctx.without_lock(|| disk::scan(&dir)) {
         Ok(found) => {
             if matches!(owner, Owner::Other { .. }) {
+                if found.is_empty() {
+                    return Ok(());
+                }
                 let kept = rms(ctx)
                     .suites
                     .keys()
                     .filter(|o| matches!(o, Owner::Other { .. }))
                     .count();
-                if found.is_empty() || kept >= MAX_OTHER_OWNERS {
-                    return Ok(());
+                if kept >= MAX_OTHER_OWNERS {
+                    return ctx.throw(
+                        RECORD_STORE_EXCEPTION,
+                        "too many other suites' record stores are in use",
+                    );
                 }
             }
             let stores = found
@@ -431,12 +438,44 @@ mod tests {
         }
         with_ctx(dir.path(), |ctx| {
             for i in 0..40 {
-                scan(ctx, &other(&format!("vendor {i}"), "game")).unwrap();
+                let result = scan(ctx, &other(&format!("vendor {i}"), "game"));
+                assert_eq!(result.is_ok(), i < MAX_OTHER_OWNERS, "vendor {i}");
             }
             assert_eq!(others(ctx), MAX_OTHER_OWNERS);
-            // One that is remembered stays; one that is not is read again.
+            // One that is remembered stays; one that is not is not kept.
             assert!(rms(ctx).suites.contains_key(&other("vendor 0", "game")));
             assert!(!rms(ctx).suites.contains_key(&other("vendor 39", "game")));
+        });
+    }
+
+    #[test]
+    fn a_suite_past_the_16_remembered_is_an_error_and_not_a_missing_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let name = StoreName::from_text("save").unwrap();
+        let file = StoreData::new(name.clone(), 0).encode();
+        for i in 0..20 {
+            let folder = disk::suite_dir(dir.path(), &format!("vendor {i}"), "game");
+            disk::write_atomic(&disk::store_path(&folder, &name), &file).unwrap();
+        }
+        let key = |vendor: &str| StoreKey {
+            owner: other(vendor, "game"),
+            name: StoreName::from_text("save").unwrap(),
+        };
+        with_ctx(dir.path(), |ctx| {
+            for i in 0..MAX_OTHER_OWNERS {
+                assert!(load(ctx, &key(&format!("vendor {i}"))).unwrap());
+            }
+            // The store is there, so the game is not told it is missing.
+            for i in MAX_OTHER_OWNERS..20 {
+                let result = load(ctx, &key(&format!("vendor {i}")));
+                assert!(result.is_err(), "vendor {i}: {result:?}");
+                assert!(delete(ctx, &key(&format!("vendor {i}"))).is_err());
+            }
+            assert_eq!(others(ctx), MAX_OTHER_OWNERS);
+            // A suite that has no store is still just missing, and the
+            // ones kept still load.
+            assert!(!load(ctx, &key("nobody")).unwrap());
+            assert!(load(ctx, &key("vendor 0")).unwrap());
         });
     }
 }
