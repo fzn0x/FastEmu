@@ -75,7 +75,7 @@ links to the page that describes the limit.
 | Java heap | 2, 4, 8 or 16 MiB, set by the phone profile | `OutOfMemoryError` | [jvm.md][jvm-heap] |
 | Memory the runtime makes for the game: strings, buffers, images, screens, sound bytes | counted on the heap | `OutOfMemoryError` | [jvm.md][jvm-heap] |
 | One request of the runtime | at most the heap, and at most twice the heap with what the heap counts already | `OutOfMemoryError` before anything is built | [jvm.md][jvm-heap] |
-| Java threads alive at once | 64, the event and lifecycle threads among them; the host may start 16 more, 80 in all | `OutOfMemoryError` from `Thread.start` or `new Timer()` | [jvm.md][jvm-threads] |
+| Java threads alive at once | 64, the event and lifecycle threads among them; the host may start 16 more, 80 in all | `OutOfMemoryError` from `Thread.start` or `new Timer()`, after one collection when a timer has no task left | [jvm.md][jvm-threads] |
 | Stack of one thread | 131072 slots, 2 MiB | `StackOverflowError` | [jvm.md][jvm-limits] |
 | Frames of one thread | 4096 | `StackOverflowError` | [jvm.md][jvm-config] |
 | Calls from the runtime back into Java, nested on one thread, the runtime's own calls included | 256 | `StackOverflowError` | [jvm.md][jvm-config] |
@@ -318,9 +318,11 @@ section says is in scope.
   holds its old buffer too, until the copy is done.
 - Each thread also reserves 16 MiB of address space for its system
   stack. The system commits only what the thread uses.
-- A `Timer` keeps its thread until `cancel()`, as in Java. A game that
-  never cancels its timers gets `OutOfMemoryError` after about 62 of
-  them.
+- A `Timer` keeps its thread until `cancel()`, or until the game drops
+  the timer and no task is left, as in Java. A game that keeps about 62
+  timers, or makes them faster than their tasks run, gets
+  `OutOfMemoryError`. A repeating task keeps the thread of a dropped
+  timer until the task is cancelled.
 - Only a lifecycle call that does not return, such as a `startApp` that
   runs the game's loop, or a very slow one, lets 8 pause and resume
   calls pile up; the ones after are dropped, as the table says.
