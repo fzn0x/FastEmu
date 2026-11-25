@@ -27,12 +27,14 @@ MIDlet-Name: Memory\r\n\
 MIDlet-Vendor: FastEmu\r\n\
 MIDlet-Version: 1.0\r\n\
 MIDlet-1: BigImage, , m.BigImage\r\n\
-MIDlet-2: ImageFile, , m.ImageFile\r\n";
+MIDlet-2: ImageFile, , m.ImageFile\r\n\
+MIDlet-3: Streams, , m.Streams\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 mod midlet {
     pub const BIG_IMAGE: usize = 0;
     pub const IMAGE_FILE: usize = 1;
+    pub const STREAMS: usize = 2;
 }
 
 /// The MIDlets, compiled once against the shared stubs and this test's
@@ -242,4 +244,27 @@ fn a_file_that_declares_more_pixels_than_the_heap_holds_is_refused_before_it_is_
         let line = format!("/dot.png {how} ok 2x2");
         assert!(run.has(&line), "no {line:?}; the log:\n{log}");
     }
+}
+
+#[test]
+fn an_image_stream_that_never_ends_is_an_io_exception_at_16_mib() {
+    let Some(jar) = suite("streams", &[]) else {
+        return;
+    };
+    let mut run = launch(&jar, midlet::STREAMS, HEAP);
+    let line = run.wait_log("endless ");
+    let log = run.dump();
+    assert!(
+        line.starts_with("endless IOException the image data is larger than 16 MiB calls "),
+        "{log}"
+    );
+    // 4 KiB a read: 4096 reads fill 16 MiB and the next one is refused.
+    let message = "endless IOException the image data is larger than 16 MiB";
+    assert_eq!(numbers(&line, message), [4097, 4097 * 4096], "{log}");
+    // A stream that gives no bytes ends after 1000 reads in a row.
+    let empty = run.wait_log("empty ");
+    assert_eq!(
+        empty, "empty IOException the stream gives no data calls 1000",
+        "{log}"
+    );
 }
