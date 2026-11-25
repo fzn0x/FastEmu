@@ -29,6 +29,11 @@ use crate::env::{InstanceEnv, env};
 /// report and more than most phones offered.
 pub const DEFAULT_QUOTA: u64 = 1 << 20;
 
+/// How many other suites' folders one virtual machine remembers. A game
+/// names any vendor and suite it likes, and each one it names that has
+/// stores of its own would take a place in the map.
+const MAX_OTHER_OWNERS: usize = 16;
+
 /// Whose stores a store belongs to.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Owner {
@@ -200,7 +205,12 @@ pub(crate) fn now_millis() -> i64 {
 
 // The functions below do file work: callers hold the file lock.
 
-/// Lists an owner's stores, once per virtual machine.
+/// Lists an owner's stores, once per virtual machine. The list of another
+/// suite is kept only when it holds a store and fewer than
+/// [`MAX_OTHER_OWNERS`] others are kept already; any other time it is read
+/// again at the next call, which is one directory read. So a game that
+/// asks for the stores of thousands of suites that are not there, or of
+/// more suites than it has any use for, does not grow the map.
 pub(crate) fn scan(ctx: &mut Ctx<'_>, owner: &Owner) -> JResult<()> {
     let dir = {
         let rms = rms(ctx);
@@ -211,6 +221,16 @@ pub(crate) fn scan(ctx: &mut Ctx<'_>, owner: &Owner) -> JResult<()> {
     };
     match ctx.without_lock(|| disk::scan(&dir)) {
         Ok(found) => {
+            if matches!(owner, Owner::Other { .. }) {
+                let kept = rms(ctx)
+                    .suites
+                    .keys()
+                    .filter(|o| matches!(o, Owner::Other { .. }))
+                    .count();
+                if found.is_empty() || kept >= MAX_OTHER_OWNERS {
+                    return Ok(());
+                }
+            }
             let stores = found
                 .into_iter()
                 .map(|(name, size)| (name, Entry { size, data: None }))
@@ -341,4 +361,88 @@ fn io_failure(ctx: &mut Ctx<'_>, what: &str, path: &Path, e: &io::Error) -> Thro
         class,
         Some(&format!("the record store file could not be used: {e}")),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use fastemu_jvm::{MemorySource, Vm, VmConfig};
+
+    use super::*;
+
+    /// Runs `body` on a virtual machine whose record stores are in `dir`.
+    fn with_ctx(dir: &Path, body: impl FnOnce(&mut Ctx<'_>)) {
+        let env = InstanceEnv::for_tests(dir);
+        let config = VmConfig {
+            log: Arc::new(|_| {}),
+            ..VmConfig::default()
+        };
+        let vm = Vm::new(config, Arc::new(MemorySource::new()), Vec::new());
+        vm.attach("test", move |ctx| {
+            ctx.set_extension(env);
+            body(ctx);
+        });
+    }
+
+    fn other(vendor: &str, suite: &str) -> Owner {
+        Owner::Other {
+            vendor: vendor.to_owned(),
+            suite: suite.to_owned(),
+        }
+    }
+
+    fn others(ctx: &mut Ctx<'_>) -> usize {
+        rms(ctx)
+            .suites
+            .keys()
+            .filter(|o| matches!(o, Owner::Other { .. }))
+            .count()
+    }
+
+    #[test]
+    fn asking_for_suites_that_are_not_there_keeps_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        with_ctx(dir.path(), |ctx| {
+            for i in 0..1000 {
+                scan(ctx, &other(&format!("vendor {i}"), "game")).unwrap();
+            }
+            assert_eq!(others(ctx), 0);
+            // Their stores are not there, and asking again is the same.
+            let key = StoreKey {
+                owner: other("vendor 1", "game"),
+                name: StoreName::from_text("save").unwrap(),
+            };
+            assert!(!load(ctx, &key).unwrap());
+            assert_eq!(others(ctx), 0);
+        });
+    }
+
+    #[test]
+    fn this_suites_own_stores_are_kept_even_when_there_are_none() {
+        let dir = tempfile::tempdir().unwrap();
+        with_ctx(dir.path(), |ctx| {
+            scan(ctx, &Owner::Own).unwrap();
+            assert!(rms(ctx).suites.contains_key(&Owner::Own));
+        });
+    }
+
+    #[test]
+    fn only_16_other_suites_with_stores_are_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        let name = StoreName::from_text("save").unwrap();
+        for i in 0..40 {
+            let folder = disk::suite_dir(dir.path(), &format!("vendor {i}"), "game");
+            disk::write_atomic(&disk::store_path(&folder, &name), b"stored").unwrap();
+        }
+        with_ctx(dir.path(), |ctx| {
+            for i in 0..40 {
+                scan(ctx, &other(&format!("vendor {i}"), "game")).unwrap();
+            }
+            assert_eq!(others(ctx), MAX_OTHER_OWNERS);
+            // One that is remembered stays; one that is not is read again.
+            assert!(rms(ctx).suites.contains_key(&other("vendor 0", "game")));
+            assert!(!rms(ctx).suites.contains_key(&other("vendor 39", "game")));
+        });
+    }
 }
