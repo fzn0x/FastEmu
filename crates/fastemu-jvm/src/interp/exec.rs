@@ -1257,14 +1257,18 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                     .last_mut()
                     .expect("a caller below the returning frame");
                 let at = caller.sp as usize;
-                match v {
-                    Value::Void => {}
-                    v if v.is_wide() => {
+                // As many slots as the callee declares, whatever it
+                // returned: the caller's stack walk counted on that, and
+                // bytecode can load a long as one slot or the second half
+                // of one.
+                match frame.method.ret.slots() {
+                    0 => {}
+                    2 => {
                         t.slots[at] = v;
                         t.slots[at + 1] = Value::Void;
                         caller.sp += 2;
                     }
-                    v => {
+                    _ => {
                         t.slots[at] = v;
                         caller.sp += 1;
                     }

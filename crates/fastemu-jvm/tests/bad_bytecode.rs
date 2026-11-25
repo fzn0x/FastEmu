@@ -6,7 +6,7 @@ mod support;
 
 use std::sync::Arc;
 
-use fastemu_jvm::{Throw, Vm, VmConfig};
+use fastemu_jvm::{Throw, Value, Vm, VmConfig};
 use support::{ClassBuilder, Handler, PUBLIC, STATIC, idx};
 
 /// Calls `static void Bad.f()` of the given classes and returns what it
@@ -234,4 +234,40 @@ fn a_virtual_call_on_an_object_of_the_class_still_runs() {
         run_with_a_and_b(|bad| call_foo_on_new(bad, "A")),
         "returned"
     );
+}
+
+/// Calls `static int Bad.f()`, which pushes 5, calls `Bad.v()I` whose body
+/// is `code`, drops the result and returns the 5: what `f` returns shows
+/// whether the call left exactly one slot behind.
+fn call_around_a_return(code: &[u8]) -> Value {
+    let mut c = ClassBuilder::new("Bad", "java/lang/Object", 49, 0);
+    let v = c.method_ref("Bad", "v", "()I");
+    let [vh, vl] = idx(v);
+    c.method(PUBLIC | STATIC, "v", "()I", 2, 2, code, &[]);
+    // iconst_5; invokestatic v; pop; ireturn
+    let f = [0x08, 0xb8, vh, vl, 0x57, 0xac];
+    c.method(PUBLIC | STATIC, "f", "()I", 2, 0, &f, &[]);
+    let source = support::source(&[("Bad", c.build())]);
+    let vm = Vm::new(VmConfig::default(), Arc::new(source), Vec::new());
+    vm.attach("test", |ctx| {
+        match ctx.call_static("Bad", "f", "()I", &[]) {
+            Ok(v) => v,
+            Err(Throw::Exception(e)) => panic!("{}", ctx.describe_exception(e)),
+            Err(Throw::Stop) => panic!("stopped"),
+        }
+    })
+}
+
+#[test]
+fn a_return_leaves_the_slots_the_method_declares() {
+    // lconst_1; lstore_0; iload_0; ireturn: the long itself, as one slot,
+    // where an int is expected. The caller took it for two slots.
+    let long_as_one = [0x0a, 0x3f, 0x1a, 0xac];
+    assert_eq!(call_around_a_return(&long_as_one), Value::Int(5));
+    // lconst_1; lstore_0; iload_1; ireturn: the second half of the long,
+    // which holds no value. The caller took it for none.
+    let second_half = [0x0a, 0x3f, 0x1b, 0xac];
+    assert_eq!(call_around_a_return(&second_half), Value::Int(5));
+    // iconst_3; ireturn
+    assert_eq!(call_around_a_return(&[0x06, 0xac]), Value::Int(5));
 }
