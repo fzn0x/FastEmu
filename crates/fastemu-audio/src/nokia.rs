@@ -38,12 +38,23 @@ const TEMPOS_BPM: [u32; 32] = [
 /// plays once.
 const MAX_PATTERN_LOOPS: u32 = 14;
 
-/// Reads a Smart Messaging ringing tone into tones.
-pub(crate) fn parse_ringtone(data: &[u8]) -> Result<Vec<ToneEvent>, AudioError> {
-    let malformed = |reason: &str| AudioError::Malformed {
+/// The most tones one ringing tone may unroll to, as many as a tone
+/// sequence may. A pattern of 255 notes can play 15 times, and a pattern
+/// that has been defined can be played again by a header of two bytes, so
+/// a file of a kilobyte unrolls to millions of tones. They are counted as
+/// they are made, and a ringing tone that passes the limit is refused
+/// before it takes the memory.
+const MAX_TONES: usize = 1 << 16;
+
+fn malformed(reason: &str) -> AudioError {
+    AudioError::Malformed {
         format: Format::NokiaRingtone,
         reason: reason.into(),
-    };
+    }
+}
+
+/// Reads a Smart Messaging ringing tone into tones.
+pub(crate) fn parse_ringtone(data: &[u8]) -> Result<Vec<ToneEvent>, AudioError> {
     let mut bits = BitReader { data, at: 0 };
     let commands = bits.read(8).ok_or_else(|| malformed("empty"))?;
     let mut unicode = false;
@@ -58,7 +69,7 @@ pub(crate) fn parse_ringtone(data: &[u8]) -> Result<Vec<ToneEvent>, AudioError> 
                 bits.align();
             }
             COMMAND_SOUND => {
-                return song(&mut bits, unicode).ok_or_else(|| malformed("ends inside the song"));
+                return song(&mut bits, unicode);
             }
             _ => break,
         }
@@ -131,15 +142,17 @@ enum Instruction {
     Volume(u32),
 }
 
-fn song(bits: &mut BitReader<'_>, unicode: bool) -> Option<Vec<ToneEvent>> {
-    let song_type = bits.read(3)?;
+fn song(bits: &mut BitReader<'_>, unicode: bool) -> Result<Vec<ToneEvent>, AudioError> {
+    let short = || malformed("ends inside the song");
+    let song_type = bits.read(3).ok_or_else(short)?;
     if song_type == SONG_BASIC {
-        let title_length = bits.read(4)? as usize;
-        bits.read(title_length * if unicode { 16 } else { 8 })?;
+        let title_length = bits.read(4).ok_or_else(short)? as usize;
+        bits.read(title_length * if unicode { 16 } else { 8 })
+            .ok_or_else(short)?;
     } else if song_type != SONG_TEMPORARY {
-        return Some(Vec::new());
+        return Ok(Vec::new());
     }
-    let pattern_count = bits.read(8)?;
+    let pattern_count = bits.read(8).ok_or_else(short)?;
     let mut patterns: [Option<Vec<Instruction>>; 4] = Default::default();
     let mut voice = Voice {
         scale: 1,
@@ -153,9 +166,9 @@ fn song(bits: &mut BitReader<'_>, unicode: bool) -> Option<Vec<ToneEvent>> {
         if header != 0 {
             break;
         }
-        let id = bits.read(2)? as usize;
-        let loops = bits.read(4)?;
-        let count = bits.read(8)?;
+        let id = bits.read(2).ok_or_else(short)? as usize;
+        let loops = bits.read(4).ok_or_else(short)?;
+        let count = bits.read(8).ok_or_else(short)?;
         if count > 0 {
             let mut instructions = Vec::with_capacity(count as usize);
             for _ in 0..count {
@@ -175,11 +188,18 @@ fn song(bits: &mut BitReader<'_>, unicode: bool) -> Option<Vec<ToneEvent>> {
             for _ in 0..plays {
                 for &instruction in instructions {
                     play(instruction, &mut voice, &mut tones);
+                    // Counted as the pattern plays, so the file stops
+                    // unrolling at the limit and not after it.
+                    if tones.len() > MAX_TONES {
+                        return Err(AudioError::TooLarge(format!(
+                            "a ringing tone of more than {MAX_TONES} tones"
+                        )));
+                    }
                 }
             }
         }
     }
-    Some(tones)
+    Ok(tones)
 }
 
 /// Reads one instruction. `None` ends the pattern: the data ran out or
@@ -363,6 +383,51 @@ mod tests {
         assert!(parse_ringtone(&w.bytes[..3]).is_err());
         assert!(parse_ringtone(&[]).is_err());
         assert!(parse_ringtone(&[1, 0]).is_err());
+    }
+
+    /// A song of `patterns` patterns that each play pattern A, which has
+    /// 255 notes and loops 14 times more, by a back reference: the file is
+    /// a few hundred bytes and plays 3825 notes for each pattern.
+    fn unrolling_song(patterns: u32) -> Vec<u8> {
+        let mut w = BitWriter::default();
+        header(&mut w, "", patterns);
+        w.put(0, 3);
+        w.put(0, 2);
+        w.put(14, 4);
+        w.put(255, 8);
+        for _ in 0..255 {
+            note(&mut w, 10, 5, 0);
+        }
+        for _ in 1..patterns {
+            w.put(0, 3);
+            w.put(0, 2);
+            w.put(14, 4);
+            w.put(0, 8);
+        }
+        w.bytes
+    }
+
+    #[test]
+    fn a_song_that_unrolls_past_the_limit_is_refused_as_it_unrolls() {
+        let file = unrolling_song(255);
+        assert!(file.len() < 1000, "{}", file.len());
+        let error = parse_ringtone(&file).unwrap_err();
+        assert!(matches!(error, AudioError::TooLarge(_)), "{error}");
+        assert_eq!(
+            error.to_string(),
+            "sound too large: a ringing tone of more than 65536 tones"
+        );
+    }
+
+    #[test]
+    fn a_song_just_under_the_limit_plays() {
+        // Each pattern is 3825 notes and as many gaps: 7650 tones.
+        let tones = parse_ringtone(&unrolling_song(8)).unwrap();
+        assert_eq!(tones.len(), 8 * 7650);
+        assert!(tones.len() <= MAX_TONES);
+        // Nine of them pass the limit.
+        let error = parse_ringtone(&unrolling_song(9)).unwrap_err();
+        assert!(matches!(error, AudioError::TooLarge(_)), "{error}");
     }
 
     #[test]
