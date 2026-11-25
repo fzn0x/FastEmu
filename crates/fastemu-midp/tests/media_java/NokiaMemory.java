@@ -10,7 +10,24 @@ import javax.microedition.media.Player;
  * sound memory is the same as MMAPI's.
  */
 public class NokiaMemory extends MediaUtil {
+    /** A file of one-byte AMR frames, which decodes to 320 times its size. */
+    static byte[] emptyAmr(int frames) {
+        byte[] amr = new byte[6 + frames];
+        byte[] magic = {'#', '!', 'A', 'M', 'R', 10};
+        for (int i = 0; i < magic.length; i++) {
+            amr[i] = magic[i];
+        }
+        for (int i = 6; i < amr.length; i++) {
+            amr[i] = 0x7C;
+        }
+        return amr;
+    }
+
     public static void main(String[] args) throws Exception {
+        // A sound that decodes to too much is no sound, as one that does
+        // not decode, and it takes no room in the group.
+        Sound huge = new Sound(emptyAmr(100000), Sound.FORMAT_WAV);
+        say("a too large sound", huge.getState());
         byte[] sound = wav(1 << 20);
         Vector sounds = new Vector();
         try {

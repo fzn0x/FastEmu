@@ -355,6 +355,7 @@ fn nokia_sounds_share_the_sound_budget_of_players() {
         "NokiaMemory",
         Some(group),
         r"
+        a too large sound: 3
         the 33rd sound: java.lang.OutOfMemoryError
         sounds held: 32
         state of the first: 1
