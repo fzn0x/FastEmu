@@ -144,7 +144,7 @@ vm.spawn("main", |ctx| {
 | `clock()` | The machine's run time, a `VmClock` (see [Run time](#run-time)). |
 | `activity()` | What the threads are doing now: an `Activity` with the live threads, those waiting for something to happen (a sleep, `Object.wait`, `Thread.join`, posted work, a pause, or a wait marked with `Ctx::wait_without_lock`), those waiting for a lock (a monitor, or a class another thread initializes), and the posted tasks. `is_idle()` holds when there are threads, every one waits, and no task is posted. For tools that tell a game waiting on a still screen from a stuck one. |
 | `thread_count`, `exit_code`, `heap_stats`, `flush_output` | Status. |
-| `downgrade()` | A `WeakVm`, which does not keep the machine alive. |
+| `downgrade()` | A `WeakVm`, which does not keep the machine alive. `WeakVm::upgrade` gives a `Vm` while anything holds the machine; `WeakVm::is_freed` says whether nothing does, without holding it. |
 
 `Vm` methods take the VM lock, so they are for host threads only. Native
 code already holds the lock; a native that called `Vm::post` or
@@ -161,12 +161,13 @@ already);
 `wait_finished` counts the wait for the lock into its timeout and
 returns `false` when it runs out. `attach`, `thread_count`,
 `exit_code` and `heap_stats` wait for as long as it takes.
-`Vm::clock`, `Vm::is_stopping`, `Vm::is_paused`, `Vm::downgrade` and
-`Ctx::clock` take no lock. A host thread that must not wait, such as an
-app's UI thread, should not call the ones that take it: a Java thread
-keeps the lock until its next safepoint or wait, and longer when its OS
-thread is not scheduled. MIDP's instances post the app's input from a
-control thread of their own (`docs/architecture/midp.md`).
+`Vm::clock`, `Vm::is_stopping`, `Vm::is_paused`, `Vm::downgrade`,
+`WeakVm::is_freed` and `Ctx::clock` take no lock. A host thread that must
+not wait, such as an app's UI thread, should not call the ones that take
+it: a Java thread keeps the lock until its next safepoint or wait, and
+longer when its OS thread is not scheduled. MIDP's instances post the
+app's input from a control thread of their own
+(`docs/architecture/midp.md`).
 
 ## Values and references
 
