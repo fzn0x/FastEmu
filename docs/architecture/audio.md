@@ -365,7 +365,7 @@ Errors map to exceptions:
 
 | `AudioError`                          | Java exception |
 | ------------------------------------- | -------------- |
-| `Unsupported`, `Malformed`, `TooLarge` | `MediaException` |
+| `Unsupported`, `Malformed`, `TooLarge`, `Busy` | `MediaException` |
 | `InvalidToneSequence`, `InvalidArgument` | `IllegalArgumentException` |
 | `InvalidState`, `Closed`              | `IllegalStateException` |
 | `OutOfMemory`                         | `OutOfMemoryError` |

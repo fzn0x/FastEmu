@@ -103,7 +103,7 @@ each sound and drop it unclosed, and a phone's collector freed those.
 | --- | --- |
 | `getState` | UNREALIZED (100) before `realize`, then the track's state: REALIZED 200, PREFETCHED 300, STARTED 400; CLOSED 0 after `close` or when the instance's group closed. Never throws. |
 | `realize`, `prefetch` | As above; nothing on a player already there. `MediaException` for a sound that is too large, `OutOfMemoryError` when the game's sound group is full. |
-| `start` | Prefetches, then starts. The state is STARTED when `start` returns, however short the sound. After the end it plays again from the start. Nothing on a started player. |
+| `start` | Prefetches, then starts. The state is STARTED when `start` returns, however short the sound. After the end it plays again from the start. Nothing on a started player. `MediaException` when the game has 32 players started already, or all games together 128: the player stays PREFETCHED, and a stop or an end makes room. |
 | `stop` | Stops and keeps the media time; nothing on a player that is not started. |
 | `deallocate` | Back to REALIZED, stopping first; nothing while UNREALIZED. |
 | `close` | CLOSED for good; the engine player and the bytes are freed. Twice is harmless. |
