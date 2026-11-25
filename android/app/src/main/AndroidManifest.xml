@@ -38,12 +38,13 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
             <!-- "Open with" for Java ME games in file managers and browsers'
-                 downloads: the JAR and its descriptor. -->
+                 downloads: the JAR and its descriptor. Content links only:
+                 a file: link would let another app name any file this app
+                 can read. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:scheme="content"/>
-                <data android:scheme="file"/>
                 <data android:mimeType="application/java-archive"/>
                 <data android:mimeType="application/x-java-archive"/>
                 <data android:mimeType="text/vnd.sun.j2me.app-descriptor"/>

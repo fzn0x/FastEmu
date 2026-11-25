@@ -104,13 +104,15 @@ class MainActivity : GameActivity() {
     }
 
     /**
-     * A game another app opened with FastEmu ("Open with"). A debuggable
-     * build also opens the file named by the `fastemu.open` extra, for
-     * testing from adb: `am start -n ... --es fastemu.open /data/local/tmp/game.jar`.
+     * A game another app opened with FastEmu ("Open with"): a content link
+     * only, see [contentOnly]. A debuggable build also opens the file named
+     * by the `fastemu.open` extra, for testing from adb:
+     * `am start -n ... --es fastemu.open /data/local/tmp/game.jar`. A
+     * release build ignores the extra.
      */
     private fun openFromIntent(intent: Intent?) {
         val uri = when {
-            intent?.action == Intent.ACTION_VIEW -> intent.data
+            intent?.action == Intent.ACTION_VIEW -> contentOnly(intent.data)
             isDebuggable() -> intent?.getStringExtra(DEBUG_OPEN_EXTRA)?.let { Uri.fromFile(File(it)) }
             else -> null
         } ?: return
@@ -118,6 +120,19 @@ class MainActivity : GameActivity() {
             val copy = GameFiles.copyIn(this, listOf(uri)).firstOrNull() ?: return@thread
             NativeBridge.nativeOpenUrl(Uri.fromFile(copy).toString())
         }
+    }
+
+    /**
+     * [uri] when it is a content link, which names a file through the
+     * provider that owns it, as the sending app was allowed to share it. Any
+     * other app can send this exported Activity any link, and a `file:` one
+     * would name a file this app can read, whatever the sender could. Those
+     * are ignored.
+     */
+    private fun contentOnly(uri: Uri?): Uri? {
+        if (uri == null || uri.scheme == "content") return uri
+        Log.w(TAG, "ignored a link with the scheme ${uri.scheme}: only content links open")
+        return null
     }
 
     private fun isDebuggable(): Boolean =
