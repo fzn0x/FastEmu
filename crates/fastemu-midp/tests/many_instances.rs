@@ -465,6 +465,19 @@ fn side_by_side(jar: &Path, root: &Path) {
             game.lines()
         );
     }
+    // Each machine is freed once its game ends, while the test still
+    // holds the instance, as a tile holds a game that ended; the frame
+    // stays.
+    wait_until(
+        "every machine is freed while its instance is held",
+        &mut games,
+        |games| {
+            games
+                .iter()
+                .all(|g| g.instance.as_ref().is_none_or(|i| i.vm_freed()))
+        },
+    );
+    assert!(games.iter().all(|g| g.frame().is_some()));
 
     // Every thread of every instance ends and its virtual machine is
     // freed: then nothing but the test holds what the notify function
