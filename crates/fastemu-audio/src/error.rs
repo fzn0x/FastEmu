@@ -9,8 +9,10 @@ use crate::format::Format;
 /// [`Malformed`](Self::Malformed) become `MediaException`,
 /// [`InvalidToneSequence`](Self::InvalidToneSequence) and
 /// [`InvalidArgument`](Self::InvalidArgument) become
-/// `IllegalArgumentException`, and [`InvalidState`](Self::InvalidState) and
-/// [`Closed`](Self::Closed) become `IllegalStateException`.
+/// `IllegalArgumentException`, [`InvalidState`](Self::InvalidState) and
+/// [`Closed`](Self::Closed) become `IllegalStateException`,
+/// [`TooLarge`](Self::TooLarge) becomes `MediaException` too, and
+/// [`OutOfMemory`](Self::OutOfMemory) becomes `OutOfMemoryError`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AudioError {
     /// The data is in a format the engine cannot play, or the content
@@ -29,6 +31,22 @@ pub enum AudioError {
     InvalidState(String),
     /// The player or its group was closed.
     Closed,
+    /// One sound is too big for any game to hold: it decodes to more than
+    /// 16 MiB, or alone it is more than a group's whole sound budget.
+    /// Trying again cannot help.
+    TooLarge(String),
+    /// The game's group holds as much sound, or as many players, as it
+    /// may. Closing players frees room, so a later try can work.
+    OutOfMemory(String),
+}
+
+impl AudioError {
+    /// Whether the engine refused for size: [`TooLarge`](Self::TooLarge)
+    /// or [`OutOfMemory`](Self::OutOfMemory). A decoder that cannot read
+    /// the data is not a size limit.
+    pub fn is_size_limit(&self) -> bool {
+        matches!(self, Self::TooLarge(_) | Self::OutOfMemory(_))
+    }
 }
 
 impl fmt::Display for AudioError {
@@ -44,6 +62,8 @@ impl fmt::Display for AudioError {
             Self::InvalidArgument(why) => write!(f, "invalid argument: {why}"),
             Self::InvalidState(why) => write!(f, "not allowed now: {why}"),
             Self::Closed => f.write_str("the player is closed"),
+            Self::TooLarge(what) => write!(f, "sound too large: {what}"),
+            Self::OutOfMemory(what) => write!(f, "out of sound memory: {what}"),
         }
     }
 }
@@ -73,5 +93,21 @@ mod tests {
             "invalid tone sequence at byte 3: bad tempo"
         );
         assert_eq!(AudioError::Closed.to_string(), "the player is closed");
+        assert_eq!(
+            AudioError::TooLarge("a WAV of 20 MiB".into()).to_string(),
+            "sound too large: a WAV of 20 MiB"
+        );
+        assert_eq!(
+            AudioError::OutOfMemory("128 players".into()).to_string(),
+            "out of sound memory: 128 players"
+        );
+    }
+
+    #[test]
+    fn only_the_size_errors_are_size_limits() {
+        assert!(AudioError::TooLarge(String::new()).is_size_limit());
+        assert!(AudioError::OutOfMemory(String::new()).is_size_limit());
+        assert!(!AudioError::Closed.is_size_limit());
+        assert!(!AudioError::Unsupported(String::new()).is_size_limit());
     }
 }

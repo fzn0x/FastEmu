@@ -34,12 +34,16 @@ pub fn classes() -> Vec<NativeClass> {
 }
 
 /// Throws the Java exception JSR-135 names for an engine error:
-/// `MediaException` for media the engine cannot handle,
-/// `IllegalArgumentException` for bad arguments and tone sequences,
-/// `IllegalStateException` for calls in the wrong state.
+/// `MediaException` for media the engine cannot handle or that is too
+/// large, `IllegalArgumentException` for bad arguments and tone
+/// sequences, `IllegalStateException` for calls in the wrong state, and
+/// `OutOfMemoryError` when the game's sound memory is full.
 pub(crate) fn throw_audio<T>(ctx: &mut Ctx<'_>, error: AudioError) -> JResult<T> {
     let class = match error {
-        AudioError::Unsupported(_) | AudioError::Malformed { .. } => api::MEDIA_EXCEPTION,
+        AudioError::Unsupported(_) | AudioError::Malformed { .. } | AudioError::TooLarge(_) => {
+            api::MEDIA_EXCEPTION
+        }
+        AudioError::OutOfMemory(_) => "java/lang/OutOfMemoryError",
         AudioError::InvalidToneSequence { .. } | AudioError::InvalidArgument(_) => {
             "java/lang/IllegalArgumentException"
         }
