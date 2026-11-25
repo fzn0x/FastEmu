@@ -179,10 +179,7 @@ fn finish(started: Started, class: &str) -> Output {
             .filter(|l| l.level == level)
             .map(|l| l.text.as_str())
             .collect::<Vec<_>>()
-            .join(
-                "
-",
-            )
+            .join("\n")
     };
     Output {
         out: pick(LogLevel::Out),
