@@ -7,7 +7,7 @@ use crate::class::{ArrayType, ClassId, ClassKind, LoadError};
 use crate::heap::{Body, Heap, HeapObject, Payload};
 use crate::lang;
 use crate::value::{ObjRef, Value};
-use crate::vm::{Diagnostic, VmState};
+use crate::vm::{Diagnostic, MAX_REPORTED_NAME, VmState};
 
 mod sealed {
     use crate::heap::Body;
@@ -106,13 +106,28 @@ impl VmState {
         self.heap.alloc(HeapObject::new(class, body, None))
     }
 
-    /// Reports a diagnostic once and logs it.
+    /// Reports a diagnostic once and logs it. The names in it are cut to
+    /// [`MAX_REPORTED_NAME`] characters, and once `limits.max_reported`
+    /// different ones are reported, the rest are left out; the first one
+    /// left out logs a line that says so.
     pub(crate) fn report(&mut self, shared: &crate::vm::VmShared, d: Diagnostic) {
-        if self.reported.insert(d.clone()) {
-            shared.log(LogLevel::Warn, d.to_string());
-            if let Some(sink) = &shared.config.diagnostics {
-                sink(&d);
+        let d = d.cut_names(MAX_REPORTED_NAME);
+        if self.reported.contains(&d) {
+            return;
+        }
+        if self.reported.len() >= shared.config.limits.max_reported {
+            if !std::mem::replace(&mut self.reported_full, true) {
+                shared.log(
+                    LogLevel::Warn,
+                    "further diagnostics are not reported: too many different ones",
+                );
             }
+            return;
+        }
+        self.reported.insert(d.clone());
+        shared.log(LogLevel::Warn, d.to_string());
+        if let Some(sink) = &shared.config.diagnostics {
+            sink(&d);
         }
     }
 }

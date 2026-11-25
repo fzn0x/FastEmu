@@ -59,6 +59,32 @@ pub enum Diagnostic {
     },
 }
 
+/// The most characters of a name a [`Diagnostic`] keeps, so a game that
+/// asks for classes, methods or fields with huge names cannot make the
+/// machine keep or log them whole.
+pub(crate) const MAX_REPORTED_NAME: usize = 255;
+
+impl Diagnostic {
+    /// This diagnostic with every name cut to `max` characters.
+    pub(crate) fn cut_names(mut self, max: usize) -> Self {
+        let cut = |s: &mut String| {
+            if let Some((at, _)) = s.char_indices().nth(max) {
+                s.truncate(at);
+            }
+        };
+        match &mut self {
+            Diagnostic::MissingClass(name) => cut(name),
+            Diagnostic::MissingMethod { class, name, desc }
+            | Diagnostic::MissingField { class, name, desc } => {
+                cut(class);
+                cut(name);
+                cut(desc);
+            }
+        }
+        self
+    }
+}
+
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -170,7 +196,11 @@ pub(crate) struct VmState {
     pub(crate) err_line: Vec<u8>,
     /// The `Math.random` generator's state, 0 until first used.
     pub(crate) random: u64,
+    /// The diagnostics reported so far, at most `limits.max_reported`.
     pub(crate) reported: HashSet<Diagnostic>,
+    /// Whether a diagnostic was left out for lack of room, which is
+    /// logged once.
+    pub(crate) reported_full: bool,
     pub(crate) wk: WellKnown,
     pub(crate) exit_code: Option<i32>,
     pub(crate) live_threads: usize,
@@ -359,6 +389,7 @@ impl Vm {
             err_line: Vec::new(),
             random: 0,
             reported: HashSet::new(),
+            reported_full: false,
             wk: WellKnown {
                 string,
                 class,
@@ -547,5 +578,46 @@ impl Vm {
         if let Some(mut state) = self.shared.state.try_lock_for(FLUSH_LOCK_WAIT) {
             lang::system::flush_lines(&self.shared, &mut state);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_diagnostic_keeps_255_characters_of_each_name() {
+        let long = "\u{20ac}".repeat(300);
+        let cut = Diagnostic::MissingMethod {
+            class: long.clone(),
+            name: "short".into(),
+            desc: long.clone(),
+        }
+        .cut_names(MAX_REPORTED_NAME);
+        assert_eq!(
+            cut,
+            Diagnostic::MissingMethod {
+                class: "\u{20ac}".repeat(255),
+                name: "short".into(),
+                desc: "\u{20ac}".repeat(255),
+            }
+        );
+        let field = Diagnostic::MissingField {
+            class: "a".into(),
+            name: long.clone(),
+            desc: "I".into(),
+        };
+        assert!(matches!(
+            field.cut_names(MAX_REPORTED_NAME),
+            Diagnostic::MissingField { name, .. } if name.chars().count() == 255
+        ));
+        assert_eq!(
+            Diagnostic::MissingClass(long).cut_names(10),
+            Diagnostic::MissingClass("\u{20ac}".repeat(10))
+        );
+        assert_eq!(
+            Diagnostic::MissingClass("exact".into()).cut_names(5),
+            Diagnostic::MissingClass("exact".into())
+        );
     }
 }
