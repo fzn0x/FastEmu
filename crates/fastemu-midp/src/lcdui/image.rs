@@ -99,6 +99,9 @@ struct DecodeTurn(Arc<Mutex<()>>);
 
 thread_local! {
     /// Whether this thread holds its game's decode turn now.
+    // clippy 1.99 calls this const initializer missing when it checks the
+    // Android build, where thread_local! expands differently.
+    #[allow(clippy::missing_const_for_thread_local)]
     static IN_TURN: Cell<bool> = const { Cell::new(false) };
 }
 
