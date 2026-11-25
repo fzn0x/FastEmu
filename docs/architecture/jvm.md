@@ -671,7 +671,8 @@ kind. A return must also leave as many slots as the method's descriptor
 says: none for `void`, two for `long` and `double`, one for the rest.
 Code that fails throws `VerifyError` on its first call; javac and
 ProGuard output always passes. Code that no path reaches is not
-checked, as phones accept the dead code that obfuscators leave. There is
+checked, as phones accept the dead code that obfuscators leave. An
+exception handler counts as reached, whatever its range holds. There is
 no type verifier beyond that; see "What the interpreter runs".
 Constant pool references resolve lazily, on first execution, into
 per-class caches; a failed resolution is not cached and throws again.
