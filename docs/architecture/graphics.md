@@ -302,6 +302,23 @@ itself (`fastemu-ui`, `icon_bgra`), on a background task where a panic
 would abort the app. It has the same guard and gives no icon for a file
 that makes the decoder panic.
 
+`probe_size(data) -> Option<(u32, u32)>` reads the size a file declares
+from its header, without decoding anything, so a caller can check it
+against the heap before `Surface::decode` allocates the pixels. It is
+exported from the crate root.
+
+- PNG: the first IHDR chunk, found with the walk decoding uses.
+- GIF: the logical screen, or the first frame's offset plus its size when
+  the screen is empty.
+- BMP: the width and height of the header, without the sign of the
+  height, for the 12 byte and the 40 byte (or longer) headers.
+- JPEG: the first frame header (SOF0 to SOF15), found by skipping each
+  segment by its length, so a thumbnail inside an APP1 block does not
+  count. The scan stops at the start of the image data.
+- `None` when the format is unknown, the header is cut short or the
+  picture is empty. The size is only what the file claims. It can be far
+  over the decoder's limits, which `Surface::decode` still enforces.
+
 ## Nokia DirectGraphics
 
 Constants match Nokia's UI API 1.1 documentation and J2ME Loader's
