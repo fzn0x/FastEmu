@@ -2,4 +2,4 @@
   JAR made of thousands of file headers, no longer keeps FastEmu busy for
   minutes or uses large amounts of memory when it is added or started.
   FastEmu looks for the MIDlets of a suite that lists none within 32 MiB
-  of inflated data (#39).
+  of inflated data and 32 MiB of the data the entries hold (#39).

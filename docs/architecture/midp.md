@@ -95,10 +95,17 @@ named.
   4 MiB, looks at 8192 of them at most, and stops when 32 MiB have been
   inflated in all. A read that went over its 4 MiB counts the 4 MiB. So
   a JAR whose entries all point at one compressed bomb costs about 8
-  inflates, not one for each entry. The largest JAR of the test folder has
-  1046 classes of 4 MB in all, and its largest class has 200 KB. A MIDlet
-  class past the budget is missed, which only a suite with no `MIDlet-1`
-  can lose.
+  inflates, not one for each entry. It also adds up what each entry holds
+  in the archive, as the entry says, whether its read gives bytes or not,
+  and passes over an entry that holds more than is left of 32 MiB. A
+  stream of empty deflate blocks inflates to nothing, so it is the bytes
+  it holds that bound the work of entries that share it. The largest JAR
+  of the test folder has 1046 classes of 4 MB in all, and its largest
+  class has 200 KB. A MIDlet class past the budget is missed, which only
+  a suite with no `MIDlet-1` can lose. A class file names itself, so the
+  search holds the name of a class and of its superclass to the rule of a
+  `MIDlet-<n>` entry: a class that fails it is no MIDlet and no link of a
+  chain to one.
 - **Resources.** The VM resolves a name relative to the package of the
   class it is called on; `JarSource` then turns `\` into `/`, collapses
   slashes and `.` segments, strips leading slashes, matches exactly and
