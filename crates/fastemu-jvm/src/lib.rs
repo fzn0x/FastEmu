@@ -38,7 +38,7 @@ pub use class::{ArrayType, ClassId, PayloadFactory};
 pub use clock::VmClock;
 pub use ctx::{ArrayElem, Ctx, FieldId, GlobalRef, JResult, StaticFieldId, Throw, Wake};
 pub use heap::{HeapStats, Payload, Tracer};
-pub use limits::VmLimits;
+pub use limits::{VmLimits, cut_log_text};
 pub use native::{FieldConstant, NativeClass, NativeField, NativeFn, NativeMethod};
 pub use source::{ClassSource, DirSource, MemorySource};
 pub use thread::ThreadId;

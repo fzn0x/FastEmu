@@ -16,7 +16,7 @@ use crate::clock::{Clock, VmClock};
 use crate::ctx::{Ctx, JResult};
 use crate::heap::{Heap, HeapStats};
 use crate::lang;
-use crate::limits::VmLimits;
+use crate::limits::{VmLimits, cut_log_text};
 use crate::monitor::Monitor;
 use crate::native::NativeClass;
 use crate::source::ClassSource;
@@ -250,11 +250,10 @@ impl VmShared {
         }
     }
 
+    /// Sends a line to the log sink, cut to `limits.max_log_line_bytes`.
     pub(crate) fn log(&self, level: LogLevel, text: impl Into<String>) {
-        (self.config.log)(LogLine {
-            level,
-            text: text.into(),
-        });
+        let text = cut_log_text(text.into(), self.config.limits.max_log_line_bytes);
+        (self.config.log)(LogLine { level, text });
     }
 }
 

@@ -535,7 +535,8 @@ impl Ctx<'_> {
             .insert(key.to_owned(), value.to_owned());
     }
 
-    /// Writes a line to the log sink.
+    /// Writes a line to the log sink. A line over
+    /// [`crate::VmLimits::max_log_line_bytes`] is cut first.
     pub fn log(&self, level: LogLevel, text: impl Into<String>) {
         self.shared.log(level, text);
     }
