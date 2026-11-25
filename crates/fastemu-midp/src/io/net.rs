@@ -5,19 +5,20 @@
 //! repeats a bounded attempt with the lock released, and between
 //! attempts checks whether the VM is stopping, the thread was interrupted
 //! or the deadline passed. Name lookups and connects, which std::net
-//! cannot bound that way, run on a helper thread ([`off_thread`]).
+//! cannot bound that way, run on a helper thread ([`off_thread`]), and a
+//! game has at most [`MAX_HELPERS`] of those alive.
 
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use fastemu_core::NetworkPolicy;
 use fastemu_jvm::{Ctx, JResult, Throw};
 
-use super::tls;
+use super::{lock, tls};
 use crate::env;
 
 /// The longest one system call on a connection blocks with the VM lock
@@ -50,6 +51,13 @@ pub(crate) const MAX_DATAGRAMS: usize = 16;
 /// How many bytes of request bodies a game's HTTP connections may hold
 /// at once, before the requests go out.
 pub(crate) const MAX_PENDING_BYTES: usize = 8 << 20;
+
+/// How many helper threads of name lookups and connects a game may have
+/// alive at once ([`off_thread`]). A helper the game stopped waiting for,
+/// on an interrupt, at its deadline or at a stop, counts until it ends,
+/// since its thread and its socket live until then. Each game thread
+/// waits for one helper at a time, and a phone ran a handful of sockets.
+pub(crate) const MAX_HELPERS: usize = 16;
 
 /// The kinds of connection a game's count of open ones is kept for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,14 +94,40 @@ impl Kind {
     }
 }
 
-/// What a game has open, shared by its [`Slot`]s and [`Pending`]s.
+/// What a game has open, shared by its [`Slot`]s, [`Pending`]s and
+/// [`HelperPlace`]s.
 #[derive(Default)]
 struct Counts {
     open: [AtomicUsize; 3],
     pending: AtomicUsize,
+    /// The helper threads alive ([`off_thread`]).
+    helpers: Mutex<usize>,
+    /// Told when a helper ends and gives its place back.
+    helper_ended: Condvar,
 }
 
 impl Counts {
+    /// Takes a place for a helper thread. A game that has [`MAX_HELPERS`]
+    /// alive first waits up to `wait` for one of them to end, and gets
+    /// `None` if none did.
+    fn take_helper(self: &Arc<Self>, wait: Duration) -> Option<HelperPlace> {
+        let mut alive = lock(&self.helpers);
+        if *alive >= MAX_HELPERS {
+            alive = self
+                .helper_ended
+                .wait_timeout(alive, wait)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        if *alive >= MAX_HELPERS {
+            return None;
+        }
+        *alive += 1;
+        Some(HelperPlace {
+            counts: Arc::clone(self),
+        })
+    }
+
     /// Takes a place for a `kind` connection, if the game has one left.
     fn take(self: &Arc<Self>, kind: Kind) -> Option<Slot> {
         let counter = &self.open[kind.index()];
@@ -136,6 +170,24 @@ pub(crate) struct Slot {
 impl Drop for Slot {
     fn drop(&mut self) {
         self.counts.open[self.kind.index()].fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// A helper thread's place among the game's [`MAX_HELPERS`]. The helper
+/// holds it until its work returns, so the place comes back when the
+/// thread and any socket it opened go, whether or not the game still
+/// waits for them.
+struct HelperPlace {
+    counts: Arc<Counts>,
+}
+
+impl Drop for HelperPlace {
+    fn drop(&mut self) {
+        *lock(&self.counts.helpers) -= 1;
+        // Wakes one waiter, which takes the place unless a caller that did
+        // not wait took it first. Any other waiter looks again after its
+        // slice.
+        self.counts.helper_ended.notify_one();
     }
 }
 
@@ -322,19 +374,33 @@ pub(crate) fn io_exception(ctx: &mut Ctx<'_>, e: &io::Error) -> Throw {
 
 /// Runs `work` on a helper thread and waits for its result with the VM
 /// lock released, for blocking calls std::net cannot bound (name lookups
-/// and connects). If the VM stops or `deadline` passes first, the helper
-/// is left to finish on its own and its result is dropped.
+/// and connects). If the VM stops, the thread is interrupted or
+/// `deadline` passes first, the helper is left to finish on its own and
+/// its result is dropped.
+///
+/// The helper takes one of the game's [`MAX_HELPERS`] places before it
+/// starts and keeps it until `work` returns. A game that holds them all
+/// waits for one within `deadline`, in slices with the same checks, as it
+/// waits for a slow network, and starts no thread meanwhile.
 pub(crate) fn off_thread<T: Send + 'static>(
     ctx: &mut Ctx<'_>,
     deadline: Instant,
     what: &str,
     work: impl FnOnce() -> T + Send + 'static,
 ) -> JResult<T> {
+    let counts = counts(ctx);
+    let place = block_on(ctx, Some(deadline), || Ok(counts.take_helper(SLICE)))?;
     let (tx, rx) = mpsc::sync_channel(1);
+    // A thread that cannot start drops the closure, and the place with
+    // it.
     let spawned = std::thread::Builder::new()
         .name(format!("fastemu-{what}"))
         .spawn(move || {
+            // When the game no longer waits, `send` hands the result back
+            // and it is dropped here, a connect's socket with it, before
+            // the place goes back.
             let _ = tx.send(work());
+            drop(place);
         });
     if spawned.is_err() {
         let message = format!("cannot start a thread to {what}");
