@@ -142,7 +142,7 @@ links to the page that describes the limit.
 | Nokia `drawPixels` block | 4194304 pixels | `IllegalArgumentException` | [graphics.md][gfx-nokia] |
 | Glyphs kept for one font and size, for all games | 4096 above U+00FF | the cache empties and starts again | [graphics.md][gfx-text] |
 | Cells of a `TiledLayer` | 2^24, 2^25 for Siemens' `TiledLayer`, and the heap | `OutOfMemoryError` | [midp.md][midp-game] |
-| Animated tiles of a `TiledLayer` | 32767 | `OutOfMemoryError` | [midp.md][midp-game] |
+| Animated tiles of a MIDP `TiledLayer` | 32767 | `OutOfMemoryError` | [midp.md][midp-game] |
 | Tiles of a Siemens `TiledLayer`, static and animated | 32767 of each | `IllegalArgumentException` | [vendors.md][vendors-siemens] |
 | Back buffer of a shown screen | counted on the heap, 4 bytes a pixel | counted, never refused; the game's next allocation fails | [midp.md][midp-frames] |
 | Surface of a `CustomItem` | 8192 pixels a side, and the heap | a larger size is cut to 8192; a surface the heap cannot hold leaves the item blank, with one warning | [midp.md][midp-screens] |
