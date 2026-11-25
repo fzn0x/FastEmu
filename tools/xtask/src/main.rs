@@ -105,10 +105,11 @@ bench:
   --me-java PATH       the java that runs MicroEmulator (default: JAVA_HOME's)
   --me-jvm-arg ARG     a JVM option for every MicroEmulator process; repeat
                        it for more
-  --me-no-headless-awt start MicroEmulator without java.awt.headless
+  --me-no-headless-awt
+                       start MicroEmulator without java.awt.headless
   --me-max-fps N       also measure MicroEmulator capped at N frames a second
 
-  --root DIR          the repository's root (default: the workspace root)";
+  --root DIR           the repository's root (default: the workspace root)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
