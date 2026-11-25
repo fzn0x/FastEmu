@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use common::{constant_wav, controller_midi, engine, kinds, midi, wav};
-use fastemu_audio::{MAX_QUEUED, PlayerEventKind, PlayerState};
+use fastemu_audio::{AudioError, MAX_QUEUED, PlayerEventKind, PlayerState};
 
 /// A listener that blocks on its first event until released, and counts
 /// every event it gets. The thread that started the player is stuck
@@ -228,4 +228,29 @@ fn a_midi_of_30_ms_is_looped() {
         .filter(|kind| matches!(kind, PlayerEventKind::EndOfMedia { last: false, .. }))
         .count();
     assert!((14..=17).contains(&loops), "{loops} passes in half a second");
+}
+
+/// A MIDI file of `n` note ons at tick 0 and a rest of half a second.
+fn note_ons(n: usize) -> Vec<u8> {
+    let mut events = Vec::with_capacity(n * 4 + 8);
+    for i in 0..n {
+        events.extend_from_slice(&[0x00, 0x90 | (i % 16) as u8, (24 + i % 90) as u8, 100]);
+    }
+    events.extend_from_slice(&[0x83, 0x60, 0x80, 60, 0]);
+    midi(480, &events)
+}
+
+#[test]
+fn a_midi_of_more_than_65536_events_is_refused_as_too_large() {
+    let engine = engine(48_000);
+    let group = engine.create_group();
+    // 200,000 events: a file of 800 KB that would take every pass of a
+    // loop to send again.
+    let refused = group.create_player(&note_ons(200_000), None).unwrap_err();
+    assert!(matches!(refused, AudioError::TooLarge(_)), "{refused:?}");
+    assert!(refused.is_size_limit());
+    assert_eq!(group.player_count(), 0);
+    // The limit is the file's events, not its bytes: the most it may hold
+    // still plays.
+    assert!(group.create_player(&note_ons(65_534), None).is_ok());
 }

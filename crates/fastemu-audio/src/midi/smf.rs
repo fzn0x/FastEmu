@@ -13,8 +13,10 @@ use crate::format::Format;
 /// The tempo a file plays at until it sets one: 120 beats per minute.
 const DEFAULT_TEMPO_US: u32 = 500_000;
 /// A file with more events than this is refused rather than held in
-/// memory; game music has a few thousand.
-const MAX_EVENTS: usize = 1 << 21;
+/// memory; game music has a few thousand. The cap also bounds the work of
+/// a seek, which sends the controllers before the new position again, and
+/// of each pass of a loop, which sends every event.
+const MAX_EVENTS: usize = 1 << 16;
 
 /// A channel message at a time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -255,7 +257,9 @@ fn parse_track(data: &[u8], raw: &mut Vec<Raw>) -> Result<TrackEnd, AudioError> 
         };
         if let Some(kind) = kind {
             if raw.len() >= MAX_EVENTS {
-                return Err(malformed("too many events"));
+                return Err(AudioError::TooLarge(format!(
+                    "a MIDI file of more than {MAX_EVENTS} events"
+                )));
             }
             raw.push(Raw { tick, kind });
         }
@@ -477,6 +481,47 @@ pub(crate) mod tests {
         ]);
         let seq = parse(&smf(0, division, &[&t])).unwrap();
         assert_eq!(seq.events[1].time_us, 1_000_000);
+    }
+
+    /// A format 0 file of `notes` events: note ons at tick 0 on channel 1.
+    fn of_events(notes: usize) -> Vec<u8> {
+        let mut t = Vec::with_capacity(notes * 4 + 4);
+        for i in 0..notes {
+            t.extend_from_slice(&[0x00, 0x90, (i % 128) as u8, 100]);
+        }
+        t.extend_from_slice(&END);
+        smf(0, 96, &[&t])
+    }
+
+    #[test]
+    fn a_file_may_hold_65536_events_and_no_more() {
+        let most = parse(&of_events(MAX_EVENTS)).unwrap();
+        assert_eq!(most.events.len(), 65_536);
+        let refused = parse(&of_events(MAX_EVENTS + 1)).unwrap_err();
+        assert_eq!(
+            refused,
+            AudioError::TooLarge("a MIDI file of more than 65536 events".into())
+        );
+        // A file of 200,000 events is refused as soon as the cap is passed,
+        // without reading the rest.
+        assert!(matches!(
+            parse(&of_events(200_000)),
+            Err(AudioError::TooLarge(_))
+        ));
+    }
+
+    #[test]
+    fn tempo_changes_count_as_events() {
+        // Nothing but tempo changes: each is an event of the file too.
+        let mut t = Vec::new();
+        for _ in 0..=MAX_EVENTS {
+            t.extend_from_slice(&[0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20]);
+        }
+        t.extend_from_slice(&END);
+        assert!(matches!(
+            parse(&smf(0, 96, &[&t])),
+            Err(AudioError::TooLarge(_))
+        ));
     }
 
     #[test]
