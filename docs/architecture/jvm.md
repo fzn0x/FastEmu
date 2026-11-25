@@ -214,6 +214,23 @@ VM lock) and one wait queue, which works as a condition variable
   thread ended, a task posted) wakes every waiting thread, and each checks
   its own condition again.
 
+**The thread limit.** A game may have `max_threads` (64) Java threads
+alive at once. The count includes the main thread, the event thread, the
+lifecycle threads and `Timer` threads: every thread of the machine.
+`Thread.start` and `new Timer()` throw `OutOfMemoryError` ("unable to
+create a thread: too many threads (limit 64)") when the machine has that
+many, and nothing is left behind: a `Thread` that was refused can start
+again once there is room, and a refused `Timer` has no queue. The host
+has 16 more. `Vm::spawn` and `Ctx::spawn_host_thread` refuse only when
+the machine has `max_threads` plus 16 threads, so a game that has used up
+its share cannot keep the app from starting the event thread, a lifecycle
+thread or the media thread. A `Timer`'s thread lives until `cancel()`, as
+in Java, so a game that makes a `Timer` for each screen and never cancels
+one gets the error after 64. A thread's stack holds at most 2 MiB (see
+[Limits](#limits)), so 64 threads hold 128 MiB at worst. The OS name of a
+thread is `java ` and Java's name without control characters, cut to 32
+characters, since `std` panics on a NUL; the Java name stays as given.
+
 Monitors have an owner, a recursion count, threads waiting to enter and
 a wait set. `wait`, `notify` and `notifyAll` without owning the monitor
 throw `IllegalMonitorStateException`; `Thread.interrupt` wakes `sleep`,
@@ -617,8 +634,8 @@ other crates register their own exception classes as subclasses
 
 ### Threads, waiting and posted work
 
-MIDP's event thread and `Timer` threads are Java threads with Rust
-bodies:
+MIDP's event thread, the media events thread and `Timer` threads are
+Java threads with Rust bodies:
 
 ```rust
 let thread = ctx.spawn_thread("event", |ctx| loop {
@@ -627,6 +644,12 @@ let thread = ctx.spawn_thread("event", |ctx| loop {
     ctx.run_posted()?;
 })?;
 ```
+
+`ctx.spawn_thread` starts a thread of the game's: it counts against
+`max_threads` and throws `OutOfMemoryError` past it, as `Timer` does. A
+thread the library runs for the game on its own account, which the game
+never starts, uses `ctx.spawn_host_thread` instead, which draws on the
+host's 16 more. `Vm::spawn` is the host's too.
 
 The host thread posts with `vm.post(move |ctx| { ... Ok(()) })`; inside a
 native, use `ctx.post`. Tasks run in order. A task that throws is printed
