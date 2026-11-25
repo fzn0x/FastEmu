@@ -34,6 +34,8 @@ const HEAP: usize = 256 * 1024;
 ///   a new `NullPointerException` on every pass.
 /// - `hoard()`: a handler that keeps every pass's array in a chain, until
 ///   the heap is full, and then goes on throwing `OutOfMemoryError`.
+/// - `tick()`: like `spin()`, and each pass adds 1 to the static `ticks`,
+///   so that the host can see whether the loop runs.
 /// - `keep()`: like `spin()`, but its handler catches only
 ///   `NullPointerException`, so a thread that lost the exception to a
 ///   collection, or found another object in its place, ends.
@@ -45,14 +47,26 @@ fn loops() -> Vec<u8> {
     let entered = c.method_ref("demo/Probe", "entered", "()V");
     let object = c.class("java/lang/Object");
     let null_pointer = c.class("java/lang/NullPointerException");
+    let ticks = c.field_ref("Loops", "ticks", "I");
+    c.field(STATIC, "ticks", "I");
     let [eh, el] = idx(entered);
     let [oh, ol] = idx(object);
+    let [th, tl] = idx(ticks);
     #[rustfmt::skip]
     let spin = [
         0xb8, eh, el,       // 0: invokestatic Probe.entered
         0x01,               // 3: aconst_null
         0xbf,               // 4: athrow
         0xbf,               // 5: athrow (the handler)
+    ];
+    #[rustfmt::skip]
+    let tick = [
+        0xb8, eh, el,       // 0: invokestatic Probe.entered
+        0x01, 0xbf,         // 3: aconst_null athrow
+        0xb2, th, tl,       // 5: getstatic ticks (the handler)
+        0x04, 0x60,         // 8: iconst_1 iadd
+        0xb3, th, tl,       // 10: putstatic ticks
+        0x01, 0xbf,         // 13: aconst_null athrow
     ];
     #[rustfmt::skip]
     let churn = [
@@ -92,6 +106,7 @@ fn loops() -> Vec<u8> {
         0x1b, 0xac,                 // 16: iload_1 ireturn
     ];
     c.method(STATIC, "spin", "()V", 1, 0, &spin, &[(3, 6, 5, 0)]);
+    c.method(STATIC, "tick", "()V", 4, 0, &tick, &[(3, 15, 5, 0)]);
     c.method(
         STATIC,
         "keep",
@@ -282,6 +297,20 @@ fn watch_heap(vm: &Vm, done: impl Fn(&HeapStats) -> bool) -> HeapStats {
     }
 }
 
+/// The passes `Loops.tick` made, read from the host with the VM lock.
+fn ticks(vm: &Vm) -> i32 {
+    let host = vm.clone();
+    within_long(move || {
+        host.attach("test", |ctx| {
+            let field = ctx
+                .static_field_id("Loops", "ticks", "I")
+                .expect("the field exists");
+            ctx.get_static(field).expect("the field reads").int()
+        })
+    })
+    .expect("host calls return")
+}
+
 /// Calls `Loops.count` and `Deep.<method>` of `vm` from the calling
 /// thread, as an attached Java thread.
 fn call_int(vm: &Vm, class: &'static str, method: &str, arg: Option<i32>) -> i32 {
@@ -335,17 +364,22 @@ fn a_throw_and_catch_loop_leaves_the_vm_lock_to_the_host() {
 fn a_paused_vm_parks_a_throw_and_catch_loop() {
     let entered = Arc::new(AtomicBool::new(false));
     let vm = vm_with(HEAP, VmLimits::default(), vec![probe(Arc::clone(&entered))]);
-    start_loop(&vm, &entered, "spin");
+    start_loop(&vm, &entered, "tick");
     vm.pause();
-    // A parked thread waits without the VM lock; one that never reached a
-    // safepoint holds it.
-    let host = vm.clone();
-    assert_eq!(
-        within_long(move || host.thread_count()),
-        Some(1),
-        "the loop parks"
-    );
+    // The loop gets to its next safepoint, which is under 4,096 passes
+    // away, and parks there without the VM lock. A loop that ignored the
+    // pause would make millions of passes in the time that follows.
+    let parked = ticks(&vm);
+    std::thread::sleep(Duration::from_millis(100));
+    let passes = ticks(&vm).wrapping_sub(parked);
+    assert!((0..4096).contains(&passes), "{passes} passes while paused");
+    // It is parked, not dead: it runs again after the resume.
     vm.resume();
+    let start = Instant::now();
+    while ticks(&vm).wrapping_sub(parked) < 4096 {
+        assert!(start.elapsed() < LONG, "the loop runs again");
+        std::thread::sleep(Duration::from_millis(2));
+    }
     assert!(stops(&vm), "the loop ends when the VM stops");
 }
 
