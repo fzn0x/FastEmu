@@ -126,6 +126,12 @@ game 3, `games/3/1` the second copy running beside it. The record stores
 are in its `rms` folder. Where the system names no Pictures folder,
 screenshots go to a `screenshots` folder beside `games`.
 
+Removing a game from the library keeps its saves, and so does losing
+`library.json`. A game added later always gets a number above every
+folder in `games`, so it never finds the saves of an older game. The
+saves of games the library no longer lists stay where they are until you
+delete their folders.
+
 A damaged `library.json` or `settings.json` is reported in the window
 and set aside as `library.json.broken` or `settings.json.broken`, and
 the defaults are used. One that cannot be read at all is reported and

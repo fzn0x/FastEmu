@@ -18,7 +18,10 @@ On Android, choose **+** and pick one or more files from storage, or open a
 hands FastEmu a copy it can read, so the app keeps its own copy of each
 game: picking the same file again finds the copy it already has, and a
 different file with the same name, such as a newer version, gets a copy of
-its own. A `.jad` and its `.jar` picked together stay side by side.
+its own. A `.jad` and its `.jar` picked together stay side by side. The app
+copies at most 64 MiB of a file, the size of the largest game it runs, and
+**Open with** takes only the content links file managers send, not `file:`
+links from other apps.
 
 FastEmu reads the suite's name, vendor, version and icon from the manifest
 or the descriptor and shows them in the library. When a `.jad` and the
@@ -105,17 +108,21 @@ Some games have a menu item that opens a web page, such as more games
 from their maker. When a game asks to open one, its screen shows the
 game's name and the whole address, with **Open** and **Dismiss**. Nothing
 opens until you choose **Open**; the page then opens in your browser and
-the game keeps running. **Dismiss** drops the request. On a small
-screen, scroll the question to reach its buttons, below the address.
+the game keeps running. **Dismiss** drops the request. The buttons
+ignore clicks for half a second after the question appears, and look
+faint until then, so a quick tap in the game cannot answer a question
+you have not read. On a small screen, scroll the question to reach its
+buttons, below the address.
 Each game has its own question, and restarting or closing the game
 drops it. In the focus
 layout, a globe next to a game's name in the strip means it is waiting
 for an answer.
 
-FastEmu opens only web pages, `http` and `https` addresses, and only after
-you agree. A game that asks to make a call, send a message, open a file,
-install another game or open another app is told the phone cannot do it,
-and its log names what it asked for.
+FastEmu opens only web pages, `http` and `https` addresses without a
+backslash or a port outside 1 to 65535, and only after you agree. A game
+that asks to make a call, send a message, open a file, install another
+game or open another app is told the phone cannot do it, and its log
+names what it asked for.
 
 ## Keys
 
