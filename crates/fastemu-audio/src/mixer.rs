@@ -1,7 +1,9 @@
 //! The mix: every group's voices resampled to the output rate, summed in
 //! f32 with headroom, and passed through a soft limiter.
 
+use std::any::Any;
 use std::collections::HashMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::event::{EventCallback, EventQueue, PlayerEvent, PlayerEventKind, PlayerId};
 use crate::group::GroupLimits;
@@ -21,6 +23,8 @@ const LIMITER_RELEASE_SECONDS: f32 = 0.15;
 const MAX_TAILS: usize = 64;
 /// Frames mixed per pass, so the scratch buffer stays small.
 const CHUNK: usize = 512;
+/// The longest message of a panic that an `Error` event carries.
+const MAX_PANIC_MESSAGE: usize = 200;
 
 /// Identifies a group (one per instance) for the life of the process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -141,6 +145,11 @@ impl Mixer {
         let mut done = 0;
         while done < frames {
             let count = (frames - done).min(CHUNK);
+            // A panic between taking the scratch buffer and putting it
+            // back (a bug somewhere in a mix) must not leave it empty.
+            if self.scratch.len() < CHUNK * 2 {
+                self.scratch = vec![0.0; CHUNK * 2];
+            }
             let mut chunk = std::mem::take(&mut self.scratch);
             chunk[..count * 2].fill(0.0);
             self.mix_tails(&mut chunk[..count * 2]);
@@ -170,9 +179,15 @@ impl Mixer {
         self.tails.retain(|tail| tail.pos < tail.samples.len());
     }
 
+    /// Mixes every started voice into `chunk`. A voice whose source panics
+    /// (a decoder or synthesizer bug on damaged data) is stopped and
+    /// closed for good, with an `Error` event and the end of its run, and
+    /// the others play on: the audio thread never unwinds for one game's
+    /// sound.
     fn mix_voices(&mut self, chunk: &mut [f32], events: &EventQueue) {
         let slew = self.slew();
         let rate = self.rate;
+        let mut failed: Vec<(PlayerId, String)> = Vec::new();
         for (&id, slot) in &mut self.slots {
             let voice = &mut slot.voice;
             if voice.state != PlayerState::Started {
@@ -191,32 +206,60 @@ impl Mixer {
             } else {
                 group.listener.clone()
             };
-            voice.render(chunk, step, target, slew, false, |reached, duration_us| {
-                let Some(listener) = &listener else { return };
-                let push = |kind| {
-                    events.push(listener.clone(), PlayerEvent { player: id, kind });
-                };
-                match reached {
-                    Reached::Loop => {
-                        push(PlayerEventKind::EndOfMedia {
-                            media_time_us: duration_us,
-                            last: false,
-                        });
-                        push(PlayerEventKind::Started { media_time_us: 0 });
-                    }
-                    Reached::End { error } => {
-                        if let Some(message) = error {
-                            push(PlayerEventKind::Error { message });
+            let rendered = catch_unwind(AssertUnwindSafe(|| {
+                voice.render(chunk, step, target, slew, false, |reached, duration_us| {
+                    let Some(listener) = &listener else { return };
+                    let push = |kind| {
+                        events.push(listener.clone(), PlayerEvent { player: id, kind });
+                    };
+                    match reached {
+                        Reached::Loop => {
+                            push(PlayerEventKind::EndOfMedia {
+                                media_time_us: duration_us,
+                                last: false,
+                            });
+                            push(PlayerEventKind::Started { media_time_us: 0 });
                         }
-                        push(PlayerEventKind::EndOfMedia {
-                            media_time_us: duration_us,
-                            last: true,
-                        });
+                        Reached::End { error } => {
+                            if let Some(message) = error {
+                                push(PlayerEventKind::Error { message });
+                            }
+                            push(PlayerEventKind::EndOfMedia {
+                                media_time_us: duration_us,
+                                last: true,
+                            });
+                        }
                     }
-                }
-            });
+                });
+            }));
+            if let Err(payload) = rendered {
+                voice.fault();
+                failed.push((id, panic_message(payload.as_ref())));
+            }
+        }
+        for (id, message) in failed {
+            let message = format!("the sound failed while playing: {message}");
+            self.emit(events, id, PlayerEventKind::Error { message });
+            self.emit(
+                events,
+                id,
+                PlayerEventKind::EndOfMedia {
+                    media_time_us: 0,
+                    last: true,
+                },
+            );
         }
     }
+}
+
+/// The text of a panic, cut to a length an event can carry.
+fn panic_message(payload: &(dyn Any + Send)) -> String {
+    let text = payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic with no message".to_owned());
+    text.chars().take(MAX_PANIC_MESSAGE).collect()
 }
 
 /// A peak limiter with instant attack and a soft clip after it, so the
@@ -268,7 +311,13 @@ fn soft_clip(x: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use crate::engine::{Engine, EngineConfig};
+    use crate::group::Group;
+    use crate::pcm::{Pcm, PcmSource};
+    use crate::source::Source;
 
     #[test]
     fn the_soft_clip_stays_inside_full_scale() {
@@ -289,5 +338,120 @@ mod tests {
         let mut quiet = vec![0.2; 4000];
         limiter.process(&mut quiet);
         assert!((quiet[3998] - 0.2).abs() < 1e-3);
+    }
+
+    /// A decoder with a bug: it panics when asked for sound.
+    struct Bomb;
+
+    impl Source for Bomb {
+        fn rate(&self) -> u32 {
+            8000
+        }
+
+        fn frames(&self) -> u64 {
+            80_000
+        }
+
+        fn render(&mut self, _out: &mut [f32]) -> usize {
+            panic!("decoder bug on damaged data");
+        }
+
+        fn seek(&mut self, _frame: u64) {}
+
+        fn memory_bytes(&self) -> usize {
+            1000
+        }
+    }
+
+    /// Puts a started voice over `source` in the group, and returns its id.
+    fn play(engine: &Engine, group: &Group, id: u64, source: Box<dyn Source>) -> PlayerId {
+        let mut voice = Voice::new(source, false);
+        voice.start();
+        let id = PlayerId(1_000_000 + id);
+        engine.lock().slots.insert(
+            id,
+            Slot {
+                group: group.id(),
+                voice,
+            },
+        );
+        id
+    }
+
+    fn constant(frames: usize) -> Box<dyn Source> {
+        Box::new(PcmSource::new(Arc::new(Pcm {
+            rate: 8000,
+            channels: 1,
+            samples: vec![8000; frames],
+        })))
+    }
+
+    #[test]
+    fn a_voice_that_panics_is_closed_and_the_others_play_on() {
+        let engine = Engine::new(EngineConfig { sample_rate: 8000 });
+        let group = engine.create_group();
+        let events = group.subscribe();
+        let healthy = play(&engine, &group, 1, constant(8000));
+        let bomb = play(&engine, &group, 2, Box::new(Bomb));
+        let mut out = vec![0.0f32; 2 * 1000];
+        // The panic stays inside the voice.
+        engine.render(&mut out);
+        assert!(
+            out.iter().any(|v| v.abs() > 0.05),
+            "the healthy voice is silent"
+        );
+        {
+            let mixer = engine.lock();
+            let voice = &mixer.slots[&bomb].voice;
+            assert_eq!(voice.state, PlayerState::Prefetched);
+            assert!(voice.at_end);
+            assert_eq!(voice.source.memory_bytes(), 0);
+            assert_eq!(mixer.slots[&healthy].voice.state, PlayerState::Started);
+        }
+        let seen: Vec<_> = events.try_iter().filter(|e| e.player == bomb).collect();
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        match &seen[0].kind {
+            PlayerEventKind::Error { message } => {
+                assert!(message.contains("decoder bug on damaged data"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            seen[1].kind,
+            PlayerEventKind::EndOfMedia { last: true, .. }
+        ));
+        // It is not asked again: no more panics, no more events.
+        engine.render(&mut out);
+        assert_eq!(events.try_iter().filter(|e| e.player == bomb).count(), 0);
+        // A start that follows plays nothing and ends at once.
+        engine.lock().slots.get_mut(&bomb).unwrap().voice.start();
+        engine.render(&mut out);
+        let ended = events
+            .try_iter()
+            .filter(|e| e.player == bomb)
+            .map(|e| e.kind)
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            ended.as_slice(),
+            [PlayerEventKind::EndOfMedia { last: true, .. }]
+        ));
+    }
+
+    #[test]
+    fn a_listener_that_panics_does_not_end_the_render() {
+        let engine = Engine::new(EngineConfig { sample_rate: 8000 });
+        let group = engine.create_group();
+        group.set_listener(Some(Arc::new(|_| panic!("listener bug"))));
+        play(&engine, &group, 1, constant(200));
+        play(&engine, &group, 2, constant(8000));
+        let mut out = vec![0.0f32; 2 * 800];
+        // The first voice ends in this render and its listener panics.
+        engine.render(&mut out);
+        assert!(out.iter().any(|v| v.abs() > 0.05));
+        // The mix of the next render is whole too.
+        engine.render(&mut out);
+        assert!(out.iter().any(|v| v.abs() > 0.05));
+        // Closing the group tells the listener, on this thread.
+        group.set_listener(None);
     }
 }

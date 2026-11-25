@@ -2,6 +2,7 @@
 //! macOS, ALSA on Linux and AAudio on Android.
 
 use std::fmt;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -223,14 +224,22 @@ where
         .build_output_stream::<T, _, _>(
             *config,
             move |data: &mut [T], _| {
-                let frames = data.len() / channels;
-                if mix.len() < frames * 2 {
-                    mix.resize(frames * 2, 0.0);
-                }
-                let mix = &mut mix[..frames * 2];
-                engine.render(mix);
-                for (out, pair) in data.chunks_mut(channels).zip(mix.as_chunks::<2>().0) {
-                    write_frame(out, *pair);
+                // The stream's thread (or an extern callback of the
+                // platform) must never unwind: a panic is a buffer of
+                // silence.
+                let played = catch_unwind(AssertUnwindSafe(|| {
+                    let frames = data.len() / channels;
+                    if mix.len() < frames * 2 {
+                        mix.resize(frames * 2, 0.0);
+                    }
+                    let mix = &mut mix[..frames * 2];
+                    engine.render(mix);
+                    for (out, pair) in data.chunks_mut(channels).zip(mix.as_chunks::<2>().0) {
+                        write_frame(out, *pair);
+                    }
+                }));
+                if played.is_err() {
+                    data.fill(T::EQUILIBRIUM);
                 }
             },
             move |err| {

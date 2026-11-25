@@ -7,8 +7,11 @@
 //! time and events agree to the frame.
 
 use std::collections::VecDeque;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 
 use crate::gain::level_gain;
+use crate::pcm::{Pcm, PcmSource};
 use crate::source::Source;
 
 /// Source frames read at a time.
@@ -418,6 +421,25 @@ impl Voice {
             }
         }
         at_end
+    }
+
+    /// Silences the voice for good after its source panicked in `render`.
+    /// The source may be in any state, so nothing is asked of it: it is
+    /// dropped (a drop that panics is caught too) and replaced by an empty
+    /// one. The voice ends where it is, holds no sound any more, and a
+    /// later start plays nothing and ends at once.
+    pub fn fault(&mut self) {
+        let empty = Pcm {
+            rate: 8000,
+            channels: 1,
+            samples: Vec::new(),
+        };
+        let broken = std::mem::replace(&mut self.source, Box::new(PcmSource::new(Arc::new(empty))));
+        let _ = catch_unwind(AssertUnwindSafe(move || drop(broken)));
+        self.state = PlayerState::Prefetched;
+        self.at_end = true;
+        self.gain = 0.0;
+        self.playhead = Playhead::new(0, wraps_for(self.loop_count));
     }
 
     /// Renders a short fade-out from where the voice is, then puts the

@@ -2,6 +2,7 @@
 //! players for each running instance.
 
 use std::fmt;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -16,6 +17,12 @@ use crate::voice::PlayerState;
 
 /// The rates the engine mixes at.
 const RATES: std::ops::RangeInclusive<u32> = 8_000..=384_000;
+
+/// Frames mixed under one hold of the mixer lock. A buffer of a device is
+/// rendered in slices of this size, with the lock free between them, so
+/// another game's call waits for one slice at most, however big the buffer
+/// and however many players the audio thread mixes.
+const SLICE_FRAMES: usize = 128;
 
 /// How the engine starts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,9 +142,22 @@ impl Engine {
     /// Mixes the next `out.len() / 2` frames of interleaved stereo at the
     /// output rate, advancing every playing player, and delivers the
     /// events that playback caused.
+    ///
+    /// It never unwinds: audio threads run it, and a panic in a decoder
+    /// or a listener must not end them. A voice that panics is closed, with
+    /// an `Error` event; anything else that panics while mixing leaves a
+    /// slice of silence.
     pub fn render(&self, out: &mut [f32]) {
-        self.lock().render(out, &self.shared.events);
-        self.deliver();
+        for slice in out.chunks_mut(SLICE_FRAMES * 2) {
+            let mixed = catch_unwind(AssertUnwindSafe(|| {
+                self.lock().render(slice, &self.shared.events);
+            }));
+            if mixed.is_err() {
+                slice.fill(0.0);
+            }
+            // A listener that panics loses its events, not the audio.
+            let _ = catch_unwind(AssertUnwindSafe(|| self.deliver()));
+        }
     }
 
     /// Moves time forward by `frames` without keeping the sound: for a
