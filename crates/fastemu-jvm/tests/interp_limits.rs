@@ -9,6 +9,7 @@
 
 mod support;
 
+use std::io::ErrorKind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
@@ -410,12 +411,21 @@ fn a_collection_by_another_thread_keeps_the_exception_of_a_handler_loop() {
     let vm = vm_with(HEAP, VmLimits::default(), vec![probe(Arc::clone(&entered))]);
     start_loop(&vm, &entered, "keep");
     // The loop waits at its safepoint with nothing but its operand stack
-    // to hold the exception, while this thread fills the heap and
-    // collects it again and again.
-    vm.spawn("churn", |ctx| {
-        ctx.call_static("Loops", "churn", "()V", &[]).map(|_| ())
-    })
-    .expect("the thread starts");
+    // to hold the exception, while another thread fills the heap and
+    // collects it again and again. A spawn gives up after a second of
+    // waiting for the lock, which a machine with every core busy can take,
+    // so it asks again.
+    let start = Instant::now();
+    loop {
+        let spawned = vm.spawn("churn", |ctx| {
+            ctx.call_static("Loops", "churn", "()V", &[]).map(|_| ())
+        });
+        match spawned {
+            Ok(()) => break,
+            Err(e) if e.kind() == ErrorKind::TimedOut && start.elapsed() < LONG => {}
+            Err(e) => panic!("the thread starts: {e}"),
+        }
+    }
     let start = Instant::now();
     loop {
         let host = vm.clone();
