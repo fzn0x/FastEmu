@@ -63,9 +63,11 @@ with `AUTHMODE_ANY`, and it can be changed only when it was also made
 writable; otherwise the call throws `SecurityException`.
 
 The list of another suite's folder is remembered only when the folder
-holds a store, and for 16 suites at most. For any other name the call
-reads the folder again, and a game that tries thousands of vendor names
-leaves nothing behind in the virtual machine.
+holds a store, and for 16 suites at most. A folder with no store is read
+again at each call, so a game that tries thousands of vendor names leaves
+nothing behind in the virtual machine. A 17th suite that has stores
+throws `RecordStoreException`: its stores are there, so the call does not
+say they are missing.
 
 **Stores are not shared between instances yet.** The folder of another
 suite sits inside this instance's own data folder, and nothing puts
