@@ -491,12 +491,13 @@ changes one of these calls `highlevel::wake_timer`.
   left and right move it a screen of rows at a time; select
   fires `SELECT_COMMAND` (a static `Command("", SCREEN, 0)` that is
   never on the soft keys) or the command `setSelectCommand` chose. The
-  elements are a native vector, so they count against the game's heap:
-  `ChoiceModel::heap_bytes` is the room of the vector (16 bytes an
-  element, and up to twice that after it grew by doubling; the strings
-  and images are Java objects and count as themselves), and `append`, `insert`, `delete`, `deleteAll` and the
-  constructors recount the object. A list that takes elements without end
-  gets `OutOfMemoryError` at the heap limit; deleting gives the room
+  elements are a native vector, so they count against the game's heap.
+  `ChoiceModel::heap_bytes` is the room of the vector: 16 bytes an
+  element, and up to twice that after it grew by doubling. The strings
+  and images are Java objects and count as themselves. `append`,
+  `insert`, `delete`, `deleteAll` and the constructors recount the
+  object. A list that takes elements without end gets
+  `OutOfMemoryError` at the heap limit, and deleting gives the room
   back. A row keeps at most 4096 units of its element's text, fewer in a
   choice of many elements (a budget of 1 Mi units between them), since
   elements may share one long string that each row would copy.
