@@ -35,7 +35,8 @@ expect from it is in [note 6](../compat/notes/06-rms.md).
 | `name` | Store names (UTF-16, 1 to 32 code units) and the file and folder names they map to. Public. |
 | `format` | `StoreData` (a store's contents) and its file format, with recovery from damaged files. Public. |
 | `disk` | Folder layout, listing, atomic writes, deleting, keeping damaged copies. Public. |
-| `state` | The `Rms` extension: the index of stores, the open stores, the quota and the file lock. |
+| `state` | The `Rms` extension: the index of stores, the open stores, the quota, the limit of 64 stores, the write budget and the file lock. |
+| `budget` | `WriteBudget`, the token bucket of disk writes, and the `Clock` it is read against. |
 | `store` | The `RecordStore` class. |
 | `enumeration` | `RecordEnumeration`, as the class `fastemu/rms/RecordEnumerationImpl`. |
 | `api` | The interfaces (`RecordFilter`, `RecordComparator`, `RecordListener`, `RecordEnumeration`) and the five exceptions. |
@@ -157,6 +158,54 @@ grow a store always succeeds. A full disk also throws
 `RecordStoreFullException`. The launcher may set another quota with
 `rms::set_quota` (a device profile could name one).
 
+A suite may have 64 record stores. Creating the 65th throws
+`RecordStoreFullException`, the exception that games already catch for a
+full store. The quota counts the bytes in the files and not the files, so
+without this limit a game could make tens of thousands of empty stores,
+each a file of its own, before the quota stopped it. Phones allowed a few
+dozen stores at most and the games of the test corpus make one or two. A
+store that exists still opens and changes when its suite has more than 64,
+as an older version could make them; the suite makes a new one once it is
+under the limit. Another suite's stores are never created by this
+instance, so the limit is only for this suite's own.
+
+## The write budget
+
+The quota limits the bytes the stores hold. It does not limit the bytes
+they write, and every change writes the whole store file and flushes it,
+so a game that rewrites a record of 900 KiB in a loop writes about 80 MiB
+a second for as long as it runs. That wears out an SSD and slows every
+other program on the disk. Each instance therefore has a write budget, a
+token bucket in `budget.rs`:
+
+- It holds 32 MiB at the start and refills at 4 MiB a second. A write
+  takes the size of the file it wrote from it, and at least 4 KiB, which
+  is what a small file costs a file system.
+- A save waits before it writes, when the writes before it have spent
+  the budget. It waits for as long as the refill takes to pay the debt, in
+  slices of 50 ms with the VM lock released, so the game's other threads
+  keep running. After each slice it looks at the stop flag, and a stopping
+  machine ends the wait with `Throw::Stop` and writes nothing. The first
+  wait of an instance is logged once, as a warning.
+- Saves stay synchronous and durable. A save is never skipped, merged
+  with another or left for later: the call returns after the file is
+  flushed and renamed, as it always did. Only the time it starts changes.
+- The copy of a damaged file (`<stem>.bad`) and a write that fails are
+  paid for like a save, since both wrote the file.
+
+A game that writes less than 4 MiB a second on average is never slowed,
+and the burst covers a first run that saves a lot at once. A game that
+adds 1000 records of 100 bytes one at a time writes a file that grows to
+112 KB each time, 56 MB in all, and waits about 5 seconds in the whole
+run. The loop above falls from 80 MiB a second to 4 MiB a second.
+
+Every save still rewrites the whole file, so the cost of filling a store
+one record at a time grows with the square of its size. That is a known
+limit. Writing only the change would end it, and is a later change. The
+launcher may set another burst and rate with `rms::set_write_limit`, as
+it sets the quota; the defaults are `rms::WRITE_BURST` and
+`rms::WRITE_RATE`.
+
 ## What is guaranteed
 
 - **Every change is on disk before the call returns.** `addRecord`,
@@ -164,7 +213,8 @@ grow a store always succeeds. A full disk also throws
   whole store to `<stem>.tmp`, flush it to the disk (`fsync`), rename it
   over `<stem>.rms` (an atomic replace on every platform; on Windows the
   rename is retried for a moment when a scanner holds the old file), and
-  on Unix flush the folder so the rename survives a power cut.
+  on Unix flush the folder so the rename survives a power cut. A game that
+  has spent its write budget waits before the write, as above.
 - **A killed instance never leaves half a store.** Whenever the process
   dies, the store file holds the old contents or the new ones. A leftover
   `.tmp` file is an unfinished write; it is ignored and the next write
@@ -187,8 +237,9 @@ grow a store always succeeds. A full disk also throws
   - a file cut short keeps the records before the cut.
 
   Each problem is logged as a warning, and the damaged file is first
-  copied to `<stem>.bad` so recovery never destroys the only copy. The
-  next change writes a sound file.
+  copied to `<stem>.bad` so recovery never destroys the only copy, and the
+  copy counts against the write budget. The next change writes a sound
+  file.
 - **Operations are serialized.** Natives change a store's state only with
   the VM lock held, and all file work for an instance holds one file lock
   (taken only with the VM lock released, so the two cannot deadlock).
@@ -240,12 +291,18 @@ the enumeration, as in the reference implementation.
 - Unit tests next to the code cover names (round trips, device names,
   case, lengths), the file format (round trips, garbage, cut files,
   damaged records and headers, huge lengths), atomic writes and listing,
-  the enumeration cursor and the sort.
+  the enumeration cursor and the sort. The write budget is tested on a
+  `Clock` that sleeps no time and writes its sleeps down, so no test
+  waits for real: the burst, the debt and its wait, the refill, a stop
+  that ends the wait, a failed write and a damaged file opened again and
+  again.
 - `crates/fastemu-midp/tests/rms.rs` compiles the programs in
   `tests/rms_java/` with `javac --release 8` against stubs of the package
   and runs them on FastEmu with an `InstanceEnv` in a temporary folder:
   ids and exceptions, enumeration orders and keepUpdated, listeners,
   stores that survive a restart of the virtual machine, records added from
-  several threads at once, other suites' stores, damaged files and the
-  quota. Without a JDK they pass with a note, unless
-  `FASTEMU_REQUIRE_JAVA=1` is set.
+  several threads at once, other suites' stores, damaged files, the
+  quota, the limit of 64 stores and a game that is made to wait for the
+  write budget, with a lower bound on the time and none above it.
+  Without a JDK they pass with a note, unless `FASTEMU_REQUIRE_JAVA=1`
+  is set.
