@@ -5,7 +5,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use crate::budget::{self, Clock, RenderBudget, Share, SystemClock, Turn};
+use crate::budget::{self, Clock, Pace, RenderBudget, Share, SystemClock, Turn};
 use crate::event::{EventCallback, EventQueue, PlayerEvent, PlayerEventKind, PlayerId};
 use crate::group::GroupLimits;
 use crate::voice::{PlayerState, Reached, Voice};
@@ -84,6 +84,9 @@ pub(crate) struct Mixer {
     /// The credit of each group under the budget, in nanoseconds. A group
     /// gets a full burst when it first has sound to play.
     credits: HashMap<GroupId, i64>,
+    /// What is left of each group's pace after the last slice it played,
+    /// in nanoseconds. A group starts with a full pace.
+    paces: HashMap<GroupId, i64>,
     /// How many times a voice waited a slice for its game's budget.
     pub waits: u64,
     /// Counts starts, so a group's voices play in the order they started.
@@ -110,6 +113,7 @@ impl Mixer {
             budget: None,
             clock: std::sync::Arc::new(SystemClock::new()),
             credits: HashMap::new(),
+            paces: HashMap::new(),
             waits: 0,
             starts: 0,
             order: Vec::new(),
@@ -126,10 +130,11 @@ impl Mixer {
     }
 
     /// Sets the render budget, or `None` for none. Every group starts
-    /// again from a full burst.
+    /// again from a full burst and a full pace.
     pub fn set_budget(&mut self, budget: Option<RenderBudget>) {
         self.budget = budget;
         self.credits.clear();
+        self.paces.clear();
     }
 
     pub fn rate(&self) -> u32 {
@@ -244,8 +249,8 @@ impl Mixer {
     /// stands still and it sends no events. It fades in when it plays
     /// again. The clock is read before the first voice and after each
     /// voice that rendered, and the time between two reads is charged to
-    /// the group of the voice that rendered. With no budget, no clock is
-    /// read and every voice plays.
+    /// the group of the voice that rendered and counted against its turn's
+    /// pace. With no budget, no clock is read and every voice plays.
     fn mix_voices(&mut self, chunk: &mut [f32], events: &EventQueue) {
         let slew = self.slew();
         let rate = self.rate;
@@ -354,13 +359,18 @@ impl Mixer {
                 let per_frame = cost.saturating_mul(1000) / frames.max(1) as u64;
                 voice.frame_cost_ps = budget::average(voice.frame_cost_ps, per_frame);
                 if let Some(turn) = turns.get_mut(turn) {
-                    turn.played(budget::frames_ns(voice.frame_cost_ps, frames));
+                    let took = i64::try_from(cost).unwrap_or(i64::MAX);
+                    turn.rendered(budget::frames_ns(voice.frame_cost_ps, frames), took);
                 }
             }
             if let Err(payload) = rendered {
                 voice.fault();
                 failed.push((id, panic_message(payload.as_ref())));
             }
+        }
+        // The plan left the groups in the order of their turns.
+        for (turn, &(group, _)) in turns.iter().zip(&self.dearest) {
+            self.paces.insert(group, turn.pace_left());
         }
         self.order = order;
         self.turns = turns;
@@ -379,8 +389,9 @@ impl Mixer {
     }
 
     /// Gives each group with a voice in `order` its part of the budget for
-    /// `slice_ns` of sound, and pushes its turn onto `turns`, in the order
-    /// the groups come. A group with nothing to play gets nothing.
+    /// `slice_ns` of sound, and pushes its turn onto `turns`, held to the
+    /// group's pace, in the order the groups come. A group with nothing to
+    /// play gets nothing, its pace included.
     fn plan(
         &mut self,
         budget: RenderBudget,
@@ -393,6 +404,10 @@ impl Mixer {
         if self.credits.len() > self.groups.len() {
             let groups = &self.groups;
             self.credits.retain(|id, _| groups.contains_key(id));
+        }
+        if self.paces.len() > self.groups.len() {
+            let groups = &self.groups;
+            self.paces.retain(|id, _| groups.contains_key(id));
         }
         let mut shares = std::mem::take(&mut self.shares);
         let mut dearest = std::mem::take(&mut self.dearest);
@@ -416,7 +431,9 @@ impl Mixer {
         budget::refill(&mut shares, budget.allowance_ns(slice_ns), cap);
         for (&(group, most), &share) in dearest.iter().zip(&shares) {
             self.credits.insert(group, share.credit);
-            turns.push(Turn::new(budget, share, most));
+            let left = self.paces.get(&group).copied().unwrap_or(i64::MAX);
+            let pace = Pace::new(left, share.part);
+            turns.push(Turn::new(budget, share, most).with_pace(pace));
         }
         self.shares = shares;
         self.dearest = dearest;
@@ -1203,6 +1220,150 @@ mod tests {
             // the sounds before it, the oldest and cheap one, it would have
             // played.
             assert_eq!(frame(&engine, fresh), at);
+        }
+
+        /// A sound like [`Costly`] whose cost the test changes while it
+        /// plays, as when the notes of a MIDI player start.
+        struct Dearer {
+            clock: Arc<TestClock>,
+            ns_per_frame: Arc<AtomicU64>,
+            level: f32,
+        }
+
+        impl Source for Dearer {
+            fn rate(&self) -> u32 {
+                RATE
+            }
+
+            fn frames(&self) -> u64 {
+                1 << 40
+            }
+
+            fn render(&mut self, out: &mut [f32]) -> usize {
+                out.fill(self.level);
+                let frames = out.len() / 2;
+                let cost = frames as u64 * self.ns_per_frame.load(Ordering::Relaxed);
+                self.clock.0.fetch_add(cost, Ordering::Relaxed);
+                frames
+            }
+
+            fn seek(&mut self, _frame: u64) {}
+        }
+
+        /// Starts `count` sounds of `level` in each of `games` new games,
+        /// after every sound started before. Each costs what `cost` says
+        /// a frame.
+        fn dearer_games(
+            engine: &Engine,
+            clock: &Arc<TestClock>,
+            cost: &Arc<AtomicU64>,
+            games: u64,
+            count: u64,
+            level: f32,
+        ) -> Vec<(Group, Vec<PlayerId>)> {
+            (0..games)
+                .map(|g| {
+                    let group = engine.create_group();
+                    let voices = (0..count)
+                        .map(|i| {
+                            let source = Dearer {
+                                clock: clock.clone(),
+                                ns_per_frame: cost.clone(),
+                                level,
+                            };
+                            let id = play(engine, &group, g * 100 + i, Box::new(source));
+                            let mut mixer = engine.lock();
+                            let order = mixer.next_start_order();
+                            mixer.slots.get_mut(&id).unwrap().voice.start_order = order;
+                            id
+                        })
+                        .collect();
+                    (group, voices)
+                })
+                .collect()
+        }
+
+        #[test]
+        fn a_game_whose_sounds_grow_dearer_spends_its_saved_time_over_many_slices() {
+            let (engine, clock) = engine_with(Some(RenderBudget::DEFAULT));
+            // Two games of 16 cheap sounds, 8% of real time each, save a
+            // full burst. Then every sound costs 10%: 160% for each game.
+            let cost = Arc::new(AtomicU64::new(ns_per_frame(1) / 2));
+            let games = dearer_games(&engine, &clock, &cost, 2, 16, 0.01);
+            slices(&engine, 100);
+            cost.store(ns_per_frame(10), Ordering::Relaxed);
+            // The sounds read their source every other slice, so their new
+            // cost shows in one of the next two. That slice renders them
+            // all: the ones held back fade out over it.
+            let before = clock.now_ns();
+            slices(&engine, 1);
+            if clock.now_ns() == before {
+                slices(&engine, 1);
+            }
+            // The fades are not counted against the pace, so the next
+            // slice still plays more than each game's oldest sound.
+            slices(&engine, 1);
+            let mixer = engine.lock();
+            for (_, game) in &games {
+                let playing = game.iter().filter(|v| !mixer.slots[v].voice.waiting);
+                assert!(playing.count() > 1);
+            }
+            drop(mixer);
+            let spent: Vec<u64> = (0..60)
+                .map(|_| {
+                    let before = clock.now_ns();
+                    slices(&engine, 1);
+                    clock.now_ns() - before
+                })
+                .collect();
+            // From then on every two slices stay within the share and a
+            // quarter, and for each game four sounds: its oldest, the one
+            // that took its pace past the end, the one render not counted,
+            // and one fading out. Without a pace each game renders all 16
+            // until its 20 ms are spent: 25.6 ms in two slices.
+            let share = 2 * SLICE as u64 * FRAME_NS / 2;
+            let sound = BLOCK * ns_per_frame(10);
+            let bound = share * 5 / 4 + 2 * 4 * sound;
+            for (at, two) in spent.windows(2).enumerate() {
+                let both = two[0] + two[1];
+                assert!(both <= bound, "slice {at} and the next: {both} of {bound}");
+            }
+        }
+
+        #[test]
+        fn a_pause_of_the_system_in_a_later_sound_holds_back_no_other() {
+            // Eight games of three cheap sounds, one run with the second
+            // sound of the first game held up a whole second on its 10th
+            // call, as when the system pauses the audio thread.
+            let run = |pause: bool| {
+                let (engine, clock) = engine_with(Some(RenderBudget::DEFAULT));
+                let mut keep = Vec::new();
+                for g in 0..8u64 {
+                    let group = engine.create_group();
+                    for i in 0..3u64 {
+                        let source = Costly {
+                            clock: clock.clone(),
+                            ns_per_frame: ns_per_frame(1),
+                            level: 0.01,
+                            calls: 0,
+                            stall_at: (pause && g == 0 && i == 1).then_some(10),
+                        };
+                        let id = play(&engine, &group, g * 100 + i, Box::new(source));
+                        let mut mixer = engine.lock();
+                        let order = mixer.next_start_order();
+                        mixer.slots.get_mut(&id).unwrap().voice.start_order = order;
+                    }
+                    keep.push(group);
+                }
+                let out = slices(&engine, RUN);
+                assert_eq!(pause, clock.now_ns() > SECOND_NS);
+                (out, engine.budget_waits())
+            };
+            let (calm, _) = run(false);
+            let (paused, waits) = run(true);
+            // The sound after it plays on as if nothing had happened.
+            assert_eq!(waits, 0);
+            assert_eq!(paused, calm);
         }
     }
 }

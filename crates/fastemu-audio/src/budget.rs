@@ -10,10 +10,16 @@
 //!
 //! Each slice, a game's sounds are offered in the order they started. Its
 //! oldest sound always plays. The others play while their measured cost
-//! fits in the game's part of the slice. One sound more may play past the
-//! part while the game has credit, the render time it saved before, so
-//! the game uses its whole part on average. The sounds after it wait,
-//! silent and in place, until the game's sound fits again.
+//! fits in the game's part of the slice. Past the part, the sounds that
+//! were playing go on while the game has credit, the render time it saved
+//! before, so the game uses its whole part on average. The sounds after
+//! them wait, silent and in place, until the game's sound fits again.
+//!
+//! The costs a game is judged by are running averages, slow to rise. So
+//! the clock also keeps a game's pace: what its sounds after the oldest
+//! really took. Once they have taken the pace of a slice, every later
+//! sound of the game waits, whatever its average says. A game that saved
+//! time thus spends it over many slices, not in a few.
 //!
 //! The mixer reads the time from a [`Clock`]. The apps use the system's
 //! clock; tests use one that the sounds themselves move, so the budget
@@ -30,9 +36,9 @@ pub struct RenderBudget {
     /// an equal part of it, and the part a game leaves unused goes to the
     /// others. The oldest sound of each game plays whatever it costs.
     pub share: f32,
-    /// The render time a game may save, and the debt it may run up: a
-    /// game that saved this much lets one more sound play past its part
-    /// for a while, and a spike shorter than it holds no sound back.
+    /// The render time a game may save, and the debt it may run up. A game
+    /// spends what it saved past its part a little each slice, and a spike
+    /// shorter than it holds no sound back.
     pub burst: Duration,
 }
 
@@ -160,19 +166,70 @@ pub(crate) fn frames_ns(per_frame_ps: u64, frames: usize) -> i64 {
     i64::try_from(ns).unwrap_or(i64::MAX).max(1)
 }
 
+/// What the sounds of a game after its oldest may take by the clock in a
+/// slice.
+///
+/// Each slice the pace grows by the game's part and a quarter more. So a
+/// game past its part spends the time it saved a quarter of its part a
+/// slice, its oldest sound aside, and the games together take not much
+/// more than the share in any slice. It holds at most two slices' worth:
+/// a sound reads its source two slices at a time, so sounds started
+/// together cost twice their average in one slice and little in the next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Pace {
+    /// What the sounds may take this slice, in nanoseconds; less than 0
+    /// after slices that took more.
+    room: i64,
+    /// The most the pace holds.
+    cap: i64,
+    /// Whether the pace was full when the slice began.
+    full: bool,
+}
+
+impl Pace {
+    /// No pace at all: the sounds may take any time.
+    const UNLIMITED: Self = Self {
+        room: i64::MAX,
+        cap: i64::MAX,
+        full: true,
+    };
+
+    /// The pace of a game whose `part` of this slice is given, after the
+    /// slices before left `left` of it (`i64::MAX` for a game new to the
+    /// budget, which starts full).
+    pub fn new(left: i64, part: i64) -> Self {
+        let part = part.max(0);
+        let rate = part.saturating_add(part / 4);
+        let cap = rate.saturating_mul(2);
+        let room = left.saturating_add(rate).min(cap);
+        Self {
+            room,
+            cap,
+            full: room >= cap,
+        }
+    }
+}
+
 /// One game's turn in a slice: which of its sounds play.
 ///
 /// The mixer offers the game's sounds in the order they started, with
 /// [`Turn::offer`], and reports each one that rendered with
-/// [`Turn::played`]. The first sound always plays. A later one plays when
-/// the estimates of the sounds before it and its own fit in the game's
-/// part, less a debt. A sound that waited needs an eighth of the part to
-/// spare, and a sound that played may run an eighth past it, so a sound
-/// at the edge does not flip on every change in the estimates. Past the
-/// part, sounds that were playing go on while the game has credit, and
+/// [`Turn::rendered`]. The first sound always plays. A later one plays
+/// when the estimates of the sounds before it and its own fit in the
+/// game's part, less a debt. A sound that waited needs an eighth of the
+/// part to spare, and a sound that played may run an eighth past it, so a
+/// sound at the edge does not flip on every change in the estimates. Past
+/// the part, sounds that were playing go on while the game has credit, and
 /// one sound that waited may come back once the game has saved half the
 /// burst. The first sound that does not play stops the turn: every sound
 /// after it waits too.
+///
+/// Whatever the estimates say, no sound after the first plays once those
+/// that played before it took the game's [`Pace`] by the clock, and a
+/// sound that waited comes back only when the pace was full. Of what the
+/// sounds took, the one render that took most past its estimate is not
+/// counted: when the system pauses the thread, one render takes the
+/// pause, while sounds that grow dearer do so many at once.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Turn {
     /// What the game may spend this slice: its part, less an eighth of
@@ -188,6 +245,15 @@ pub(crate) struct Turn {
     /// The dearest estimate known in the game: a sound never measured is
     /// counted at it.
     dearest: i64,
+    /// What the sounds after the first may take by the clock.
+    pace: Pace,
+    /// What the sounds after the first that played took by the clock.
+    took: i64,
+    /// The most one of them took past its estimate: not counted.
+    spike: i64,
+    /// The estimate of the sound just let in after the first, until it
+    /// rendered.
+    expected: Option<i64>,
     /// Whether the oldest sound is still to come.
     first: bool,
     /// Whether a sound plays past the part.
@@ -198,7 +264,8 @@ pub(crate) struct Turn {
 
 impl Turn {
     /// A turn for a game given `share`, whose dearest sound measured so
-    /// far costs `dearest` nanoseconds this slice (0 for none).
+    /// far costs `dearest` nanoseconds this slice (0 for none), with no
+    /// pace until [`Turn::with_pace`].
     pub fn new(budget: RenderBudget, share: Share, dearest: i64) -> Self {
         let limit = share.part.saturating_add(share.credit.min(0) / 8);
         Self {
@@ -207,10 +274,19 @@ impl Turn {
             half: budget.cap_ns() / 2,
             spent: 0,
             dearest,
+            pace: Pace::UNLIMITED,
+            took: 0,
+            spike: 0,
+            expected: None,
             first: true,
             past: false,
             closed: false,
         }
+    }
+
+    /// The same turn, held to `pace`.
+    pub fn with_pace(self, pace: Pace) -> Self {
+        Self { pace, ..self }
     }
 
     /// Whether the next sound plays. `estimate` is what it should cost
@@ -218,6 +294,7 @@ impl Turn {
     /// it did not play the last slice (or has not played since it
     /// started); `credit` is the game's credit now.
     pub fn offer(&mut self, estimate: Option<i64>, waiting: bool, credit: i64) -> bool {
+        self.expected = None;
         if self.closed {
             return false;
         }
@@ -225,25 +302,55 @@ impl Turn {
             self.first = false;
             return true;
         }
+        let taken = self.took.saturating_sub(self.spike);
+        if taken > self.pace.room || (waiting && !self.pace.full) {
+            self.closed = true;
+            return false;
+        }
         let cost = estimate.unwrap_or(self.dearest);
         let room = if waiting {
             self.limit - self.margin
         } else {
             self.limit + self.margin
         };
-        if self.spent.saturating_add(cost) <= room {
-            return true;
-        }
-        let plays = credit > 0 && (!waiting || (!self.past && credit >= self.half));
-        self.past |= plays;
+        let plays = self.spent.saturating_add(cost) <= room || {
+            let plays = credit > 0 && (!waiting || (!self.past && credit >= self.half));
+            self.past |= plays;
+            plays
+        };
         self.closed |= !plays;
+        if plays {
+            self.expected = Some(cost);
+        }
         plays
     }
 
-    /// Counts a sound that rendered, at its estimate after this slice.
-    pub fn played(&mut self, estimate: i64) {
+    /// Counts a sound that rendered: at `estimate`, its estimate after
+    /// this slice, and, if it was let in after the first sound, at
+    /// `took`, what it took by the clock.
+    pub fn rendered(&mut self, estimate: i64, took: i64) {
         self.spent = self.spent.saturating_add(estimate);
         self.dearest = self.dearest.max(estimate);
+        if let Some(expected) = self.expected.take() {
+            self.took = self.took.saturating_add(took);
+            self.spike = self.spike.max(took.saturating_sub(expected));
+        }
+    }
+
+    /// Counts a sound that rendered and took its estimate.
+    #[cfg(test)]
+    pub fn played(&mut self, estimate: i64) {
+        self.rendered(estimate, estimate);
+    }
+
+    /// What is left of the pace for the next slice: never less than
+    /// minus what it holds, so a game comes back within a few slices.
+    pub fn pace_left(&self) -> i64 {
+        let taken = self.took.saturating_sub(self.spike);
+        self.pace
+            .room
+            .saturating_sub(taken)
+            .max(self.pace.cap.saturating_neg())
     }
 }
 
@@ -433,5 +540,89 @@ mod tests {
         );
         // A limit of 700, and an eighth of that, 87, over it.
         assert_eq!(offer_all(&mut t, 200, &[false; 8], -800), 3);
+    }
+
+    #[test]
+    fn the_pace_grows_by_a_part_and_a_quarter_up_to_two_slices() {
+        // A game new to the budget starts with a full pace.
+        let new = Pace::new(i64::MAX, 800);
+        assert_eq!((new.room, new.cap, new.full), (2000, 2000, true));
+        // After a slice that took all of it, a part and a quarter comes
+        // back; after slices that took more, less.
+        let after = Pace::new(0, 800);
+        assert_eq!((after.room, after.full), (1000, false));
+        assert_eq!(Pace::new(-1500, 800).room, -500);
+        assert!(Pace::new(1000, 800).full);
+        assert_eq!(Pace::new(0, 0).room, 0);
+    }
+
+    /// Offers sounds that each cost 100 by their estimate but take `took`
+    /// by the clock, the oldest first, until one waits; returns how many
+    /// played. The game has credit and its estimates fit in its part.
+    fn offer_paced(turn: &mut Turn, took: &[i64]) -> usize {
+        let mut played = 0;
+        for &took in took {
+            if !turn.offer(Some(100), false, 1000) {
+                break;
+            }
+            turn.rendered(100, took);
+            played += 1;
+        }
+        played
+    }
+
+    #[test]
+    fn no_sound_plays_once_those_before_it_took_the_pace() {
+        // A pace of 2000. Every sound takes 600 by the clock, 500 past its
+        // estimate: one of those 500 is not counted. The oldest is not
+        // counted at all. So the sounds after it took 100, 700, 1300 and
+        // 1900 when the next is offered, and 2500 after the fifth.
+        let full = Pace::new(i64::MAX, 800);
+        let mut t = turn(1000).with_pace(full);
+        assert_eq!(offer_paced(&mut t, &[600; 8]), 6);
+        assert_eq!(t.pace_left(), -500);
+        // With no pace, the estimates alone let all eight play.
+        assert_eq!(offer_paced(&mut turn(1000), &[600; 8]), 8);
+    }
+
+    #[test]
+    fn the_render_that_took_most_past_its_estimate_is_not_counted() {
+        // The system pauses the thread in the third sound's render: it
+        // takes 5000 by the clock. The sounds after it play on.
+        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800));
+        let took = [100, 100, 5000, 100, 100, 100];
+        assert_eq!(offer_paced(&mut t, &took), 6);
+        assert_eq!(t.pace_left(), 2000 - 500);
+        // Two such renders: the second counts, and the pace is taken.
+        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800));
+        let took = [100, 5000, 5000, 100, 100];
+        assert_eq!(offer_paced(&mut t, &took), 3);
+    }
+
+    #[test]
+    fn a_sound_that_waited_comes_back_only_on_a_full_pace() {
+        // The pace is short of full after a slice that took it all: a
+        // sound that played goes on, one that waited does not come back,
+        // though both fit in the part.
+        let short = Pace::new(0, 800);
+        let mut t = turn(1000).with_pace(short);
+        assert_eq!(
+            offer_all(&mut t, 100, &[false, false, true, false], 1000),
+            2
+        );
+        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800));
+        assert_eq!(
+            offer_all(&mut t, 100, &[false, false, true, false], 1000),
+            4
+        );
+    }
+
+    #[test]
+    fn a_pace_left_stops_at_minus_what_it_holds() {
+        let mut t = turn(1000).with_pace(Pace::new(i64::MAX, 800));
+        // The oldest, then one sound that takes far more than its pace
+        // twice over, with a second one so the first is not forgiven.
+        assert_eq!(offer_paced(&mut t, &[100, 9000, 9000]), 3);
+        assert_eq!(t.pace_left(), -2000);
     }
 }
