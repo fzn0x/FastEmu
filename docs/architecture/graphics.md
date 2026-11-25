@@ -287,6 +287,10 @@ throws as `IllegalArgumentException` (or `IOException` for
     `png` crate panics on one that is not. An indexed picture then fails
     to decode; other pictures do not use the palette.
 - **JPEG**, baseline and progressive, through zune-jpeg.
+  A file with more than 16 extended XMP segments, which is 1 MB of
+  metadata, is refused with a decode error: zune-jpeg joins the unfinished
+  segments again after every marker, which took 4.8 s for a 1.6 MB file
+  of thousands of them.
 - **GIF**: the first frame, placed on the logical screen, transparent
   index clear.
 - **BMP**: 1, 4, 8, 16, 24 and 32 bits, bit-field masks, bottom-up or
