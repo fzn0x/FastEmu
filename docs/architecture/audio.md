@@ -128,7 +128,7 @@ the MIDP layer (see the mapping below):
   whole loop.
 - A loop is heard with no gap, but listeners are told of it at most once
   every 20 ms of output per player (`MIN_LOOP_US`): a sound of one frame
-  at 384 kHz loops 384,000 times a second, and each pass would be two
+  at 384 kHz loops 384000 times a second, and each pass would be two
   events. The first loop after a start, and the end of a run, are always
   told.
 - At most 32 players of a game and 128 of all games together are started
@@ -234,7 +234,8 @@ should report.
 - **MP3**: MPEG-1 and MPEG-2 layer III. The length comes from the Xing or
   LAME header without the encoder delay and padding (which the decoder
   trims), or else from the frame headers. ID3v2 tags are skipped. An MP3
-  that fails to decode 16 frames in a row ends there, with an `Error` event.
+  that fails to decode more than 16 frames in a row ends there, with an
+  `Error` event.
 - **AMR narrowband**: the RFC 4867 storage format (`#!AMR\n`), mono 8 kHz,
   decoded up front. Frames of other codecs are concealed like lost frames;
   a file cut short keeps what decoded. AMR wideband (`#!AMR-WB\n`) and the
@@ -247,11 +248,12 @@ should report.
   optional `TEMPO` (5 to 127, times 4 bpm) and `RESOLUTION` (1 to 127) in
   either order, blocks (`BLOCK_START n ... BLOCK_END n`, defined before
   use, not nested), `PLAY_BLOCK`, `SET_VOLUME` (0 to 100), `REPEAT` (2 to
-  127), notes 0 to 127 and `SILENCE`. A sequence or a block holds at most 65536 tones, and all its
-  lists together 262144, `SET_VOLUME` entries included. A note lasts
-  `duration * 60000 * 4 / (resolution * tempo)` ms. Errors carry the byte
-  offset where reading stopped. Sequences that unroll past 65536 tones are
-  refused, since blocks that play blocks grow without bound.
+  127), notes 0 to 127 and `SILENCE`. A sequence or a block holds at most
+  65536 tones, and all its lists together 262144, `SET_VOLUME` entries
+  included. A note lasts `duration * 60000 * 4 / (resolution * tempo)` ms.
+  Errors carry the byte offset where reading stopped. Sequences that
+  unroll past 65536 tones are refused, since blocks that play blocks grow
+  without bound.
 - **Nokia ringing tones**: the Smart Messaging bit stream (commands,
   basic and temporary songs, patterns with loops and back references, note,
   scale, style, tempo and volume instructions). Volume 1 to 15 maps to
