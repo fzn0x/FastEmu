@@ -163,8 +163,12 @@ impl ClassFile {
         }
         let field_count = r.u16()?;
         let mut fields = Vec::with_capacity(field_count as usize);
+        // The pool entries whose text was found to be a field descriptor.
+        // Fields share descriptors, and one can take 65535 bytes, so a
+        // descriptor is walked once however many fields name it.
+        let mut sound = HashSet::new();
         for _ in 0..field_count {
-            fields.push(parse_field(&mut r, &cp)?);
+            fields.push(parse_field(&mut r, &cp, &mut sound)?);
         }
         let method_count = r.u16()?;
         let mut methods = Vec::with_capacity(method_count as usize);
@@ -214,14 +218,22 @@ fn attribute<'b, 'c>(
     Ok((name, r.bytes(len)?))
 }
 
-fn parse_field(r: &mut Reader<'_>, cp: &ConstantPool) -> Result<FieldInfo, FormatError> {
+fn parse_field(
+    r: &mut Reader<'_>,
+    cp: &ConstantPool,
+    sound: &mut HashSet<u16>,
+) -> Result<FieldInfo, FormatError> {
     let access = r.u16()?;
     let name = cp.utf8_arc(r.u16()?)?;
-    let descriptor = cp.utf8_arc(r.u16()?)?;
-    if !crate::descriptor::is_field_descriptor(&descriptor) {
-        return Err(FormatError::new(format!(
-            "field {name} has a bad descriptor {descriptor}"
-        )));
+    let descriptor_index = r.u16()?;
+    let descriptor = cp.utf8_arc(descriptor_index)?;
+    if !sound.contains(&descriptor_index) {
+        if !crate::descriptor::is_field_descriptor(&descriptor) {
+            return Err(FormatError::new(format!(
+                "field {name} has a bad descriptor {descriptor}"
+            )));
+        }
+        sound.insert(descriptor_index);
     }
     let mut constant_value = None;
     for _ in 0..r.u16()? {
@@ -351,7 +363,7 @@ pub(crate) fn class_of_methods(descriptors: &[&str], per_descriptor: usize) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::descriptor::take_shapes;
+    use crate::descriptor::{take_shapes, take_walks};
 
     /// A hand-assembled `public class T { static int f() { return 7; } }`
     /// with a `SourceFile` and a `LineNumberTable`.
@@ -474,6 +486,29 @@ mod tests {
         b
     }
 
+    /// A class file `T` with `per_descriptor` fields named `f` for each of
+    /// `descriptors`, which are one pool entry each.
+    fn class_of_fields(descriptors: &[&str], per_descriptor: usize) -> Vec<u8> {
+        let mut texts = vec!["f"];
+        texts.extend(descriptors);
+        let mut b = class_head(&texts);
+        b.extend(0x0421u16.to_be_bytes());
+        b.extend(2u16.to_be_bytes());
+        b.extend(4u16.to_be_bytes());
+        b.extend(0u16.to_be_bytes()); // interfaces
+        b.extend(((descriptors.len() * per_descriptor) as u16).to_be_bytes());
+        for i in 0..descriptors.len() {
+            for _ in 0..per_descriptor {
+                b.extend(0x0001u16.to_be_bytes());
+                b.extend(5u16.to_be_bytes());
+                b.extend((6 + i as u16).to_be_bytes());
+                b.extend(0u16.to_be_bytes()); // attributes
+            }
+        }
+        b.extend([0; 4]); // no methods, no attributes
+        b
+    }
+
     #[test]
     fn interfaces_that_name_one_class_share_its_name() {
         // A class file can name one interface 65535 times, and the name can
@@ -488,6 +523,26 @@ mod tests {
                 .iter()
                 .all(|name| Arc::ptr_eq(name, &class.interfaces[0]))
         );
+    }
+
+    #[test]
+    fn fields_that_share_a_descriptor_walk_it_once() {
+        // 3000 fields of a descriptor of 60000 bytes: walked for every
+        // field, that is 180 million bytes. A class file of 65535 fields
+        // took a second.
+        let wide = format!("L{};", "a".repeat(60_000));
+        let bytes = class_of_fields(&[&wide, "[[J"], 1500);
+        take_walks();
+        let class = ClassFile::parse(&bytes).unwrap();
+        assert_eq!(class.fields.len(), 3000);
+        assert_eq!(take_walks(), 2, "one walk for each descriptor");
+    }
+
+    #[test]
+    fn a_bad_field_descriptor_is_refused_however_many_fields_share_it() {
+        let err = ClassFile::parse(&class_of_fields(&["L;", "I"], 3)).unwrap_err();
+        assert!(err.0.contains("bad descriptor"), "{}", err.0);
+        assert!(ClassFile::parse(&class_of_fields(&["I", "Lx;"], 3)).is_ok());
     }
 
     #[test]

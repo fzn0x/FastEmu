@@ -75,12 +75,22 @@ pub fn field_len(s: &[u8]) -> Option<usize> {
 
 /// Whether `desc` is exactly one field descriptor.
 pub fn is_field_descriptor(desc: &str) -> bool {
+    #[cfg(test)]
+    WALKS.with(|count| count.set(count.get() + 1));
     field_len(desc.as_bytes()) == Some(desc.len())
 }
 
 #[cfg(test)]
 thread_local! {
     static SHAPES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many texts [`is_field_descriptor`] has walked on this thread since
+/// the last call, which starts the count again.
+#[cfg(test)]
+pub(crate) fn take_walks() -> usize {
+    WALKS.with(|count| count.replace(0))
 }
 
 /// How many descriptors [`method_shape`] has walked on this thread since
