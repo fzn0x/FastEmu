@@ -39,5 +39,7 @@ public class List extends Screen implements Choice {
 
     public void delete(int elementNum) {}
 
+    public void deleteAll() {}
+
     public void setSelectCommand(Command command) {}
 }

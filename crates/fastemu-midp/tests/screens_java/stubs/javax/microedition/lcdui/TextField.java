@@ -14,6 +14,12 @@ public class TextField extends Item {
 
     public void setString(String text) {}
 
+    public void insert(String src, int position) {}
+
+    public int setMaxSize(int maxSize) {
+        return 0;
+    }
+
     public int size() {
         return 0;
     }

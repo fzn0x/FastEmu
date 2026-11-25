@@ -6,6 +6,8 @@
 //! Without a JDK the tests print why and pass, unless
 //! `FASTEMU_REQUIRE_JAVA=1` is set.
 
+#![allow(dead_code, reason = "each test binary uses a different part")]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -22,7 +24,10 @@ MIDlet-2: Texts, , s.Texts\r\n\
 MIDlet-3: Alerts, , s.Alerts\r\n\
 MIDlet-4: Forms, , s.Forms\r\n\
 MIDlet-5: Customs, , s.Customs\r\n\
-MIDlet-6: Edges, , s.Edges\r\n";
+MIDlet-6: Edges, , s.Edges\r\n\
+MIDlet-7: MemLists, , s.MemLists\r\n\
+MIDlet-8: MemTexts, , s.MemTexts\r\n\
+MIDlet-9: MemInsert, , s.MemInsert\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 pub mod midlet {
@@ -32,6 +37,9 @@ pub mod midlet {
     pub const FORMS: usize = 3;
     pub const CUSTOMS: usize = 4;
     pub const EDGES: usize = 5;
+    pub const MEM_LISTS: usize = 6;
+    pub const MEM_TEXTS: usize = 7;
+    pub const MEM_INSERT: usize = 8;
 }
 
 /// The JDK tool `name`, from `JAVA_HOME` first, then the `PATH`.
