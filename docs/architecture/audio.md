@@ -363,17 +363,34 @@ each game a part of the audio thread's time instead.
 - Past the part, sounds that were playing go on while the game has
   credit. One sound that waited may come back past the part, and only
   once the game has saved half the burst, 10 ms. So a game over its part
-  plays the sounds that fit, and one more part of the time, which uses its
-  whole part on average. The first sound that does not play holds back
-  every sound started after it.
+  plays the sounds that fit, and more of them part of the time, which
+  uses its whole part on average. The first sound that does not play
+  holds back every sound started after it.
+- The averages rise an eighth of the way each slice, so the clock also
+  keeps each game's pace: what its sounds after the oldest may take. The
+  pace grows by the game's part and a quarter each slice and holds two
+  slices' worth, since a sound reads its source two slices at a time.
+  Once the sounds that played took the pace, every later sound of the
+  game waits, whatever the averages say, and a sound that waited comes
+  back only on a full pace. So a game spends what it saved about a
+  quarter of its part a slice, its oldest sound aside, and the time
+  several games saved does not all go in a few slices.
+- One render a slice is not counted against the pace: the one that took
+  most past its average. When the system pauses the thread, one render
+  takes the pause, and the sounds after it play on. Sounds that grow
+  dearer do so many at once, and the others count. The fade-outs of the
+  sounds a game holds back do not count either.
 - A start or a restart puts a sound at the back of its game's order, and
   it must be let in as a sound that waited: a game that starts 31 sounds
   at once gets the ones that fit and at most one more in that slice.
 - A sound that cannot play fades out over the 3 ms ramp, then waits,
   silent, in place: it stays STARTED, its media time stands still, and it
   sends no events, so its END_OF_MEDIA comes later. It fades back in when
-  it plays again. A `playTone` tone that waits does not end meanwhile;
-  they stay capped at 16 a game.
+  it plays again. A sound of which nothing was heard in its last slice,
+  such as a MIDI player resting before its notes, stops at once instead:
+  a fade would cost a render and change nothing that is heard. A
+  `playTone` tone that waits does not end meanwhile; they stay capped at
+  16 a game.
 - `Engine::budget_waits` counts the slices sounds waited, over all games.
 - The tests give the mixer a clock that their sounds move, so they never
   read the time and behave the same on any machine.
@@ -386,29 +403,32 @@ unless the case says "after 0.5 s":
 
 | Case | Without the budget | With it |
 | --- | --- | --- |
-| One game of 32 MIDI players x 32 notes, from its first buffer, 4 s | 85 to 86 percent, 1 to 12 buffers late, the first 13 to 14 ms | 50 percent, none late, the worst 6.9 ms |
-| The same, after 0.5 s | 85 percent | 50 percent, none late; 14 to 21 of its players play, 18.5 on average, and a player at the edge switches up to 3 times a second |
-| The same beside a game playing a corpus MIDI file, after 0.5 s, 8 s | 86 to 88 percent, 6 to 23 buffers late | 50 percent, none late; the light game plays every frame |
-| Four such games, from their first buffer, 4 s | 340 to 348 percent, every buffer late, the first 54 ms | 52 percent, none late, the worst 7.8 ms |
-| A fourth such game starts beside three held ones, 4 s | 341 to 376 percent, every buffer late | 51 percent, 1 buffer late by 0.4 ms in one run, none in the other |
-| A game playing one cheap sound starts 31 such players beside three held games, 4 s | 336 to 340 percent, every buffer late | 50 percent, none late |
-| Eight games, each playing the heaviest corpus MIDI file twice, after 0.5 s, 8 s | 11.4 percent | 11.5 to 11.6 percent, no sound waits |
-| A game playing 18 such players, about its whole part alone, when three such games start beside it, 4 s | 310 to 545 percent, every buffer late | 52 percent, 1 buffer late by up to 4 ms; the four games take 86 to 94 percent over the first 4 buffers |
-| Two games of 32 silent MIDI players that all start 32 notes at once after 1 s, 3 s | 119 to 122 percent, every buffer late from the notes on | 35 to 36 percent, the first 4 buffers of the notes late, by up to 8 ms |
-| The same with four games | 232 to 257 percent, every buffer late from the notes on | 37 to 38 percent, 3 to 4 buffers late, by up to 35 ms |
+| One game of 32 MIDI players x 32 notes, from its first buffer, 4 s | 85 to 86 percent, 1 to 12 buffers late, the first 13 to 14 ms | 50 percent, none late in one run, 1 by 0.2 ms in the other |
+| The same, after 0.5 s | 85 percent | 50 percent, none late; 9 to 20 of its players play, 17 on average, and a player at the edge switches up to about 4 times a second |
+| The same beside a game playing a corpus MIDI file, after 0.5 s, 8 s | 86 to 88 percent, 6 to 23 buffers late | 50 percent, 1 buffer late in each run, by 1.6 and 5.6 ms; the light game plays every frame |
+| Four such games, from their first buffer, 4 s | 340 to 348 percent, every buffer late, the first 54 ms | 52 percent, 1 buffer late in each run, by 0.9 and 1.4 ms |
+| Four such games, after 0.5 s, 2 s | 340 to 367 percent, every buffer late | 49 to 50 percent, none late in one run, 1 by 0.4 ms in the other |
+| A fourth such game starts beside three held ones, 4 s | 341 to 376 percent, every buffer late | 51 percent, none late in one run, 2 by 5.4 ms in all in the other |
+| A game playing one cheap sound starts 31 such players beside three held games, 4 s | 336 to 340 percent, every buffer late | 51 percent, none late |
+| Eight games, each playing the heaviest corpus MIDI file twice, after 0.5 s, 8 s | 11.4 percent | 11.9 to 12.7 percent, no sound waits |
+| A game playing 18 such players, about its whole part alone, when three such games start beside it, 4 s | 310 to 545 percent, every buffer late | 52 percent, none late in one run, 4 by 15 ms in all in the other; the four games take 64 to 68 percent over the first 4 buffers |
+| Two games of 32 silent MIDI players that all start 32 notes at once after 1 s, 3 s | 119 to 122 percent, every buffer late from the notes on | 36 percent, none late in one run, 1 by 0.1 ms in the other |
+| The same with four games | 232 to 257 percent, every buffer late from the notes on | 37 to 38 percent, none late |
+| Two such games that close their 32 players every 200 ms and start 32 new ones, which rest 20 ms before their notes, 4 s | 168 percent, 355 of 375 buffers late | 51 percent, none late |
+| The same with four games | 345 percent, 355 of 375 buffers late | 52 percent, 8 buffers late by 23 ms in all in one run, 2 by 3 ms in the other |
 
-With the budget, four heavy games that have played for a while still
-take about 50 percent. In one run of that case 3 of 187 buffers were
-late, the worst 14.6 ms: about twice what the budget lets a buffer take,
-so the system paused the thread there.
+A buffer or two late by a few ms in one run of a case, and not in the
+other, is most likely the busy machine pausing the thread. Three more
+runs of the last case on a quieter machine left 0 or 1 buffer late, by
+0.2 ms at most.
 
-In the last three rows the games spend the time they saved. Sounds
-that were playing go on past the part while their game has saved time.
-So a game whose part shrinks, or whose playing sounds grow dearer all at
-once, renders them at their full cost until that time is spent, and the
-time several games saved adds up. Silent players also look cheap to the
-running average, which takes a few slices to catch up once their notes
-start.
+In the last five rows a game's part shrinks, or the games' sounds grow
+dearer at once, while the games have time saved. The averages take a few
+slices to catch up, and the pace holds each game meanwhile. Four games
+whose notes start together take 70 to 90 percent of real time for about
+a quarter of a second, while they spend what they saved, then about 50.
+Their players rest before the notes and make no sound, so the ones held
+back stop without a fade.
 
 The heaviest MIDI file in the 305 games of the test corpus plays in about
 1 percent of real time, and with eight games each game's part is at least
@@ -421,10 +441,11 @@ What the budget does not do:
   part by one sound. That sound is bounded by the other limits: 32
   synthesizer voices, 512 MIDI messages and 8 s of MP3 catching up per
   call.
-- It bounds what a game spends over time, not in each buffer. A game
-  that saved 20 ms of render time spends it at its full cost when its
-  playing sounds grow dearer at once. Games that do that together still
-  make a few buffers late, as the last rows of the table show.
+- A game can take more than its pace in a slice: its oldest sound, the
+  sound that took the pace past its end, the one render not counted, and
+  the fade-outs of the sounds it holds back. So in the slice where many
+  sounds a game plays grow dearer at once, all of them render, the ones
+  held back fading out, unless nothing of them was heard.
 - It reads the system's clock, so time the system takes from the audio
   thread is charged to the game whose sound was rendering. On a busy
   computer a normal game's newer sounds can then wait.
