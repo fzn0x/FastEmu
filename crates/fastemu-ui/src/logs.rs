@@ -45,12 +45,17 @@ impl LogBuffer {
     }
 
     /// Appends lines, dropping the oldest beyond the capacity and beyond
-    /// the byte budget. A line longer than the whole budget is dropped
-    /// too.
+    /// the byte budget. A line longer than the whole budget is dropped on
+    /// its own, and the lines before it stay.
     pub fn extend(&mut self, lines: impl IntoIterator<Item = LogLine>) {
         for line in lines {
             if matches!(line.level, LogLevel::Err | LogLevel::Warn) {
                 self.unseen_problems += 1;
+            }
+            if line.text.len() > self.max_bytes {
+                // It would push out every line before it and then itself.
+                self.dropped += 1;
+                continue;
             }
             self.bytes += line.text.len();
             self.lines.push_back(line);
@@ -152,8 +157,11 @@ mod tests {
             line(LogLevel::Err, &"y".repeat(101)),
             line(LogLevel::Out, "after"),
         ]);
-        assert_eq!(log.len(), 1);
-        assert_eq!(log.get(0).map(|l| l.text.as_str()), Some("after"));
+        // The long line is the only one that goes.
+        assert_eq!(log.len(), 2);
+        assert_eq!(log.get(0).map(|l| l.text.as_str()), Some("small"));
+        assert_eq!(log.get(1).map(|l| l.text.as_str()), Some("after"));
+        assert_eq!(log.dropped(), 1);
         // It still counts as a problem nobody has seen.
         assert_eq!(log.unseen_problems(), 1);
         log.clear();
