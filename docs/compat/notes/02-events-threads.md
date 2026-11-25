@@ -248,9 +248,27 @@ task is cancelled and the timer thread keeps running the others
 On Java SE an exception kills the timer thread and cancels every task.
 [code]
 
+When a timer's thread ends differs too. On Java SE it ends once the game
+holds no reference to the timer and no task is left. J2ME Loader does the
+same: a helper the timer holds sets a flag from its finalizer, and the
+thread returns once its queue is empty and the flag is set. It has no
+idle timeout
+([FinalizerHelper](https://github.com/nikita36078/J2ME-Loader/blob/e270ed91e67b5cafc18c1991b92ba5249cf41c50/app/src/main/java/javax/microedition/shell/custom/Timer.java#L330)).
+Sun's MIDP reference implementation (phoneME, `java/util/Timer.java`,
+Sun 1990 to 2007) differs: `new Timer()` starts no thread. The first
+`schedule` starts it, and a later one starts a new thread if the old one
+has ended. The thread ends once its queue has been empty for 30 s. So on
+phones built from it, `new Timer()` never fails, and a timer the game
+keeps holds no thread while it is idle. A task that throws is cancelled
+there too, and the thread goes on. [code]
+
 **For FastEmu:** each `Timer` has its own thread; tasks on one timer run
 one at a time, concurrently with UI callbacks as the spec says. A task
-that throws is logged and cancelled; the timer survives.
+that throws is logged and cancelled; the timer survives. The thread
+starts in `new Timer()` and ends after `cancel()`, or once the game has
+dropped the timer and no task is left, as on Java SE and in J2ME Loader.
+A timer the game keeps holds its thread while idle, which the reference
+implementation does not.
 
 ## vibrate and flashBacklight
 
