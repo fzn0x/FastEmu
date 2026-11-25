@@ -6,6 +6,8 @@ import android.provider.OpenableColumns
 import android.util.Log
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.security.MessageDigest
 
 /**
@@ -17,10 +19,17 @@ import java.security.MessageDigest
  * copies, so the library keeps one entry for them; a different file with the
  * same name, such as a game's newer version, gets a folder of its own and
  * never overwrites a JAR a running game reads. A `.jad` and its `.jar` picked
- * together share a folder, so the descriptor finds its JAR beside it.
+ * together share a folder, so the descriptor finds its JAR beside it. A file
+ * over [MAX_FILE_BYTES] is not copied.
  */
 object GameFiles {
     private const val TAG = "fastemu_files"
+
+    /**
+     * The most bytes of one file copied: 64 MiB, the largest JAR the suite
+     * reader opens, so a bigger file could not run anyway.
+     */
+    const val MAX_FILE_BYTES = 64L * 1024 * 1024
 
     /** The MIME types file managers and browsers give `.jar` and `.jad` files. */
     val suiteTypes = arrayOf(
@@ -56,32 +65,56 @@ object GameFiles {
         }
     }
 
-    /** Copies one file into [folder]; its name and its bytes' digest. */
-    private fun copyOne(context: Context, uri: Uri, folder: File): String? =
+    /**
+     * Copies one file into [folder]; its name and its bytes' digest. A file
+     * over [MAX_FILE_BYTES], or one that fails midway, leaves no part of
+     * itself in the folder.
+     */
+    private fun copyOne(context: Context, uri: Uri, folder: File): String? {
+        var target: File? = null
         try {
-            val target = File(folder, displayName(context, uri))
+            val file = File(folder, displayName(context, uri))
+            target = file
             val digest = MessageDigest.getInstance("SHA-256")
             val input = context.contentResolver.openInputStream(uri)
                 ?: throw IOException("no stream for $uri")
             input.use { source ->
-                target.outputStream().use { sink ->
-                    val buffer = ByteArray(64 * 1024)
-                    while (true) {
-                        val read = source.read(buffer)
-                        if (read < 0) break
-                        digest.update(buffer, 0, read)
-                        sink.write(buffer, 0, read)
-                    }
-                }
+                file.outputStream().use { sink -> copyLimited(source, sink, digest) }
             }
-            "${target.name}\n${hex(digest.digest())}"
+            return "${file.name}\n${hex(digest.digest())}"
         } catch (error: IOException) {
             Log.e(TAG, "couldn't copy $uri", error)
-            null
         } catch (error: SecurityException) {
             Log.e(TAG, "no permission to read $uri", error)
-            null
         }
+        target?.delete()
+        return null
+    }
+
+    /**
+     * Copies [source] to [sink], feeding every byte copied to [digest]. A
+     * source with more than [limit] bytes fails with an [IOException] before
+     * the byte over the limit is written, so what a stream that never ends
+     * (a provider that streams without end, a device file) can put into the
+     * app's storage is bounded.
+     */
+    internal fun copyLimited(
+        source: InputStream,
+        sink: OutputStream,
+        digest: MessageDigest,
+        limit: Long = MAX_FILE_BYTES,
+    ) {
+        val buffer = ByteArray(64 * 1024)
+        var total = 0L
+        while (true) {
+            val read = source.read(buffer)
+            if (read < 0) break
+            total += read
+            if (total > limit) throw IOException("more than $limit bytes")
+            digest.update(buffer, 0, read)
+            sink.write(buffer, 0, read)
+        }
+    }
 
     private fun sha256(text: String): ByteArray =
         MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
