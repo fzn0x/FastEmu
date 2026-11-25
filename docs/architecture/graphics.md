@@ -173,6 +173,20 @@ whole rows (`copy_from_slice`) when untransformed.
 Surfaces over 2^25 pixels (128 MiB) fail with `OutOfMemoryError`, as a
 phone would, instead of exhausting the host.
 
+The MIDP wrapper counts an image against the game's heap at 4 bytes a
+pixel, and asks the heap before it makes the pixels. A call that makes an
+image (`createImage(w, h)`, the copies, `createRGBImage`, the Nokia and
+Siemens ones) throws `OutOfMemoryError` when the pixels are more than the
+whole heap, or more than twice the heap together with what the heap
+counts already. A file is checked by the size its header declares,
+`probe_size`, before `Surface::decode` runs. A file of 130 KB that
+declares 16384 by 2048 pixels never reaches the decoder on a small heap.
+A file whose size cannot be read goes to the decoder, which refuses it.
+
+`Image.createImage(InputStream)` reads at most 16 MiB. A stream that gives
+more ends with `IOException`, and so does one whose `read` returns no
+bytes 1000 times in a row.
+
 `getRGB(rgbData, offset, scanlength, x, y, w, h)` stores pixel `(i, j)` at
 `offset + i + j * scanlength`; a negative `scanlength` stores rows
 bottom-up. Its checks run in this order: `|scanlength| < w`, then a
@@ -298,7 +312,10 @@ throws as `IllegalArgumentException` (or `IOException` for
   alpha mask is set but all zero are shown opaque.
 
 Images wider or taller than 16 384 pixels, or over the pixel limit, fail
-with `OutOfMemoryError` before their pixels are allocated.
+with `OutOfMemoryError` before their pixels are allocated. The wrapper
+checks the declared size against the heap first, as the Images section
+says, so a PNG that declares 2^25 pixels does not make `decode_stream`
+reserve its 128 MiB buffer on a heap of a few MiB.
 
 A panic inside a decoder (png, gif or zune-jpeg) is caught in
 `Surface::decode`, and so in `decode_range`, and becomes a decode error
