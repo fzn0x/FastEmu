@@ -185,7 +185,8 @@ order they happened in:
   player that was never realized, and `STOPPED_AT_TIME`.
 
 The `media-events` thread waits for the channel with the VM lock
-released, then calls each listener in order. It never runs on the audio
+released (`Ctx::wait_without_lock`, so `Vm::activity` counts it as
+waiting, not running), then calls each listener in order. It never runs on the audio
 thread and never calls Java with the mixer locked. While the VM is
 paused it parks before delivering. Each note runs in its own local
 frame; an exception a listener throws is logged with its stack trace

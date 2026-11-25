@@ -215,7 +215,8 @@ fn run(ctx: &mut Ctx<'_>, receiver: &NoteReceiver) -> JResult<()> {
         let wait = next.map_or(IDLE, |at| {
             at.saturating_duration_since(Instant::now()).min(IDLE)
         });
-        let first = ctx.without_lock(|| receiver.recv_timeout(wait));
+        // A wait, not work: `Vm::activity` counts the thread as waiting.
+        let first = ctx.wait_without_lock(|| receiver.recv_timeout(wait));
         if ctx.is_stopping() {
             return Err(Throw::Stop);
         }
@@ -406,5 +407,45 @@ pub(crate) fn call_listener(
             report_exception(ctx, callback, exception);
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use fastemu_jvm::{MemorySource, Vm, VmConfig};
+
+    use super::probe;
+    use crate::env::InstanceEnv;
+
+    /// The media thread waits for sound events with the VM lock released,
+    /// and the machine counts it as waiting, so a game with sound that
+    /// waits on a still screen looks idle. It wakes every 200 ms and works
+    /// for a moment, so the test waits for a look that finds it waiting.
+    #[test]
+    fn the_media_thread_counts_as_waiting() {
+        let config = VmConfig {
+            log: Arc::new(|_| {}),
+            ..VmConfig::default()
+        };
+        let classes = crate::classes(&fastemu_core::default_profile());
+        let vm = Vm::new(config, Arc::new(MemorySource::new()), classes);
+        vm.attach("test", |ctx| {
+            ctx.set_extension(InstanceEnv::for_tests("unused"));
+            probe(ctx).expect("the media thread starts");
+        });
+        let begun = Instant::now();
+        loop {
+            let activity = vm.activity();
+            if activity.is_some_and(|a| a.threads == 1 && a.is_idle()) {
+                break;
+            }
+            assert!(begun.elapsed() < Duration::from_secs(20), "{activity:?}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        vm.stop();
+        assert!(vm.wait_finished(Some(Duration::from_secs(20))));
     }
 }
