@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-use fastemu_jvm::{NativeClass, Throw, Value, Vm, VmConfig, VmLimits};
+use fastemu_jvm::{HeapStats, NativeClass, Throw, Value, Vm, VmConfig, VmLimits};
 use support::{ClassBuilder, STATIC, idx};
 
 /// How long a test waits for something that takes milliseconds: far longer
@@ -233,6 +233,32 @@ fn stops(vm: &Vm) -> bool {
     stopped == Some(true)
 }
 
+/// Reads the heap counters of `vm` from the host, again and again, until
+/// `done` says they show what the test waits for. The heap must stay
+/// within three times its limit at every reading. A loop on a loaded
+/// machine takes as long as it takes to get there, so the test waits
+/// instead of guessing how long that is.
+fn watch_heap(vm: &Vm, done: impl Fn(&HeapStats) -> bool) -> HeapStats {
+    let start = Instant::now();
+    loop {
+        let host = vm.clone();
+        let stats = within_long(move || host.heap_stats()).expect("host calls return");
+        assert!(
+            stats.used_bytes < 3 * HEAP,
+            "the heap counts {} bytes of {HEAP}",
+            stats.used_bytes
+        );
+        if done(&stats) {
+            return stats;
+        }
+        assert!(
+            start.elapsed() < LONG,
+            "the heap never showed it: {stats:?}"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
 /// Calls `Loops.count` and `Deep.<method>` of `vm` from the calling
 /// thread, as an attached Java thread.
 fn call_int(vm: &Vm, class: &'static str, method: &str, arg: Option<i32>) -> i32 {
@@ -305,14 +331,9 @@ fn a_handler_loop_that_makes_exceptions_stays_in_its_heap() {
     let entered = Arc::new(AtomicBool::new(false));
     let vm = vm_with(HEAP, VmLimits::default(), vec![probe(Arc::clone(&entered))]);
     start_loop(&vm, &entered, "fresh");
-    let host = vm.clone();
-    let stats = within_long(move || host.heap_stats()).expect("host calls return");
-    assert!(
-        stats.used_bytes < 3 * HEAP,
-        "the heap counts {} bytes of {HEAP}",
-        stats.used_bytes
-    );
-    assert!(stats.collections > 0, "the garbage was collected");
+    // The garbage of the exceptions was collected, and the heap stayed
+    // small while it was.
+    watch_heap(&vm, |stats| stats.collections > 0);
     assert!(stops(&vm), "the loop ends when the VM stops");
 }
 
@@ -321,18 +342,8 @@ fn a_handler_loop_that_keeps_arrays_stops_at_the_heap_limit() {
     let entered = Arc::new(AtomicBool::new(false));
     let vm = vm_with(HEAP, VmLimits::default(), vec![probe(Arc::clone(&entered))]);
     start_loop(&vm, &entered, "hoard");
-    let host = vm.clone();
-    let stats = within_long(move || host.heap_stats()).expect("host calls return");
-    assert!(
-        stats.used_bytes < 3 * HEAP,
-        "the heap counts {} bytes of {HEAP}",
-        stats.used_bytes
-    );
-    assert!(
-        stats.used_bytes > HEAP / 2,
-        "the chain filled the heap: {} bytes",
-        stats.used_bytes
-    );
+    // The chain fills the heap, and the heap does not grow past it.
+    watch_heap(&vm, |stats| stats.used_bytes > HEAP / 2);
     assert!(stops(&vm), "the loop ends when the VM stops");
 }
 
