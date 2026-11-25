@@ -115,9 +115,13 @@ vm.spawn("main", |ctx| {
   `user.home` and the like) is set, so a game reads them as `null`.
 - `log`: receives `System.out` and `System.err` line by line
   (`LogLevel::Out`, `LogLevel::Err`, uncaught exceptions included) and
-  warnings (`LogLevel::Warn`, diagnostics among them). It is called with
+  warnings (`LogLevel::Warn`, diagnostics among them). A line is at most
+  `limits.max_log_line_bytes` (4096) bytes: `System.out` text without a
+  line break comes out as lines of that size, and any other line is cut
+  with a note of how many characters went. It is called with
   the VM lock held: push to a queue and return.
-- `diagnostics`: receives each `Diagnostic` once per VM (see below).
+- `diagnostics`: receives each `Diagnostic` once per VM, the first
+  `limits.max_reported` (256) different ones (see below).
 - `allow_exit`: whether `System.exit` stops the VM (`Vm::exit_code` then
   holds the status) or throws `SecurityException`, as MIDP requires.
 - `limits`: a `VmLimits`, the limits on what a game can make the VM use
@@ -131,7 +135,7 @@ vm.spawn("main", |ctx| {
 | `spawn(name, body)` | Starts a Java thread whose body is a Rust closure. An exception it returns is printed as uncaught. |
 | `run_main(class, args)` | Starts thread `main` running `static void main(String[])`, for tests and tools. |
 | `attach(name, f)` | Runs `f` on the calling OS thread as a temporary Java thread, with the lock held. For setup and short work; the host stack is small, so it allows only 16 nested native-to-Java calls. |
-| `post(task)` | Queues a task for a thread that drains posted tasks (MIDP's event thread). |
+| `post(task)` | Queues a task for a thread that drains posted tasks (MIDP's event thread). At most `limits.max_posted` wait; later ones are dropped. |
 | `pause()`, `resume()` | Parks every thread at its next safepoint, and lets them go. The run time stands still meanwhile. |
 | `stop()` | Every thread unwinds at its next safepoint or wait. `finally` blocks do not run. |
 | `wait_finished(timeout)` | Waits until every Java thread has ended. |
@@ -147,7 +151,9 @@ methods a host thread uses to stop the machine wait for it only so long:
 `stop`, `pause` and `resume` 100 ms, after which they wake the waiting
 threads without the lock; `flush_output` 250 ms, then it skips the
 flush; `spawn` and `post` one second, then `spawn` fails with
-`ErrorKind::TimedOut` and `post` drops its task and logs a warning;
+`ErrorKind::TimedOut` and `post` drops its task and logs a warning (it
+drops it too, with a warning the first time, when `max_posted` tasks wait
+already);
 `wait_finished` counts the wait for the lock into its timeout and
 returns `false` when it runs out. `attach`, `thread_count`,
 `exit_code` and `heap_stats` wait for as long as it takes.
@@ -343,6 +349,31 @@ hundred in all. A call that would pass the limit throws
 bytecode or a native that calls into Java. A frame that declares 65535
 locals and 65535 stack slots needs 131072 slots, the whole limit, so it
 fits only when nothing is below it on the thread's stack.
+
+A game chooses the text of its output, its log lines and the names it asks
+for, and none of that is on the Java heap, so these three bound what the
+host keeps for it:
+
+- **Output lines.** `System.out` and `System.err` keep the text since the
+  last line break in a buffer of at most `max_log_line_bytes`. When it
+  is full the buffer goes to the log as a line and starts again, so a
+  game that prints without a line break in a loop makes 4 KiB lines and
+  never a large buffer. A cut inside a multi byte character garbles that
+  one boundary. `flush_output` and the end of a thread still send what is
+  left.
+- **Log lines.** `cut_log_text` cuts every line the machine writes to
+  the log sink at a character boundary and ends it with ` ... (N more
+  characters)`. The cut line fits the limit, so a host that cuts again
+  (MIDP's `HostLink` does) changes nothing. It is public, for hosts that
+  add lines of their own.
+- **Diagnostics.** The names in a `Diagnostic` are cut to 255 characters.
+  After `max_reported` different ones the machine reports no more, and
+  logs once that it stops; the game still gets its errors. One that is
+  reported already is not new.
+- **Posted tasks.** `Vm::post` and `Ctx::post` drop a task when
+  `max_posted` wait, and log one warning the first time. A native that
+  keeps a queue of its own reads the limit with `Ctx::limits`: MIDP's
+  `callSerially` throws `OutOfMemoryError` at the same number.
 
 ### Payloads and the heap
 
@@ -597,7 +628,9 @@ let thread = ctx.spawn_thread("event", |ctx| loop {
 The host thread posts with `vm.post(move |ctx| { ... Ok(()) })`; inside a
 native, use `ctx.post`. Tasks run in order. A task that throws is printed
 as uncaught and the next one runs. Tasks and thread bodies must not
-capture `ObjRef`s; give them `GlobalRef`s.
+capture `ObjRef`s; give them `GlobalRef`s. A post is dropped when
+`max_posted` tasks wait. A native that posts once for each call a game
+makes must be able to lose some when a game floods it.
 
 `ctx.wait_until(deadline)` releases the lock and returns a `Wake`
 (`Notified`, `TimedOut`, `Interrupted`, `Paused`) or `Err(Throw::Stop)`.
@@ -944,5 +977,9 @@ What natives and games can rely on:
   cases with two threads keep data over the limit and check that a
   thread that allocates nothing, or only sleeps and wakes, never gets
   the error.
+- `tests/output_limits.rs` runs the programs in `tests/output_java/`
+  and checks output without a line break, long log lines, the diagnostic
+  limit and its name cut, and the posted task limit, from a host thread
+  and from a native.
 - `tests/bench.rs` is the benchmark: a plain loop, static calls and
   `StringBuffer.append`.
