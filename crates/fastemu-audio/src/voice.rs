@@ -88,6 +88,17 @@ pub(crate) struct Voice {
     /// The gain heard now; it slides toward the target so changes do not
     /// click.
     pub gain: f32,
+    /// Where the voice stands in the order its game's voices started:
+    /// under a render budget, the voices started last wait first.
+    pub start_order: u64,
+    /// Whether the voice did not play the last slice, held back by the
+    /// render budget, or has not played since it started: the budget must
+    /// let it in. It holds its place meanwhile.
+    pub waiting: bool,
+    /// What one output frame of the voice costs to render, on average, in
+    /// picoseconds; 0 until a render budget first measures it. It stays
+    /// across stops and starts.
+    pub frame_cost_ps: u64,
     /// Output frames rendered since listeners last heard of a loop.
     since_loop_event: u64,
     playhead: Playhead,
@@ -252,6 +263,9 @@ impl Voice {
             one_shot,
             at_end: false,
             gain: 0.0,
+            start_order: 0,
+            waiting: false,
+            frame_cost_ps: 0,
             since_loop_event: LONG_AGO,
             playhead: Playhead::new(0, 0),
         }
@@ -333,13 +347,15 @@ impl Voice {
     }
 
     /// Starts playing: from the start again if the last run reached the
-    /// end. The gain starts from silence.
+    /// end. The gain starts from silence. Under a render budget the voice
+    /// waits until the budget lets it in, as one that never played.
     pub fn start(&mut self) {
         if self.at_end {
             self.reposition(0, wraps_for(self.loop_count));
         }
         self.state = PlayerState::Started;
         self.gain = 0.0;
+        self.waiting = true;
         self.since_loop_event = LONG_AGO;
     }
 

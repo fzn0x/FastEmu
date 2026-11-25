@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::{Mutex, MutexGuard};
 
+use crate::budget::RenderBudget;
 use crate::event::EventQueue;
 use crate::gain::unit_gain;
 use crate::group::{Group, GroupLimits};
@@ -194,6 +195,32 @@ impl Engine {
             .values()
             .filter(|slot| slot.voice.state == PlayerState::Started)
             .count()
+    }
+
+    /// Sets how much of real time the sound of all games may take to
+    /// render, or `None`, the default, for no limit. The apps set
+    /// [`RenderBudget::DEFAULT`] on the engine that feeds the device.
+    /// Tests and offline runners, which render faster or slower than real
+    /// time, leave it off. Every game starts again from a full burst.
+    pub fn set_render_budget(&self, budget: Option<RenderBudget>) {
+        self.lock().set_budget(budget);
+    }
+
+    pub fn render_budget(&self) -> Option<RenderBudget> {
+        self.lock().budget
+    }
+
+    /// How many times a sound waited, silent, for a slice of 128 frames
+    /// because its game's sound was over the render budget, across all
+    /// games.
+    pub fn budget_waits(&self) -> u64 {
+        self.lock().waits
+    }
+
+    /// Reads render times from `clock` instead of the system's clock.
+    #[cfg(test)]
+    pub(crate) fn set_clock(&self, clock: Arc<dyn crate::budget::Clock>) {
+        self.lock().clock = clock;
     }
 }
 
