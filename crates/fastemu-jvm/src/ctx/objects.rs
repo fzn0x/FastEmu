@@ -6,6 +6,7 @@ use super::{Ctx, JResult, Throw};
 use crate::class::{ArrayType, ClassId, ClassKind, LoadError};
 use crate::heap::{Body, Heap, HeapObject, Payload};
 use crate::lang;
+use crate::limits::VmLimits;
 use crate::value::{ObjRef, Value};
 use crate::vm::{Diagnostic, MAX_REPORTED_NAME, VmState};
 
@@ -554,6 +555,13 @@ impl Ctx<'_> {
     /// [`crate::VmLimits::max_log_line_bytes`] is cut first.
     pub fn log(&self, level: LogLevel, text: impl Into<String>) {
         self.shared.log(level, text);
+    }
+
+    /// The limits this machine was configured with
+    /// ([`crate::VmConfig::limits`]), for natives that bound a queue or a
+    /// set of their own by one of them.
+    pub fn limits(&self) -> &VmLimits {
+        &self.shared.config.limits
     }
 
     /// Reports a diagnostic (once per virtual machine) and logs it.
