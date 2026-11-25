@@ -16,6 +16,7 @@ use super::NATIVE_MEM;
 use super::bitmap::{apply_mask, copy_of, from_1bpp};
 use super::extended_image::{self, ExtendedData};
 use crate::lcdui::font::default_font;
+use crate::lcdui::highlevel::trim;
 use crate::lcdui::image::surface_of;
 use crate::lcdui::throw_gfx;
 
@@ -394,6 +395,13 @@ impl Payload for Manager {
             tracer.mark(object);
         }
     }
+
+    /// The room of the list, which the heap counts against the game: the
+    /// objects are Java objects and count as themselves, but a list that
+    /// takes the same one again and again grows without making any.
+    fn heap_bytes(&self) -> usize {
+        self.objects.capacity() * size_of::<ObjRef>()
+    }
 }
 
 fn manager<'a>(ctx: &'a mut Ctx<'_>, this: Value) -> JResult<&'a mut Manager> {
@@ -564,19 +572,23 @@ fn manager_class() -> NativeClass {
         .payload::<Manager>()
         .method("<init>", "()V", |_, _| Ok(Value::Void))
         .method("addObject", &format!("({object})V"), |ctx, a| {
+            let this = ctx.non_null(a[0])?;
             let object = ctx.non_null(a[1])?;
             let objects = &mut manager(ctx, a[0])?.objects;
             // An object is in the list once, as a layer is in a
             // `LayerManager`'s; adding it again changes nothing.
             if !objects.contains(&object) {
                 objects.push(object);
+                ctx.recount(this);
             }
             Ok(Value::Void)
         })
         .method("insertObject", &format!("({object}I)V"), |ctx, a| {
+            let this = ctx.non_null(a[0])?;
             let object = ctx.non_null(a[1])?;
             let at = position(ctx, a[0], a[2].int(), true)?;
             manager(ctx, a[0])?.objects.insert(at, object);
+            ctx.recount(this);
             Ok(Value::Void)
         })
         .method("getObjectPosition", &format!("({object})I"), |ctx, a| {
@@ -590,16 +602,23 @@ fn manager_class() -> NativeClass {
             Ok(manager(ctx, a[0])?.objects[at].into())
         })
         .method("deleteObject", &format!("({object})V"), |ctx, a| {
+            let this = ctx.non_null(a[0])?;
             let object = a[1].obj();
             let objects = &mut manager(ctx, a[0])?.objects;
             if let Some(i) = objects.iter().position(|&o| Some(o) == object) {
                 objects.remove(i);
+                trim(objects);
+                ctx.recount(this);
             }
             Ok(Value::Void)
         })
         .method("deleteObject", "(I)V", |ctx, a| {
+            let this = ctx.non_null(a[0])?;
             let at = position(ctx, a[0], a[1].int(), false)?;
-            manager(ctx, a[0])?.objects.remove(at);
+            let objects = &mut manager(ctx, a[0])?.objects;
+            objects.remove(at);
+            trim(objects);
+            ctx.recount(this);
             Ok(Value::Void)
         })
         .method("paint", &format!("({IMAGE}II)V"), |ctx, a| {
