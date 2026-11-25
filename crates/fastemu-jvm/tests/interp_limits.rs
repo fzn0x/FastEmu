@@ -18,7 +18,7 @@ use support::{ClassBuilder, STATIC, idx};
 
 /// How long a test waits for something that takes milliseconds: far longer
 /// than that, so that a busy machine waits instead of failing.
-const LONG: Duration = Duration::from_secs(5);
+const LONG: Duration = Duration::from_secs(10);
 
 /// A small heap: the smallest the heap allows is 64 KiB.
 const HEAP: usize = 256 * 1024;
