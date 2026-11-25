@@ -131,7 +131,8 @@ MIDlet-10: SiemensLayers, , m.SiemensLayers\r\n\
 MIDlet-11: SiemensSprites, , m.SiemensSprites\r\n\
 MIDlet-12: Returns, , m.Returns\r\n\
 MIDlet-13: DecodeThreads, , m.DecodeThreads\r\n\
-MIDlet-14: StreamThreads, , m.StreamThreads\r\n";
+MIDlet-14: StreamThreads, , m.StreamThreads\r\n\
+MIDlet-15: SoundThreads, , m.SoundThreads\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 mod midlet {
@@ -149,6 +150,7 @@ mod midlet {
     pub const RETURNS: usize = 11;
     pub const DECODE_THREADS: usize = 12;
     pub const STREAM_THREADS: usize = 13;
+    pub const SOUND_THREADS: usize = 14;
 }
 
 /// What the back buffer of a shown canvas takes of the heap on the default
@@ -167,6 +169,7 @@ fn classes() -> Option<&'static Path> {
             tests.join("java").join("stubs"),
             tests.join("screens_java").join("stubs"),
             tests.join("vendor_stubs"),
+            tests.join("media_stubs"),
         ])
         .expect("joining the stub folders");
         let out = scratch("memory-classes");
@@ -763,5 +766,27 @@ fn threads_that_read_image_streams_at_once_share_the_heap() {
         assert!(numbers(line, &prefix)[0] <= (1 << 20) + 4096, "{log}");
     }
     // Eight threads held 16 MiB each beside the heap: 128 MiB.
+    assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
+}
+
+#[test]
+fn threads_that_read_sound_streams_at_once_share_the_heap() {
+    let alone = Alone::new();
+    let Some(jar) = suite("sound-threads", &[]) else {
+        return;
+    };
+    // A heap of 4 MiB: each stream alone could fill it.
+    let mut run = launch(&jar, midlet::SOUND_THREADS, 4 << 20);
+    let lines = thread_lines(&mut run, "sound");
+    let log = run.dump();
+    // Every stream that never ends is an OutOfMemoryError once it gave
+    // the heap's size at most, and the read of 16 KiB that did not fit.
+    for (id, line) in lines.iter().enumerate() {
+        let prefix = format!("sound {id} OutOfMemoryError ");
+        assert!(line.starts_with(&prefix), "{log}");
+        assert!(numbers(line, &prefix)[0] <= (4 << 20) + (16 << 10), "{log}");
+    }
+    // Their bytes count on the heap, so together they hold about twice
+    // the heap at most. Eight threads held 4 MiB each beside it: 32 MiB.
     assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
 }

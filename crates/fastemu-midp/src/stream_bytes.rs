@@ -129,11 +129,15 @@ mod tests {
             }
             assert_eq!(pushed, 256);
             assert_eq!(held.len(ctx)?, 1 << 20);
-            // Taken out, they stay counted.
+            // Taken out, still counted; taken out uncounted, not.
             let bytes = held.take(ctx)?;
             assert_eq!(bytes.len(), 1 << 20);
             let (_, taken) = ctx.heap_usage();
             assert!(taken - before >= 1 << 20);
+            held.push(ctx, &[1; 10], 16 << 20)?;
+            assert_eq!(held.take_uncounted(ctx)?, [1; 10]);
+            let (_, uncounted) = ctx.heap_usage();
+            assert!(uncounted - before < 4096, "{}", uncounted - before);
             Ok(())
         });
         assert!(outcome.is_ok());

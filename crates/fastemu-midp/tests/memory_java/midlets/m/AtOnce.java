@@ -3,6 +3,8 @@ package m;
 import java.io.IOException;
 import java.io.InputStream;
 import javax.microedition.lcdui.Image;
+import javax.microedition.media.Manager;
+import javax.microedition.media.MediaException;
 import javax.microedition.midlet.MIDlet;
 
 /**
@@ -67,6 +69,22 @@ public abstract class AtOnce extends MIDlet {
             OUTCOME[id] = 1;
         } catch (IOException e) {
             OUTCOME[id] = 2;
+        } catch (OutOfMemoryError e) {
+            OUTCOME[id] = 3;
+        }
+        COUNT[id] = endless.bytes;
+    }
+
+    /** Passes Manager.createPlayer a stream that never ends. */
+    static void sound(int id) {
+        Endless endless = new Endless();
+        try {
+            Manager.createPlayer(endless, "audio/x-wav");
+            OUTCOME[id] = 1;
+        } catch (IOException e) {
+            OUTCOME[id] = 2;
+        } catch (MediaException e) {
+            OUTCOME[id] = 4;
         } catch (OutOfMemoryError e) {
             OUTCOME[id] = 3;
         }
