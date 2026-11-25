@@ -1183,6 +1183,15 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                     let Some(e) = s!()[sp - 1].obj() else {
                         break Err(Fault::NullPointer);
                     };
+                    // Handlers and the report of an uncaught exception read
+                    // the object as a Throwable, as a verifier would ensure.
+                    let class = ctx.state.heap.class_of(e);
+                    if !ctx.state.classes.is_subclass(class, ctx.state.wk.throwable) {
+                        break Err(Fault::Error(
+                            "java/lang/VerifyError",
+                            "athrow of an object that is not a Throwable".to_owned(),
+                        ));
+                    }
                     break Err(Fault::Throw(Throw::Exception(e)));
                 }
                 Insn::CheckCast(i) => {
