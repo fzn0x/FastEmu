@@ -537,6 +537,26 @@ mod tests {
     }
 
     #[test]
+    fn elements_count_their_room_and_give_it_back() {
+        with_texts(1, |t| {
+            let mut m = model(EXCLUSIVE, &[]);
+            assert_eq!(m.heap_bytes(), 0);
+            for _ in 0..1000 {
+                let at = m.len();
+                m.insert(at, t[0], None);
+            }
+            assert!(m.heap_bytes() >= 1000 * size_of::<Element>());
+            for _ in 0..995 {
+                m.delete(0);
+            }
+            assert_eq!(m.len(), 5);
+            assert!(m.heap_bytes() <= 40 * size_of::<Element>());
+            m.clear();
+            assert_eq!(m.heap_bytes(), 0);
+        });
+    }
+
+    #[test]
     fn exclusive_choices_keep_one_selection() {
         with_texts(3, |t| {
             let mut m = model(EXCLUSIVE, t);
