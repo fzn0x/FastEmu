@@ -73,9 +73,9 @@ impl CountedBytes {
     }
 
     /// Takes the bytes out and leaves the holder empty. The heap goes on
-    /// counting them, at the room they had, until it collects the holder
-    /// after the native returns: they are still held, by whatever the
-    /// native does with them next, while other threads run.
+    /// counting them, at the room they had, until its next collection
+    /// measures the holder again. That can come before the native returns:
+    /// another thread may collect while this one runs without the VM lock.
     pub(crate) fn take(self, ctx: &mut Ctx<'_>) -> JResult<Vec<u8>> {
         Ok(std::mem::take(
             &mut ctx.payload_mut::<StreamBytes>(self.0)?.0,

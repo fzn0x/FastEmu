@@ -350,7 +350,8 @@ fn read_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<CountedBytes> {
 fn create_from_stream(ctx: &mut Ctx<'_>, stream: Value) -> JResult<Value> {
     let stream = ctx.non_null(stream)?;
     // Read before the turn, as reading runs the game's code. The bytes stay
-    // counted while the thread waits for its turn, and while they decode.
+    // counted while the thread waits for its turn; in the turn they are its
+    // file, which the next collection no longer counts.
     let read = read_stream(ctx, stream)?;
     let made = decode_in_turn(ctx, |ctx| {
         let bytes = read.take(ctx)?;
