@@ -264,10 +264,9 @@ section says is in scope.
   table entry for it, outside the heap: about the heap's size again for
   long strings, and more for very short ones.
 - A call into the runtime has each large request checked first, and is
-  judged as a whole after it returns. It can take the heap past its
-  limit for a moment, and its change stays: a
-  `List.append` past the heap adds the element, then throws
-  `OutOfMemoryError`.
+  judged as a whole after it returns. It can take the heap past its limit
+  for a moment, and its change stays: a `List.append` past the heap adds
+  the element, then throws `OutOfMemoryError`.
 - The back buffer of a shown screen is made on the event thread, so it
   is counted but never refused. A canvas keeps its buffer for as long as
   it lives, while a menu or a form that is hidden gives its buffer back.
