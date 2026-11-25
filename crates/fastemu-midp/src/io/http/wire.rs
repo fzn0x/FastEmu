@@ -595,6 +595,29 @@ mod tests {
     }
 
     #[test]
+    fn trailers_have_a_size_limit() {
+        let body = b"1\r\nA\r\n0\r\n";
+        let with = |extra: &[u8]| [body.as_slice(), extra].concat();
+        // Lines that add up to a little less than the limit, then the end.
+        let mut within = b"X-Trailer: yes\r\n".repeat(1000);
+        within.extend_from_slice(b"\r\n");
+        for step in [1, 7, 4096] {
+            let decoded = decode_all(Framing::Chunked, &with(&within), step, 64);
+            assert_eq!(decoded.unwrap(), b"A", "step {step}");
+        }
+        // Lines that never end, in lines or in one line.
+        let endless = b"X-Trailer: yes\r\n".repeat(2000);
+        assert!(decode_all(Framing::Chunked, &with(&endless), 100, 64).is_err());
+        assert!(decode_all(Framing::Chunked, &with(&endless), 1, 64).is_err());
+        let one_line = vec![b'X'; MAX_TRAILER + 10];
+        assert!(decode_all(Framing::Chunked, &with(&one_line), 500, 64).is_err());
+        // A line that ends just past the limit is too long as well.
+        let mut past = b"X-Trailer: yes\r\n".repeat(1024);
+        past.extend_from_slice(b"X\r\n\r\n");
+        assert!(decode_all(Framing::Chunked, &with(&past), 4096, 64).is_err());
+    }
+
+    #[test]
     fn ready_counts_only_body_bytes() {
         let decoder = Decoder::new(Framing::Length(3));
         assert_eq!(decoder.ready(b"abcdef"), 3);

@@ -3,9 +3,12 @@
 
 mod io_support;
 
-use std::io::Write;
-use std::net::TcpStream;
-use std::time::Duration;
+use std::io::{ErrorKind, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use fastemu_core::NetworkPolicy;
 use io_support::{HttpServer, Request};
@@ -223,4 +226,240 @@ swapped 9000
 name java.lang.IllegalArgumentException: the connection name is longer than 8192 bytes
 done";
     io_support::assert_output(&output, expected);
+}
+
+/// What a hostile server has done so far, shared with the test.
+#[derive(Default)]
+struct Script {
+    /// How many bytes it has sent.
+    sent: AtomicUsize,
+    /// Set by the test when it is over, to end the server's threads.
+    done: AtomicBool,
+}
+
+impl Script {
+    /// Sends `bytes`, waiting for room in the socket; `false` when the
+    /// client is gone or the test is over.
+    fn push(&self, stream: &mut TcpStream, mut bytes: &[u8]) -> bool {
+        while !bytes.is_empty() {
+            if self.done.load(Ordering::Relaxed) {
+                return false;
+            }
+            match stream.write(bytes) {
+                Ok(0) => return false,
+                Ok(n) => {
+                    self.sent.fetch_add(n, Ordering::Relaxed);
+                    bytes = &bytes[n..];
+                }
+                Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+                Err(_) => return false,
+            }
+        }
+        true
+    }
+
+    /// Sends one byte of `filler` every 10 ms for as long as it can.
+    fn drip(&self, stream: &mut TcpStream, filler: u8) {
+        while self.push(stream, &[filler]) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+const CHUNKED_HEAD: &[u8] = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nA\r\n0\r\n";
+
+/// Interim responses as fast as the client takes them.
+fn flood_interim(stream: &mut TcpStream, script: &Script) {
+    let block = b"HTTP/1.1 100 Continue\r\n\r\n".repeat(600);
+    while script.push(stream, &block) {}
+}
+
+/// A chunked body, then trailer lines as fast as the client takes them.
+fn flood_trailers(stream: &mut TcpStream, script: &Script) {
+    if script.push(stream, CHUNKED_HEAD) {
+        let block = b"X-Trailer: yes\r\n".repeat(1000);
+        while script.push(stream, &block) {}
+    }
+}
+
+/// A head that never ends: one byte every 10 ms.
+fn drip_head(stream: &mut TcpStream, script: &Script) {
+    if script.push(stream, b"HTTP/1.1 200 OK\r\nX-Drip: ") {
+        script.drip(stream, b'b');
+    }
+}
+
+/// A body that is far from complete: one byte every 10 ms.
+fn drip_body(stream: &mut TcpStream, script: &Script) {
+    if script.push(
+        stream,
+        b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\n",
+    ) {
+        script.drip(stream, b'x');
+    }
+}
+
+/// A chunked body whose trailer never ends: one byte every 10 ms.
+fn drip_trailer(stream: &mut TcpStream, script: &Script) {
+    if script.push(stream, CHUNKED_HEAD) {
+        script.drip(stream, b'X');
+    }
+}
+
+/// A server on 127.0.0.1 that reads a request and runs `script` on the
+/// connection, until the test drops it.
+struct Hostile {
+    port: u16,
+    script: Arc<Script>,
+}
+
+impl Hostile {
+    fn start(script: fn(&mut TcpStream, &Script)) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let shared = Arc::<Script>::default();
+        let state = Arc::clone(&shared);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let state = Arc::clone(&state);
+                std::thread::spawn(move || {
+                    let mut head = Vec::new();
+                    let mut byte = [0];
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    while !head.ends_with(b"\r\n\r\n") {
+                        match stream.read(&mut byte) {
+                            Ok(1) => head.push(byte[0]),
+                            _ => return,
+                        }
+                    }
+                    // A client that stops reading must not hold the thread.
+                    stream
+                        .set_write_timeout(Some(Duration::from_millis(100)))
+                        .unwrap();
+                    script(&mut stream, &state);
+                });
+            }
+        });
+        Self {
+            port,
+            script: shared,
+        }
+    }
+
+    /// Waits until the server has sent `bytes`.
+    fn wait_for(&self, bytes: usize) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while self.script.sent.load(Ordering::Relaxed) < bytes {
+            assert!(Instant::now() < deadline, "the server sent no data");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+impl Drop for Hostile {
+    fn drop(&mut self) {
+        self.script.done.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Starts `HttpHostile` against `server` in `mode`.
+fn start_hostile(classes: &Path, server: &Hostile, mode: &str) -> io_support::Program {
+    let port = server.port.to_string();
+    io_support::Program::start(
+        classes,
+        "HttpHostile",
+        &[&port, mode],
+        NetworkPolicy::Allow,
+        |_| {},
+    )
+}
+
+/// Runs `HttpHostile` against a server that sends for ever, until it
+/// finishes by itself, and returns what it printed.
+fn run_hostile(classes: &Path, server: &Hostile, mode: &str) -> io_support::Output {
+    let program = start_hostile(classes, server, mode);
+    let finished = program.vm.wait_finished(Some(Duration::from_secs(20)));
+    // Let a program that is stuck go, so that nothing outlives the test.
+    server.script.done.store(true, Ordering::Relaxed);
+    program.vm.stop();
+    let output = program.output();
+    assert!(
+        finished,
+        "the program is stuck in a read; it printed:\n{}\n{}",
+        output.out, output.err
+    );
+    output
+}
+
+#[test]
+fn endless_interim_responses_end_with_an_error() {
+    let Some(classes) = io_support::classes() else {
+        return;
+    };
+    let server = Hostile::start(flood_interim);
+    let output = run_hostile(classes, &server, "head");
+    io_support::assert_output(
+        &output,
+        "asking\nfailed java.io.IOException: the server sent too many interim responses\ndone",
+    );
+}
+
+#[test]
+fn endless_trailers_end_with_an_error() {
+    let Some(classes) = io_support::classes() else {
+        return;
+    };
+    let server = Hostile::start(flood_trailers);
+    let output = run_hostile(classes, &server, "body");
+    io_support::assert_output(
+        &output,
+        "asking\ncode 200\nfailed java.io.IOException: the trailer of the response is too long\ndone",
+    );
+}
+
+/// Starts `HttpHostile` against a server that trickles, waits until the
+/// server has sent a few bytes of it, stops the VM and checks that it
+/// ends.
+fn stop_during(classes: &Path, server: &Hostile, mode: &str) {
+    let program = start_hostile(classes, server, mode);
+    server.wait_for(100);
+    program.vm.stop();
+    let ended = program.vm.wait_finished(Some(Duration::from_secs(10)));
+    server.script.done.store(true, Ordering::Relaxed);
+    let output = program.output();
+    assert!(
+        ended,
+        "the VM did not end after stop(); it printed:\n{}\n{}",
+        output.out, output.err
+    );
+}
+
+#[test]
+fn a_head_that_trickles_in_ends_when_the_game_stops() {
+    let Some(classes) = io_support::classes() else {
+        return;
+    };
+    let server = Hostile::start(drip_head);
+    stop_during(classes, &server, "head");
+}
+
+#[test]
+fn a_trailer_that_trickles_in_ends_when_the_game_stops() {
+    let Some(classes) = io_support::classes() else {
+        return;
+    };
+    let server = Hostile::start(drip_trailer);
+    stop_during(classes, &server, "body");
+}
+
+#[test]
+fn a_body_that_trickles_in_ends_when_the_game_stops() {
+    let Some(classes) = io_support::classes() else {
+        return;
+    };
+    let server = Hostile::start(drip_body);
+    stop_during(classes, &server, "bulk");
 }
