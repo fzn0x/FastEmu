@@ -9,6 +9,8 @@
 
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
@@ -33,6 +35,72 @@ pub(crate) const IO_TIMEOUT: Duration = Duration::from_secs(30);
 /// The message of the `IOException` every network open throws when the
 /// instance's network policy is `Deny`.
 pub(crate) const NETWORK_OFF: &str = "network access is off for this game";
+
+/// How many bytes of request bodies a game's HTTP connections may hold
+/// at once, before the requests go out.
+pub(crate) const MAX_PENDING_BYTES: usize = 8 << 20;
+
+/// What a game has open, shared by its [`Pending`]s.
+#[derive(Default)]
+struct Counts {
+    pending: AtomicUsize,
+}
+
+/// The counts of the instance, kept in the VM as an extension. They hold
+/// no Java references.
+#[derive(Default)]
+struct ConnectionSlots(Arc<Counts>);
+
+/// The counts of the instance `ctx` runs in, made on first use.
+fn counts(ctx: &mut Ctx<'_>) -> Arc<Counts> {
+    if let Some(slots) = ctx.extension::<ConnectionSlots>() {
+        return Arc::clone(&slots.0);
+    }
+    let slots = ConnectionSlots::default();
+    let counts = Arc::clone(&slots.0);
+    ctx.set_extension(slots);
+    counts
+}
+
+/// Request bytes a connection holds until its request goes out, counted
+/// for the whole game. They are given back when it is dropped.
+pub(crate) struct Pending {
+    counts: Arc<Counts>,
+    bytes: usize,
+}
+
+/// A new, empty count of pending request bytes.
+pub(crate) fn pending(ctx: &mut Ctx<'_>) -> Pending {
+    Pending {
+        counts: counts(ctx),
+        bytes: 0,
+    }
+}
+
+impl Pending {
+    /// Counts `more` bytes, unless the game would hold more than
+    /// [`MAX_PENDING_BYTES`]; then nothing is counted.
+    pub(crate) fn add(&mut self, more: usize) -> bool {
+        let counted = self
+            .counts
+            .pending
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |held| {
+                held.checked_add(more)
+                    .filter(|total| *total <= MAX_PENDING_BYTES)
+            })
+            .is_ok();
+        if counted {
+            self.bytes += more;
+        }
+        counted
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        self.counts.pending.fetch_sub(self.bytes, Ordering::AcqRel);
+    }
+}
 
 /// Throws `IOException` unless this instance may use the network. A VM
 /// without an [`env::InstanceEnv`] has no network either.

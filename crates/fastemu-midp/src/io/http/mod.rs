@@ -63,6 +63,9 @@ struct State {
     /// The request body the output stream collected, until the request
     /// goes out.
     body: Vec<u8>,
+    /// The body's share of what the game's connections may hold; given
+    /// back when the request goes out.
+    pending: Option<net::Pending>,
     phase: Phase,
     /// `close` was called.
     closed: bool,
@@ -220,6 +223,7 @@ pub(crate) fn open(
         Err(message) => return ctx.throw("java/lang/IllegalArgumentException", &message),
     };
     net::check_network(ctx)?;
+    let pending = net::pending(ctx);
     let class = ctx.find_class(if scheme == "https" {
         HTTPS_IMPL
     } else {
@@ -233,6 +237,7 @@ pub(crate) fn open(
         method: "GET".to_owned(),
         headers: Vec::new(),
         body: Vec::new(),
+        pending: Some(pending),
         phase: Phase::Setup,
         closed: false,
         input_opened: false,
@@ -283,7 +288,7 @@ fn remember(ctx: &mut Ctx<'_>, shared: &Shared, thrown: Throw) -> Throw {
 /// stream is open.
 fn ensure_sent(ctx: &mut Ctx<'_>, shared: &Shared, allow_closed: bool) -> JResult<()> {
     let agent = user_agent(ctx);
-    let (url, request) = {
+    let (url, request, _pending) = {
         let mut s = lock(shared);
         if s.closed && !allow_closed {
             drop(s);
@@ -299,7 +304,8 @@ fn ensure_sent(ctx: &mut Ctx<'_>, shared: &Shared, allow_closed: bool) -> JResul
         s.phase = Phase::Sent;
         let body = std::mem::take(&mut s.body);
         let request = wire::encode_request(&s.method, &s.url, &s.headers, body, &agent);
-        (s.url.clone(), request)
+        // The body counts until the request is written.
+        (s.url.clone(), request, s.pending.take())
     };
     let link = match send(ctx, &url, &request) {
         Ok(link) => Arc::new(link),
@@ -474,6 +480,10 @@ impl Output for BodyOutput {
         if s.body.len() + bytes.len() > MAX_REQUEST_BODY {
             drop(s);
             return throw_io(ctx, "the request body is larger than 4 MiB");
+        }
+        if !s.pending.as_mut().is_some_and(|p| p.add(bytes.len())) {
+            drop(s);
+            return throw_io(ctx, "too much request data is waiting to be sent");
         }
         s.body.extend_from_slice(bytes);
         Ok(())
