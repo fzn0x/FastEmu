@@ -20,9 +20,9 @@ use crate::voice::PlayerState;
 const RATES: std::ops::RangeInclusive<u32> = 8_000..=384_000;
 
 /// Frames mixed under one hold of the mixer lock. A buffer of a device is
-/// rendered in slices of this size, with the lock free between them, so
-/// another game's call waits for one slice at most, however big the buffer
-/// and however many players the audio thread mixes.
+/// rendered in slices of this size, and the lock is handed to a waiting
+/// call between them, so another game's call waits for one slice at most,
+/// however big the buffer and however many players the audio thread mixes.
 const SLICE_FRAMES: usize = 128;
 
 /// How the engine starts.
@@ -151,7 +151,12 @@ impl Engine {
     pub fn render(&self, out: &mut [f32]) {
         for slice in out.chunks_mut(SLICE_FRAMES * 2) {
             let mixed = catch_unwind(AssertUnwindSafe(|| {
-                self.lock().render(slice, &self.shared.events);
+                let mut mixer = self.lock();
+                mixer.render(slice, &self.shared.events);
+                // A plain unlock lets this thread take the lock straight
+                // back for the next slice, before a waiting call wakes; a
+                // fair one hands it to that call.
+                MutexGuard::unlock_fair(mixer);
             }));
             if mixed.is_err() {
                 slice.fill(0.0);
