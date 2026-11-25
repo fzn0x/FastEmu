@@ -280,7 +280,8 @@ fn numbers(line: &str, prefix: &str) -> Vec<i64> {
 }
 
 #[test]
-fn an_image_the_heap_cannot_hold_is_an_out_of_memory_error_before_its_pixels() {
+fn images_are_refused_before_their_pixels_and_kept_ones_end_at_the_heap()
+ {
     let alone = Alone::new();
     let Some(jar) = suite("big-image", &[]) else {
         return;
@@ -303,28 +304,15 @@ fn an_image_the_heap_cannot_hold_is_an_out_of_memory_error_before_its_pixels() {
     let changed = run.wait_log("free changed ");
     let used = numbers(&changed, "free changed ")[0];
     assert!((0..8192).contains(&used), "{changed}; {log}");
+    // Images kept in a list end in the error at the heap: 400 by 400 pixels
+    // are 640000 bytes of 1048576.
+    let kept = run.wait_log("kept ");
+    assert!(kept.ends_with("then OutOfMemoryError"), "{log}");
+    let made = numbers(&kept, "kept ")[0];
+    assert!((1..20).contains(&made), "kept {made} images; {log}");
     // And the host never held the 64 MiB of the image that was refused, nor
     // the 128 MiB that a size of 2 billion by 2 billion would saturate to.
     assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
-}
-
-#[test]
-fn images_kept_in_a_list_end_in_out_of_memory_at_the_heap() {
-    let _alone = Alone::new();
-    let Some(jar) = suite("kept-images", &[]) else {
-        return;
-    };
-    let mut run = launch(&jar, midlet::BIG_IMAGE, HEAP);
-    let kept = run.wait_log("kept ");
-    // 400 by 400 pixels is 640000 bytes of a heap of 1048576.
-    assert!(kept.ends_with("then OutOfMemoryError"), "{}", run.dump());
-    let made = numbers(&kept, "kept ")[0];
-    assert!(
-        (1..20).contains(&made),
-        "kept {made} images; {}",
-        run.dump()
-    );
-    run.wait_log("done ");
 }
 
 #[test]
@@ -465,18 +453,26 @@ fn a_shown_canvas_counts_its_back_buffer_and_canvases_kept_end_in_out_of_memory(
 
 #[test]
 fn a_game_canvas_buffer_the_heap_cannot_hold_is_refused_before_it_is_made() {
-    let _alone = Alone::new();
+    let alone = Alone::new();
     let Some(jar) = suite("game-buffer", &[]) else {
         return;
     };
-    // The buffer is 307200 bytes.
-    let mut run = launch(&jar, midlet::GAME_BUFFER, 250 * 1024);
+    // A phone with a screen of 3072 by 2048 pixels and a heap of 1 MiB:
+    // the buffer of a GameCanvas is 24 MiB.
+    let profile = fastemu_core::DeviceProfile {
+        screen_width: 3072,
+        screen_height: 2048,
+        heap_bytes: HEAP,
+        ..default_profile()
+    };
+    let mut run = Running::launch_on(&jar, midlet::GAME_BUFFER, profile);
     run.wait_log("done");
     let log = run.dump();
     assert!(run.has("game canvas OutOfMemoryError"), "{log}");
     let changed = run.wait_log("game canvas free changed ");
     let used = numbers(&changed, "game canvas free changed ")[0];
     assert!((0..8192).contains(&used), "{log}");
+    assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
 }
 
 #[test]
