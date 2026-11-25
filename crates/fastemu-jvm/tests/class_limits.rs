@@ -1,6 +1,8 @@
 //! Class names, array dimensions and class hierarchies of any size end in
 //! a Java error, never in a host stack overflow (which closes the whole
-//! app) and never in a search that runs for hours.
+//! app) and never in a search that runs for hours. The class data of a
+//! machine is limited too: past `VmLimits::max_class_bytes` a class does
+//! not load and the game gets `OutOfMemoryError`.
 //!
 //! Every case runs on a thread of the virtual machine, which has its own
 //! 16 MiB stack, and under a deadline: a regression fails the test where it
@@ -11,7 +13,9 @@ mod support;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use fastemu_jvm::{Ctx, JResult, MemorySource, NativeClass, Throw, Value, Vm, VmConfig};
+use fastemu_jvm::{
+    ArrayType, Ctx, JResult, MemorySource, NativeClass, Throw, Value, Vm, VmConfig, VmLimits,
+};
 use support::{ClassBuilder, PUBLIC, STATIC, idx};
 
 /// How long a case may take. They take milliseconds; a loaded machine gets
@@ -30,13 +34,23 @@ fn run<R: Send + 'static>(
     natives: fn() -> Vec<NativeClass>,
     body: impl FnOnce(&mut Ctx<'_>) -> R + Send + 'static,
 ) -> R {
+    run_with(VmConfig::default(), classes, natives, body)
+}
+
+/// [`run`] on a machine of `config`.
+fn run_with<R: Send + 'static>(
+    config: VmConfig,
+    classes: Classes,
+    natives: fn() -> Vec<NativeClass>,
+    body: impl FnOnce(&mut Ctx<'_>) -> R + Send + 'static,
+) -> R {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut source = MemorySource::new();
         for (name, bytes) in classes {
             source.add_class(name, bytes);
         }
-        let vm = Vm::new(VmConfig::default(), std::sync::Arc::new(source), natives());
+        let vm = Vm::new(config, std::sync::Arc::new(source), natives());
         let (result_tx, result_rx) = mpsc::channel();
         vm.spawn("probe", move |ctx| {
             let _ = result_tx.send(body(ctx));
@@ -504,4 +518,220 @@ fn an_interface_chain_is_refused_past_the_limit_in_either_order() {
             .collect::<Vec<_>>()
     });
     assert_eq!(failed, (255..300).collect::<Vec<_>>());
+}
+
+// The class memory budget.
+
+/// A machine that holds `max_class_bytes` of class data.
+fn limited(max_class_bytes: usize) -> VmConfig {
+    VmConfig {
+        limits: VmLimits {
+            max_class_bytes,
+            ..VmLimits::default()
+        },
+        ..VmConfig::default()
+    }
+}
+
+/// `Loader`, whose method loads a class and catches the error a game gets
+/// when it cannot:
+///
+/// ```java
+/// static int tryLoad(String name) {
+///     try { Class.forName(name); return 1; }
+///     catch (OutOfMemoryError e) { return 0; }
+/// }
+/// ```
+fn loader() -> Vec<u8> {
+    let mut c = ClassBuilder::new("Loader", "java/lang/Object", 49, 0);
+    let for_name = c.method_ref(
+        "java/lang/Class",
+        "forName",
+        "(Ljava/lang/String;)Ljava/lang/Class;",
+    );
+    let [fh, fl] = idx(for_name);
+    let oom = c.class("java/lang/OutOfMemoryError");
+    #[rustfmt::skip]
+    let code = [
+        0x2a,               // 0: aload_0
+        0xb8, fh, fl,       // 1: invokestatic Class.forName
+        0x57,               // 4: pop
+        0x04,               // 5: iconst_1
+        0xac,               // 6: ireturn
+        0x57,               // 7: pop (the error)
+        0x03,               // 8: iconst_0
+        0xac,               // 9: ireturn
+    ];
+    c.method(
+        PUBLIC | STATIC,
+        "tryLoad",
+        "(Ljava/lang/String;)I",
+        1,
+        1,
+        &code,
+        &[(0, 7, 7, oom)],
+    );
+    c.build()
+}
+
+/// Whether the game's own code loaded the class `name`: 1 when it did, 0
+/// when it caught `OutOfMemoryError`.
+fn try_load(ctx: &mut Ctx<'_>, name: &str) -> i32 {
+    let name = ctx.new_string(name).expect("a string");
+    let called = ctx.call_static("Loader", "tryLoad", "(Ljava/lang/String;)I", &[name.into()]);
+    match called {
+        Ok(v) => v.int(),
+        Err(Throw::Exception(e)) => panic!("{}", ctx.describe_exception(e)),
+        Err(Throw::Stop) => panic!("stopped"),
+    }
+}
+
+/// A class `name` that holds `entries` constants and one method. The
+/// audit's `bigpool`: a pool of 65535 entries is 327 KB of file, 600 bytes
+/// in a JAR, and 6.3 MiB in memory.
+fn big_pool(name: &str, entries: usize) -> Vec<u8> {
+    let mut c = ClassBuilder::new(name, "java/lang/Object", 49, 0);
+    for i in 0..entries {
+        c.integer(i as i32);
+    }
+    c.method(PUBLIC | STATIC, "run", "()V", 0, 0, &[0xb1], &[]);
+    c.build()
+}
+
+/// `Loader` and the classes `<prefix>0` to `<prefix><count - 1>`, each a
+/// pool of `entries` constants.
+fn pools(prefix: &str, count: usize, entries: usize) -> Classes {
+    let mut classes = vec![("Loader".to_owned(), loader())];
+    for i in 0..count {
+        let name = format!("{prefix}{i}");
+        classes.push((name.clone(), big_pool(&name, entries)));
+    }
+    classes
+}
+
+#[test]
+fn classes_with_big_constant_pools_stop_loading_at_the_limit() {
+    // Each class takes about 420 KB by the model, so two fit in 1 MiB.
+    let loaded = run_with(limited(1 << 20), pools("P", 8, 4000), no_natives, |ctx| {
+        (0..8)
+            .map(|i| try_load(ctx, &format!("P{i}")))
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(loaded, [1, 1, 0, 0, 0, 0, 0, 0]);
+}
+
+#[test]
+fn a_class_that_does_not_fit_leaves_room_for_a_smaller_one() {
+    let mut classes = pools("Small", 1, 100);
+    classes.push(("Big".to_owned(), big_pool("Big", 12000)));
+    let loaded = run_with(limited(1 << 20), classes, no_natives, |ctx| {
+        // The refused class is not half loaded: asking again is refused
+        // again, and nothing of it is left to take the room.
+        [
+            try_load(ctx, "Big"),
+            try_load(ctx, "Big"),
+            try_load(ctx, "Small0"),
+        ]
+    });
+    assert_eq!(loaded, [0, 0, 1]);
+}
+
+#[test]
+fn a_game_sized_set_of_classes_loads_under_the_default_limit() {
+    let loaded = run(pools("Game", 200, 300), no_natives, |ctx| {
+        (0..200)
+            .map(|i| try_load(ctx, &format!("Game{i}")))
+            .sum::<i32>()
+    });
+    assert_eq!(loaded, 200);
+}
+
+/// `Loader`, `Base` with `methods` methods and `subclasses` classes that
+/// extend it and declare nothing: the audit's `wide`. Each subclass is a
+/// few dozen bytes of file and has the whole method table of `Base` of its
+/// own.
+fn wide(methods: usize, subclasses: usize) -> Classes {
+    let mut classes = vec![("Loader".to_owned(), loader())];
+    let mut base = ClassBuilder::new("Base", "java/lang/Object", 49, 0);
+    for i in 0..methods {
+        base.method(PUBLIC, &format!("m{i}"), "()V", 0, 1, &[0xb1], &[]);
+    }
+    classes.push(("Base".to_owned(), base.build()));
+    for i in 0..subclasses {
+        classes.push((format!("S{i}"), bare(&format!("S{i}"), "Base")));
+    }
+    classes
+}
+
+#[test]
+fn subclasses_of_a_wide_class_stop_loading_at_the_limit() {
+    let loaded = run_with(limited(4 << 20), wide(3000, 200), no_natives, |ctx| {
+        (0..200)
+            .map(|i| try_load(ctx, &format!("S{i}")))
+            .collect::<Vec<_>>()
+    });
+    // `Base` takes about 1.9 MiB, and each subclass about 100 KB of method
+    // table: about 20 of them fit.
+    let fit = loaded.iter().take_while(|&&l| l == 1).count();
+    assert!((10..=40).contains(&fit), "{fit} subclasses loaded");
+    assert!(loaded[fit..].iter().all(|&l| l == 0), "{loaded:?}");
+}
+
+/// The interface `name`, which extends `parent` when there is one.
+fn interface(name: &str, parent: Option<&str>) -> Vec<u8> {
+    let mut c = ClassBuilder::new(name, "java/lang/Object", 49, 0);
+    c.access(0x0601);
+    let parent = parent.map(|p| c.class(p).to_be_bytes());
+    let mut bytes = c.build();
+    if let Some([hi, lo]) = parent {
+        // With no fields, methods or attributes, the class file ends in
+        // four counts of 2 bytes: the interfaces, then the three others.
+        let at = bytes.len() - 8;
+        bytes.splice(at..at + 2, [0, 1, hi, lo]);
+    }
+    bytes
+}
+
+#[test]
+fn a_chain_of_interfaces_loaded_from_its_root_stops_at_the_limit() {
+    // The list of interfaces of each one is longer than the one before's,
+    // so a chain takes memory by the square of its length.
+    let mut classes = vec![("Loader".to_owned(), loader())];
+    for i in 0..250 {
+        let parent = (i > 0).then(|| format!("I{}", i - 1));
+        let name = format!("I{i}");
+        classes.push((name.clone(), interface(&name, parent.as_deref())));
+    }
+    let loaded = run_with(limited(256 << 10), classes, no_natives, |ctx| {
+        (0..250)
+            .map(|i| try_load(ctx, &format!("I{i}")))
+            .collect::<Vec<_>>()
+    });
+    let fit = loaded.iter().take_while(|&&l| l == 1).count();
+    assert!((50..250).contains(&fit), "{fit} interfaces loaded");
+    assert!(loaded[fit..].iter().all(|&l| l == 0), "{loaded:?}");
+}
+
+#[test]
+fn arrays_of_every_class_stop_at_the_limit_and_primitive_arrays_do_not() {
+    // A game can ask for an array of 255 dimensions of every class there
+    // is, which makes 255 classes, each with a name and a method table.
+    let mut classes = vec![("Loader".to_owned(), loader())];
+    for i in 0..40 {
+        classes.push((format!("E{i}"), bare(&format!("E{i}"), "java/lang/Object")));
+    }
+    let (made, primitives) = run_with(limited(1 << 20), classes, no_natives, |ctx| {
+        let made = (0..40)
+            .filter(|i| {
+                let name = format!("{}LE{i};", "[".repeat(255));
+                ctx.find_class(&name).is_ok()
+            })
+            .count();
+        // Whatever is left of the limit, `new double[4]` needs its class.
+        let primitives = [ArrayType::Double, ArrayType::Long, ArrayType::Short]
+            .map(|t| ctx.new_array(t, 4).is_ok());
+        (made, primitives)
+    });
+    assert!((1..10).contains(&made), "{made} of 40 arrays were made");
+    assert_eq!(primitives, [true; 3]);
 }
