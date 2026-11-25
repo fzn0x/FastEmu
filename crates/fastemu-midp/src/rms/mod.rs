@@ -10,6 +10,7 @@
 //! read, back up and move saves outside a running game.
 
 mod api;
+mod budget;
 pub mod disk;
 mod enumeration;
 pub mod format;
@@ -19,7 +20,8 @@ mod store;
 
 use fastemu_jvm::NativeClass;
 
-pub use state::{DEFAULT_QUOTA, set_quota};
+pub use budget::{WRITE_BURST, WRITE_RATE};
+pub use state::{DEFAULT_QUOTA, set_quota, set_write_limit};
 
 const RECORD_STORE: &str = "javax/microedition/rms/RecordStore";
 const RECORD_ENUMERATION: &str = "javax/microedition/rms/RecordEnumeration";

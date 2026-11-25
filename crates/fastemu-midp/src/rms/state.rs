@@ -18,6 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use fastemu_core::LogLevel;
 use fastemu_jvm::{Ctx, GlobalRef, JResult, Throw};
 
+use super::budget::{Clock, SLICE, SystemClock, WRITE_BURST, WRITE_RATE, WriteBudget};
 use super::disk;
 use super::format::StoreData;
 use super::name::StoreName;
@@ -78,6 +79,12 @@ pub(crate) struct Rms {
     own_suite: String,
     quota: u64,
     files: Arc<Mutex<()>>,
+    /// How much the game may still write to the disk.
+    budget: WriteBudget,
+    /// The time the budget is read against.
+    clock: Arc<dyn Clock>,
+    /// Whether the log has said that the game was slowed.
+    slowed: bool,
     /// The stores of each owner whose folder has been listed.
     suites: HashMap<Owner, BTreeMap<StoreName, Entry>>,
     /// The stores that are open.
@@ -86,12 +93,16 @@ pub(crate) struct Rms {
 
 impl Rms {
     fn new(env: &InstanceEnv) -> Self {
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock::new());
         Self {
             data_dir: env.data_dir.clone(),
             own_vendor: env.suite.vendor.clone(),
             own_suite: env.suite.name.clone(),
             quota: DEFAULT_QUOTA,
             files: Arc::default(),
+            budget: WriteBudget::new(WRITE_BURST, WRITE_RATE, clock.now()),
+            clock,
+            slowed: false,
             suites: HashMap::new(),
             open: HashMap::new(),
         }
@@ -193,6 +204,64 @@ pub(crate) fn rms<'a>(ctx: &'a mut Ctx<'_>) -> &'a mut Rms {
 /// installed.
 pub fn set_quota(ctx: &mut Ctx<'_>, bytes: u64) {
     rms(ctx).quota = bytes;
+}
+
+/// Sets how much this virtual machine's record stores may write to the
+/// disk: `burst` bytes at once, then `bytes_per_second` (the defaults are
+/// [`WRITE_BURST`] and [`WRITE_RATE`]). A save that would pass the limit
+/// waits for the budget to refill, and still returns only once the store
+/// is on the disk. For the launcher, when a device profile or a setting
+/// names its own limit, and for tests. Call it after the [`InstanceEnv`]
+/// is installed.
+pub fn set_write_limit(ctx: &mut Ctx<'_>, burst: u64, bytes_per_second: u64) {
+    let rms = rms(ctx);
+    rms.budget = WriteBudget::new(burst, bytes_per_second, rms.clock.now());
+}
+
+/// Waits, with the VM lock released, until the game's earlier writes are
+/// paid for: not at all while its write budget is not in debt. The wait
+/// sleeps in slices of [`SLICE`] and looks at the stop flag after each, so
+/// a stopping machine is not held up by a game that was slowed; it gives
+/// `Err(Throw::Stop)`. The first wait of a machine is logged once, since
+/// a player may wonder why a game is slow to save.
+///
+/// A write waits before it is made, so the save that spends the last of
+/// the budget is not itself made to wait for it, and the last save of a
+/// game that is closing goes through.
+pub(crate) fn pace(ctx: &mut Ctx<'_>) -> JResult<()> {
+    loop {
+        let (wait, clock, say) = {
+            let rms = rms(ctx);
+            let wait = rms.budget.wait(rms.clock.now());
+            let say = !wait.is_zero() && !rms.slowed;
+            rms.slowed |= say;
+            (wait, Arc::clone(&rms.clock), say)
+        };
+        if wait.is_zero() {
+            return Ok(());
+        }
+        if ctx.is_stopping() {
+            return Err(Throw::Stop);
+        }
+        if say {
+            let rate = rms(ctx).budget.rate();
+            ctx.log(
+                LogLevel::Warn,
+                format!(
+                    "RMS: the game writes record stores faster than {} KiB a second; \
+                     its saves wait for the disk",
+                    rate >> 10
+                ),
+            );
+        }
+        ctx.without_lock(|| clock.sleep(wait.min(SLICE)));
+    }
+}
+
+/// Takes the bytes of a write that was made from the write budget.
+fn charge(ctx: &mut Ctx<'_>, bytes: u64) {
+    let rms = rms(ctx);
+    rms.budget.spend(bytes, rms.clock.now());
 }
 
 /// Takes the file lock, releasing the VM lock while it waits for another
@@ -318,14 +387,20 @@ pub(crate) fn load(ctx: &mut Ctx<'_>, key: &StoreKey) -> JResult<bool> {
 }
 
 /// Writes a store's new contents to its file and, once they are there,
-/// makes them the store's contents in memory.
+/// makes them the store's contents in memory. The write waits first, when
+/// the game's earlier writes have spent its write budget ([`pace`]), and
+/// is paid for from the budget whether it works or not: the whole file is
+/// written, and a failed write may have written most of it.
 pub(crate) fn save(ctx: &mut Ctx<'_>, key: &StoreKey, data: StoreData) -> JResult<()> {
+    pace(ctx)?;
     let path = rms(ctx).path(key);
-    let written = ctx.without_lock(|| {
+    let (bytes, written) = ctx.without_lock(|| {
         let bytes = data.encode();
-        disk::write_atomic(&path, &bytes).map(|()| bytes.len() as u64)
+        let written = disk::write_atomic(&path, &bytes);
+        (bytes.len() as u64, written)
     });
-    match written {
+    charge(ctx, bytes);
+    match written.map(|()| bytes) {
         Ok(size) => {
             let stores = rms(ctx).suites.entry(key.owner.clone()).or_default();
             stores.insert(
