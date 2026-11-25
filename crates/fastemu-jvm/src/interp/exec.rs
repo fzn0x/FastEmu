@@ -66,6 +66,35 @@ fn gc_for(ctx: &mut Ctx<'_>, bytes: usize) -> JResult<()> {
     Ok(())
 }
 
+/// What the heap will count for the arrays `alloc_multi` builds for these
+/// sizes: the outer array, and the arrays of every level below it, each at
+/// its own length and element size. Saturates, so a request that no heap
+/// holds is a number that no heap holds.
+fn multi_bytes(st: &VmState, class: ClassId, counts: &[i32]) -> usize {
+    let mut bytes = 0usize;
+    // How many arrays the level being sized has.
+    let mut arrays = 1usize;
+    let mut class = class;
+    for (level, &len) in counts.iter().enumerate() {
+        let (len, elem_bytes, inner) = match st.classes.get(class).kind {
+            ClassKind::PrimArray(t) => (len as usize, t.elem_bytes(), None),
+            ClassKind::RefArray(elem) => (len as usize, 4, Some(elem)),
+            // Not an array: `alloc_multi` makes an empty one.
+            ClassKind::Plain | ClassKind::Interface => (0, 4, None),
+        };
+        bytes = bytes.saturating_add(arrays.saturating_mul(Heap::array_bytes(len, elem_bytes)));
+        match inner {
+            // The next sizes are for the arrays this level holds.
+            Some(elem) if level + 1 < counts.len() && len > 0 => {
+                arrays = arrays.saturating_mul(len);
+                class = elem;
+            }
+            _ => break,
+        }
+    }
+    bytes
+}
+
 /// Allocates a multi-dimensional array of class `class`.
 fn alloc_multi(st: &mut VmState, class: ClassId, counts: &[i32]) -> ObjRef {
     let len = counts[0] as usize;
@@ -1113,14 +1142,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                             "multianewarray of a class that is not an array".to_owned(),
                         ));
                     }
-                    let mut bytes: usize = 0;
-                    let mut outer: usize = 1;
-                    for &n in &counts {
-                        outer = outer.saturating_mul(n as usize);
-                        bytes = bytes
-                            .saturating_add(outer.saturating_mul(8))
-                            .saturating_add(16);
-                    }
+                    let bytes = multi_bytes(&ctx.state, class, &counts);
                     if ctx.state.heap.gc_requested() || ctx.state.heap.would_exceed(bytes) {
                         tri!(gc_for(ctx, bytes));
                     }
