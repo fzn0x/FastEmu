@@ -5,22 +5,114 @@
 //! reaches the limit instead of gigabytes.
 //!
 //! Each test runs one MIDlet of `tests/memory_java` on a phone whose heap
-//! is 1 MiB, and reads what it printed. The tests assert the errors the
-//! game sees, not the memory of the process: an error means the request
-//! never reached the host. Without a JDK the tests print why and pass,
-//! unless `FASTEMU_REQUIRE_JAVA=1` is set (CI sets it).
+//! is 1 MiB, and reads what it printed. Some also measure the host: the
+//! tests run one at a time under a counting allocator, which keeps the
+//! most bytes the process held at once, so a request that reached the
+//! host shows even when the error the game gets is the same. Without a
+//! JDK the tests print why and pass, unless `FASTEMU_REQUIRE_JAVA=1` is
+//! set (CI sets it).
+
+#![allow(
+    unsafe_code,
+    reason = "the counting allocator forwards every call to the system's"
+)]
 
 mod support;
 
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use fastemu_core::default_profile;
 use support::{Running, scratch, zip};
 
+/// The bytes the process holds now, and the most it held since a test
+/// began.
+static LIVE: AtomicUsize = AtomicUsize::new(0);
+static PEAK: AtomicUsize = AtomicUsize::new(0);
+
+/// The system's allocator, counting what it hands out. A zeroed block is
+/// counted at its size whether or not anything touches it, so a buffer the
+/// operating system gives out lazily shows too.
+struct Counting;
+
+fn grew(by: usize) {
+    let now = LIVE.fetch_add(by, Relaxed) + by;
+    PEAK.fetch_max(now, Relaxed);
+}
+
+// SAFETY: every method forwards to `System`, which upholds the contract of
+// `GlobalAlloc`, with the same arguments, and only adds to atomic counters.
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: the caller's contract is passed on unchanged.
+        let block = unsafe { System.alloc(layout) };
+        if !block.is_null() {
+            grew(layout.size());
+        }
+        block
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: the caller's contract is passed on unchanged.
+        let block = unsafe { System.alloc_zeroed(layout) };
+        if !block.is_null() {
+            grew(layout.size());
+        }
+        block
+    }
+
+    unsafe fn dealloc(&self, block: *mut u8, layout: Layout) {
+        // SAFETY: the caller's contract is passed on unchanged.
+        unsafe { System.dealloc(block, layout) };
+        LIVE.fetch_sub(layout.size(), Relaxed);
+    }
+
+    unsafe fn realloc(&self, block: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // SAFETY: the caller's contract is passed on unchanged.
+        let moved = unsafe { System.realloc(block, layout, new_size) };
+        if !moved.is_null() {
+            LIVE.fetch_sub(layout.size(), Relaxed);
+            grew(new_size);
+        }
+        moved
+    }
+}
+
+#[global_allocator]
+static COUNTING: Counting = Counting;
+
+/// Keeps the other tests of this file from running while one measures, and
+/// remembers where its measure began.
+struct Alone {
+    _turn: MutexGuard<'static, ()>,
+    start: usize,
+}
+
+impl Alone {
+    fn new() -> Self {
+        static TURNS: Mutex<()> = Mutex::new(());
+        let turn = TURNS.lock().unwrap_or_else(PoisonError::into_inner);
+        let start = LIVE.load(Relaxed);
+        PEAK.store(start, Relaxed);
+        Self { _turn: turn, start }
+    }
+
+    /// How many bytes beyond those the test began with the process held at
+    /// most, in MiB.
+    fn peak_mib(&self) -> usize {
+        PEAK.load(Relaxed).saturating_sub(self.start) >> 20
+    }
+}
+
 /// The heap of the phone the tests run on.
 const HEAP: u64 = 1024 * 1024;
+
+/// More than the process holds while a MIDlet runs on a heap of 1 MiB, and
+/// less than the 64 MiB of the smallest image or grid a test refuses.
+const LIMIT_MIB: usize = 16;
 
 const MANIFEST: &str = "Manifest-Version: 1.0\r\n\
 MIDlet-Name: Memory\r\n\
@@ -189,6 +281,7 @@ fn numbers(line: &str, prefix: &str) -> Vec<i64> {
 
 #[test]
 fn an_image_the_heap_cannot_hold_is_an_out_of_memory_error_before_its_pixels() {
+    let alone = Alone::new();
     let Some(jar) = suite("big-image", &[]) else {
         return;
     };
@@ -210,10 +303,14 @@ fn an_image_the_heap_cannot_hold_is_an_out_of_memory_error_before_its_pixels() {
     let changed = run.wait_log("free changed ");
     let used = numbers(&changed, "free changed ")[0];
     assert!((0..8192).contains(&used), "{changed}; {log}");
+    // And the host never held the 64 MiB of the image that was refused, nor
+    // the 128 MiB that a size of 2 billion by 2 billion would saturate to.
+    assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
 }
 
 #[test]
 fn images_kept_in_a_list_end_in_out_of_memory_at_the_heap() {
+    let _alone = Alone::new();
     let Some(jar) = suite("kept-images", &[]) else {
         return;
     };
@@ -232,6 +329,7 @@ fn images_kept_in_a_list_end_in_out_of_memory_at_the_heap() {
 
 #[test]
 fn a_file_that_declares_more_pixels_than_the_heap_holds_is_refused_before_it_is_decoded() {
+    let alone = Alone::new();
     let png = declared_png(16384, 2048);
     let bmp = declared_bmp(16384, 2048);
     assert_eq!(fastemu_gfx::probe_size(&png), Some((16384, 2048)));
@@ -258,10 +356,13 @@ fn a_file_that_declares_more_pixels_than_the_heap_holds_is_refused_before_it_is_
         let line = format!("/dot.png {how} ok 2x2");
         assert!(run.has(&line), "no {line:?}; the log:\n{log}");
     }
+    // Six files that declare 128 MiB each were read, and none was decoded.
+    assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
 }
 
 #[test]
 fn an_image_stream_that_never_ends_is_an_io_exception_at_16_mib() {
+    let alone = Alone::new();
     let Some(jar) = suite("streams", &[]) else {
         return;
     };
@@ -281,10 +382,14 @@ fn an_image_stream_that_never_ends_is_an_io_exception_at_16_mib() {
         empty, "empty IOException the stream gives no data calls 1000",
         "{log}"
     );
+    // The bytes read are held once and are 16 MiB at most; the vector they
+    // grow in may hold its old and its new block at a doubling.
+    assert!(alone.peak_mib() < 40, "{} MiB", alone.peak_mib());
 }
 
 #[test]
 fn a_tiled_layer_the_heap_cannot_hold_is_an_out_of_memory_error_before_its_grid() {
+    let alone = Alone::new();
     let Some(jar) = suite("tiles", &[]) else {
         return;
     };
@@ -301,10 +406,14 @@ fn a_tiled_layer_the_heap_cannot_hold_is_an_out_of_memory_error_before_its_grid(
     assert!(kept.ends_with("then OutOfMemoryError"), "{log}");
     let count = numbers(&kept, "layers ")[0];
     assert!((1..10).contains(&count), "{log}");
+    // Neither the 64 MiB grid that was refused nor a hundred of 360000
+    // bytes were made.
+    assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
 }
 
 #[test]
 fn animated_tiles_stop_at_32767_with_an_out_of_memory_error() {
+    let _alone = Alone::new();
     let Some(jar) = suite("animated", &[]) else {
         return;
     };
@@ -321,6 +430,7 @@ fn animated_tiles_stop_at_32767_with_an_out_of_memory_error() {
 
 #[test]
 fn many_sprites_that_keep_one_big_frame_sequence_end_in_out_of_memory() {
+    let _alone = Alone::new();
     let Some(jar) = suite("sprites", &[]) else {
         return;
     };
@@ -336,6 +446,7 @@ fn many_sprites_that_keep_one_big_frame_sequence_end_in_out_of_memory() {
 
 #[test]
 fn a_shown_canvas_counts_its_back_buffer_and_canvases_kept_end_in_out_of_memory() {
+    let _alone = Alone::new();
     let Some(jar) = suite("canvases", &[]) else {
         return;
     };
@@ -354,6 +465,7 @@ fn a_shown_canvas_counts_its_back_buffer_and_canvases_kept_end_in_out_of_memory(
 
 #[test]
 fn a_game_canvas_buffer_the_heap_cannot_hold_is_refused_before_it_is_made() {
+    let _alone = Alone::new();
     let Some(jar) = suite("game-buffer", &[]) else {
         return;
     };
@@ -369,6 +481,7 @@ fn a_game_canvas_buffer_the_heap_cannot_hold_is_refused_before_it_is_made() {
 
 #[test]
 fn custom_items_count_their_surfaces_and_screens_not_shown_give_their_buffers_back() {
+    let _alone = Alone::new();
     let Some(jar) = suite("customs", &[]) else {
         return;
     };
