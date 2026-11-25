@@ -751,6 +751,54 @@ classes have 5 classes at most.
   and in bytes, with `ClassNotFoundException`, and does not copy a string
   that is too long.
 
+**Class memory.** A loaded class stays for as long as its machine runs:
+classes are never unloaded. None of it is on the Java heap, so a game
+could fill the host with classes the heap meter never sees: a pool of
+65535 constants is 327 KB of file, 600 bytes in a JAR and 6.3 MiB of
+tables, and each subclass copies the method table of its superclass.
+`VmLimits::max_class_bytes` (128 MiB) bounds the class data of one
+machine. A class that would take the machine past it does not load, and
+the game gets `OutOfMemoryError` with the message `class memory limit
+reached`, which it can catch. The classes that loaded stay, and a smaller
+class can still load.
+
+The classes a game can make count: those read from class files, and the
+array classes of any name it asks for (an array of 255 dimensions of every
+class is 255 classes). The classes of the library do not, and neither do
+the eight arrays of primitives, which `new int[n]` needs. The size of a
+class is an estimate (`class/budget.rs`), worked out from its definition
+before anything of it is built, so a class that does not fit costs little
+to refuse and leaves nothing behind. These are the parts, on a 64 bit
+machine:
+
+| Part | Bytes |
+| --- | --- |
+| a class | 512 and the length of its name |
+| a constant pool entry | 104 (the entry and the slot that caches what it resolves to), and the text of a `Utf8` entry with its 16 byte header |
+| a field | 64, and 16 for its static value or its slot in the instance template |
+| the instance slots a subclass copies | 16 each, inherited ones included |
+| a string constant of a static field | 16 and 2 per character, once however many fields name it |
+| a method | 216 and the lengths of its name and descriptor |
+| a method with code, besides | 184, 21 per byte of code, 24 per exception handler, 4 per line number |
+| an entry of a method table | 32: the superclass's entries, a slot for each method a subclass could override, and the methods of interfaces the superclass does not implement |
+| a superclass or interface of the class | 4 each, so a chain of interfaces loaded from its root takes memory by the square of its length |
+| an array class | 512 and the length of its name, and 32 per entry of the method table of `Object` |
+
+A byte of code is counted at 21 because the decoded instruction takes 16
+bytes and its offset 4, and the shortest instruction is one byte. Real
+code has two or three bytes to an instruction, so the model counts about
+twice what real code takes. The code of every method is counted when the
+class links, whether the method ever runs, so the interpreter needs no
+hook.
+
+By this model the JARs of the test game folder cost 3 KB to 29 MiB. The
+largest game (327 classes) costs 7.3 MiB. The 29 MiB is a desktop library
+of 1046 classes that is no game, and the largest single class, with
+thousands of fields, costs 2.8 MiB. What the limit is for stops at 128
+MiB: a class with 65535 constants takes 6.5 MiB, a method of 64 KiB of
+code 1.3 MiB, and a method table of 30000 methods 960 KB for each
+subclass.
+
 **Diagnostics.** Something a game needs that FastEmu lacks throws the
 usual error and is reported once to the diagnostics hook and the log, by
 exact internal name, so it says what to implement next:
