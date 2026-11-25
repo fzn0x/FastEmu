@@ -132,10 +132,24 @@ fn create_from_resource(ctx: &mut Ctx<'_>, name: Value) -> JResult<Value> {
     }
 }
 
-/// Reads a Java `InputStream` to its end through its `read([BII)I`.
+/// The most bytes `Image.createImage(InputStream)` reads. The PNG and JPEG
+/// files of games are far smaller; the largest in the test corpus is
+/// 144 KB.
+const MAX_IMAGE_FILE: usize = 16 * 1024 * 1024;
+
+/// How many reads in a row may return no bytes before the stream counts as
+/// giving no data. `InputStream.read` blocks until it has a byte, so a read
+/// that returns 0 again and again is a stream that is broken.
+const MAX_EMPTY_READS: u32 = 1000;
+
+/// Reads a Java `InputStream` to its end through its `read([BII)I`, at most
+/// [`MAX_IMAGE_FILE`] bytes: an image stream that goes on is an
+/// `IOException`, as a phone's would end in one, and not a Vec that grows
+/// until the host is out of memory.
 fn read_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<Vec<u8>> {
     let buffer = ctx.new_array(fastemu_jvm::ArrayType::Byte, 4096)?;
     let mut bytes = Vec::new();
+    let mut empty_reads = 0;
     loop {
         let n = ctx
             .call_virtual(
@@ -150,6 +164,20 @@ fn read_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<Vec<u8>> {
         }
         let chunk = ctx.array::<i8>(buffer)?;
         let n = (n as usize).min(chunk.len());
+        if n == 0 {
+            empty_reads += 1;
+            if empty_reads >= MAX_EMPTY_READS {
+                return ctx.throw("java/io/IOException", "the stream gives no data");
+            }
+            continue;
+        }
+        empty_reads = 0;
+        if bytes.len() + n > MAX_IMAGE_FILE {
+            return ctx.throw(
+                "java/io/IOException",
+                "the image data is larger than 16 MiB",
+            );
+        }
         bytes.extend(chunk[..n].iter().map(|&b| b as u8));
     }
     Ok(bytes)
