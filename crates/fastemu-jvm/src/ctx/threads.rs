@@ -127,14 +127,29 @@ impl Ctx<'_> {
         name: &str,
         body: impl FnOnce(&mut Ctx<'_>) -> JResult<()> + Send + 'static,
     ) -> JResult<ObjRef> {
-        let spawned = thread::spawn_with_new_object(
-            self.shared,
-            &mut self.state,
-            name,
-            Box::new(body),
-            Starter::Game,
-        );
-        match spawned {
+        self.spawn_as(name, Box::new(body), Starter::Game)
+    }
+
+    /// Starts a Java thread like [`Ctx::spawn_thread`], for work the
+    /// library does for a game and never hands to it, as MIDP's media
+    /// events thread. It draws on the threads the host may have beyond
+    /// `max_threads`, so a game that has started as many threads as it may
+    /// still gets it.
+    pub fn spawn_host_thread(
+        &mut self,
+        name: &str,
+        body: impl FnOnce(&mut Ctx<'_>) -> JResult<()> + Send + 'static,
+    ) -> JResult<ObjRef> {
+        self.spawn_as(name, Box::new(body), Starter::Host)
+    }
+
+    fn spawn_as(
+        &mut self,
+        name: &str,
+        body: thread::ThreadBody,
+        starter: Starter,
+    ) -> JResult<ObjRef> {
+        match thread::spawn_with_new_object(self.shared, &mut self.state, name, body, starter) {
             Ok(obj) => Ok(self.root(obj)),
             Err(message) => Err(self.new_exception("java/lang/OutOfMemoryError", Some(&message))),
         }
