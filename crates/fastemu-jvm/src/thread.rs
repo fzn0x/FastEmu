@@ -117,6 +117,15 @@ pub(crate) struct ThreadEntry {
 /// What a Rust-bodied Java thread runs.
 pub(crate) type ThreadBody = Box<dyn FnOnce(&mut Ctx<'_>) -> JResult<()> + Send>;
 
+/// The name the OS gets for a thread: Java's name without control
+/// characters, cut to 32 characters. `std` panics on a NUL in a thread
+/// name, and the name is only a label for debuggers; the Java side keeps
+/// the name it was given.
+fn os_name(name: &str) -> String {
+    let label: String = name.chars().filter(|c| !c.is_control()).take(32).collect();
+    format!("java {label}")
+}
+
 /// Adds a thread for `java_thread` to the table and starts its OS thread.
 pub(crate) fn spawn(
     shared: &VmShared,
@@ -128,7 +137,7 @@ pub(crate) fn spawn(
     let tid = register(shared, state, java_thread, name.clone());
     let arc = shared.arc();
     let result = std::thread::Builder::new()
-        .name(format!("java {name}"))
+        .name(os_name(&name))
         .stack_size(shared.config.thread_stack_bytes)
         .spawn(move || run(&arc, tid, body));
     match result {
