@@ -59,27 +59,42 @@ impl ImageFormat {
 ///
 /// The size is the one the decoder goes by: a PNG's first IHDR chunk, a
 /// GIF's logical screen (or its first frame, when the screen is empty), a
-/// BMP's header without the sign of its height, and a JPEG's first frame
-/// header. `None` when the format is not one of these, the header is cut
-/// short or the picture is empty; decoding such a file fails too, apart
-/// from rare odd files, so `None` is no reason to refuse it. The size is
-/// only what the file claims: decoding stays within its own limits
-/// (16 384 pixels a side and [`MAX_PIXELS`] in all) whatever it says.
+/// BMP's header without the sign of its height, and a JPEG's frame
+/// header. The decoders' own code finds the PNG, GIF and JPEG sizes, run
+/// only as far as the header, so a block or segment the decoder skips is
+/// no size here either. `None` when the format is not one of these, the
+/// header is cut short or the picture is empty. Decoding such a file
+/// fails too, as it reads the same header first, so a caller can go on to
+/// [`Surface::decode`] for the error. The size is only what the file
+/// claims: decoding stays within its own limits (16 384 pixels a side and
+/// [`MAX_PIXELS`] in all) whatever it says.
 ///
 /// ```
 /// use fastemu_gfx::probe_size;
 ///
-/// let gif = b"GIF89a\x10\x00\x20\x00\x00\x00\x00";
-/// assert_eq!(probe_size(gif), Some((16, 32)));
+/// // A BMP with the 12 byte header: 16 by 32 pixels, 24 bits.
+/// let mut bmp = b"BM".to_vec();
+/// bmp.extend_from_slice(&[0; 8]);
+/// bmp.extend_from_slice(&26_u32.to_le_bytes());
+/// bmp.extend_from_slice(&12_u32.to_le_bytes());
+/// bmp.extend_from_slice(&[16, 0, 32, 0, 1, 0, 24, 0]);
+/// assert_eq!(probe_size(&bmp), Some((16, 32)));
 /// assert_eq!(probe_size(b"not an image"), None);
 /// ```
 pub fn probe_size(data: &[u8]) -> Option<(u32, u32)> {
-    match ImageFormat::sniff(data)? {
-        ImageFormat::Png => png::probe(data),
-        ImageFormat::Jpeg => probe::jpeg(data),
-        ImageFormat::Gif => probe::gif(data),
-        ImageFormat::Bmp => probe::bmp(data),
-    }
+    let format = ImageFormat::sniff(data)?;
+    // The gif and zune-jpeg crates do the reading for their formats; a
+    // panic in one is no size.
+    guarded(|| {
+        Ok(match format {
+            ImageFormat::Png => png::probe(data),
+            ImageFormat::Jpeg => jpeg::probe(data),
+            ImageFormat::Gif => gif::probe(data),
+            ImageFormat::Bmp => probe::bmp(data),
+        })
+    })
+    .ok()
+    .flatten()
 }
 
 /// Runs a decode and turns a panic in it into a decode error. The decoders
@@ -291,6 +306,45 @@ mod tests {
         exif.extend_from_slice(&[0xFF, 0xE1, 0, 10, 0xFF, 0xC0, 0, 0x11, 8, 0xFF, 0xFF, 0xFF]);
         exif.extend_from_slice(&jpeg[2..]);
         assert_eq!(probe_size(&exif), Some((5, 3)));
+    }
+
+    /// `file` with `piece` put in at `at`.
+    fn with_inserted(file: &[u8], at: usize, piece: &[u8]) -> Vec<u8> {
+        let mut out = file[..at].to_vec();
+        out.extend_from_slice(piece);
+        out.extend_from_slice(&file[at..]);
+        out
+    }
+
+    #[test]
+    fn probe_size_is_not_fooled_by_a_header_the_decoder_skips() {
+        // A frame header that is not one: 1 by 1 pixels. If the probe took
+        // it for the size, a caller would weigh a 1 by 1 image and decode
+        // the real one.
+        let fake = [0xFF, 0xC0, 0, 11, 8, 0, 1, 0, 1, 1, 1, 0x11, 0];
+        let jpeg = jpeg_file();
+        let frame = jpeg.windows(2).position(|w| w == [0xFF, 0xC0]).unwrap();
+        // zune-jpeg takes only SOF0, SOF1 and SOF2 for frame headers and
+        // skips the other SOF markers by their length.
+        for marker in [0xC3, 0xC5, 0xC7, 0xC9, 0xCB, 0xCD, 0xCF] {
+            let mut skipped = fake;
+            skipped[1] = marker;
+            assert_probe_matches_decode(&with_inserted(&jpeg, frame, &skipped), (5, 3));
+        }
+        // It reads a restart marker and a start of image as the start of a
+        // segment with a length too, so a frame header inside one is hidden.
+        for marker in [0x01, 0xD0, 0xD7, 0xD8] {
+            let mut hidden = vec![0xFF, marker, 0, 15];
+            hidden.extend_from_slice(&fake);
+            assert_probe_matches_decode(&with_inserted(&jpeg, frame, &hidden), (5, 3));
+        }
+        // A GIF with an empty screen and a block the decoder skips before
+        // its first frame.
+        let mut gif = gif_file();
+        gif[6..10].fill(0);
+        let image = gif.iter().position(|&b| b == 0x2C).unwrap();
+        let odd = with_inserted(&gif, image, &[0x05, 2, 0xAA, 0xBB, 0]);
+        assert_probe_matches_decode(&odd, (3, 2));
     }
 
     #[test]

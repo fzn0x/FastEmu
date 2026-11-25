@@ -10,14 +10,38 @@ use super::{check_size, failed};
 use crate::error::Result;
 use crate::surface::MAX_PIXELS;
 
-pub(super) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>)> {
+/// How a file is read, to decode it and to probe its size.
+fn options() -> DecodeOptions {
     let mut options = DecodeOptions::new();
     options.set_color_output(ColorOutput::RGBA);
     options.allow_unknown_blocks(true);
     if let Some(limit) = NonZeroU64::new(MAX_PIXELS * 4) {
         options.set_memory_limit(MemoryLimit::Bytes(limit));
     }
-    let mut decoder = options
+    options
+}
+
+/// The size the file declares: its logical screen, or, where an encoder
+/// left that empty, the first frame at its offset, as `decode` takes it.
+/// The `gif` crate does the reading up to the frame header, with the
+/// options `decode` uses, so blocks it skips are skipped here too, and
+/// no pixels are read.
+pub(super) fn probe(data: &[u8]) -> Option<(u32, u32)> {
+    let mut decoder = options().read_info(Cursor::new(data)).ok()?;
+    let (width, height) = (u32::from(decoder.width()), u32::from(decoder.height()));
+    if width > 0 && height > 0 {
+        return Some((width, height));
+    }
+    let frame = decoder.next_frame_info().ok()??;
+    let (width, height) = (
+        u32::from(frame.left) + u32::from(frame.width),
+        u32::from(frame.top) + u32::from(frame.height),
+    );
+    (width > 0 && height > 0).then_some((width, height))
+}
+
+pub(super) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>)> {
+    let mut decoder = options()
         .read_info(Cursor::new(data))
         .map_err(|e| failed("GIF", e))?;
     let (screen_w, screen_h) = (u32::from(decoder.width()), u32::from(decoder.height()));

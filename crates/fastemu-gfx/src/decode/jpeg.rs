@@ -9,13 +9,32 @@ use super::{MAX_SIDE, check_size, failed};
 use crate::color::OPAQUE;
 use crate::error::Result;
 
-pub(super) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>)> {
-    let options = DecoderOptions::default()
+/// How a file is read, to decode it and to probe its size.
+fn options(max_side: usize) -> DecoderOptions {
+    DecoderOptions::default()
         .jpeg_set_out_colorspace(ColorSpace::RGB)
-        .set_max_width(MAX_SIDE as usize)
-        .set_max_height(MAX_SIDE as usize)
-        .set_strict_mode(false);
-    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(data), options);
+        .set_max_width(max_side)
+        .set_max_height(max_side)
+        .set_strict_mode(false)
+}
+
+/// The size the file declares in its frame header. zune-jpeg reads the
+/// headers up to the start of the image data, as `decode` does, so the
+/// frame header is the one it takes, and what it skips is skipped here
+/// too. No pixels are read. The side limit is the most a frame header
+/// can say, so the size is what the file claims and not only what the
+/// decoder accepts.
+pub(super) fn probe(data: &[u8]) -> Option<(u32, u32)> {
+    let mut decoder =
+        JpegDecoder::new_with_options(ZCursor::new(data), options(usize::from(u16::MAX)));
+    decoder.decode_headers().ok()?;
+    let (width, height) = decoder.dimensions()?;
+    let (width, height) = (u32::try_from(width).ok()?, u32::try_from(height).ok()?);
+    (width > 0 && height > 0).then_some((width, height))
+}
+
+pub(super) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>)> {
+    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(data), options(MAX_SIDE as usize));
     decoder.decode_headers().map_err(|e| failed("JPEG", e))?;
     let (width, height) = decoder
         .dimensions()
