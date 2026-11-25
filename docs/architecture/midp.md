@@ -59,8 +59,9 @@ named.
   The suite's name, vendor, version and MIDlet names in `SuiteInfo` are
   cut at 100 characters and the description at 500, for the tiles and the
   launcher; `SuiteInfo::properties` keep every value whole, so
-  `getAppProperty` is unchanged. An icon over 1 MiB, or over 512 pixels a
-  side, is not kept.
+  `getAppProperty` is unchanged. An icon over 1 MiB is not kept, and the
+  app shows no icon for one over 512 pixels a side (`fastemu-ui`'s
+  `pixels::icon_bgra`).
 - **The JAR of a JAD.** `MIDlet-Jar-URL` as a relative path, then its
   last segment, then the JAD's own name with `.jar`. A JAR picks up a JAD
   of the same name beside it.
