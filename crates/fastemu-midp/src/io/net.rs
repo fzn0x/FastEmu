@@ -540,3 +540,46 @@ pub(crate) fn write_all(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use fastemu_jvm::{MemorySource, Vm, VmConfig};
+
+    use super::*;
+    use crate::env::InstanceEnv;
+
+    /// Runs `f` on a VM with the MIDP classes whose instance may use the
+    /// network.
+    fn with_network(f: impl FnOnce(&mut Ctx<'_>)) {
+        let vm = Vm::new(
+            VmConfig::default(),
+            Arc::new(MemorySource::new()),
+            crate::classes(&fastemu_core::default_profile()),
+        );
+        vm.attach("test", |ctx| {
+            let mut env = InstanceEnv::for_tests("unused");
+            env.settings.network = NetworkPolicy::Allow;
+            ctx.set_extension(env);
+            f(ctx);
+        });
+    }
+
+    #[test]
+    fn pending_request_bytes_are_counted_for_the_whole_game() {
+        with_network(|ctx| {
+            let mut first = pending(ctx);
+            let mut second = pending(ctx);
+            assert!(first.add(MAX_PENDING_BYTES - 10));
+            assert!(!second.add(11));
+            assert!(second.add(10));
+            assert!(!second.add(1));
+            drop(first);
+            assert!(second.add(MAX_PENDING_BYTES - 10));
+            assert!(!second.add(1));
+            drop(second);
+            assert_eq!(counts(ctx).pending.load(Ordering::Acquire), 0);
+        });
+    }
+}

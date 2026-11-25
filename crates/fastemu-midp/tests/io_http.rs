@@ -204,3 +204,23 @@ done"
     );
     io_support::assert_output(&output, &expected);
 }
+
+#[test]
+fn a_game_cannot_make_the_host_hold_unbounded_request_data() {
+    let Some(classes) = io_support::classes() else {
+        return;
+    };
+    let output = io_support::run(classes, "HttpLimits", &[], NetworkPolicy::Allow);
+    let expected = "body 64 the request body is larger than 4 MiB
+send failed
+budget 8 MiB too much request data is waiting to be sent
+first send failed
+room again
+headers 64 too many request headers
+replaced other null new
+bytes the request headers are larger than 16 KiB
+swapped 9000
+name java.lang.IllegalArgumentException: the connection name is longer than 8192 bytes
+done";
+    io_support::assert_output(&output, expected);
+}
