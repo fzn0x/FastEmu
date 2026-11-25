@@ -244,14 +244,20 @@ impl Player {
         }
         let tones = sequence::parse(sequence_bytes)?;
         let rate = self.engine.sample_rate();
+        let source = media::tones(tones, rate);
         self.with(|mixer, _| {
-            let voice = self.voice(mixer);
-            if voice.state != PlayerState::Realized {
+            let slot = mixer.slots.get(&self.id).expect("checked by with");
+            if slot.voice.state != PlayerState::Realized {
                 return Err(AudioError::InvalidState(
                     "the sequence can only change while realized".into(),
                 ));
             }
-            voice.set_source(media::tones(tones, rate));
+            // The new notes replace the old ones, which count no more. A
+            // sequence of 65536 tones is 1.5 MiB, and a game can make 128
+            // players that each take one.
+            let (group, old) = (slot.group, slot.voice.source.memory_bytes());
+            crate::group::admit(mixer, group, source.memory_bytes(), old, false)?;
+            self.voice(mixer).set_source(source);
             Ok(())
         })
     }

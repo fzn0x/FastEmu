@@ -379,3 +379,37 @@ fn every_kind_of_sound_counts_what_it_holds() {
     drop(player);
     assert_eq!(group.memory_bytes(), 0);
 }
+
+#[test]
+fn a_new_tone_sequence_counts_in_place_of_the_old() {
+    let engine = engine(8000);
+    let group = engine.create_group();
+    group.set_limits(GroupLimits {
+        max_bytes: 4096,
+        max_players: 8,
+    });
+    // VERSION 1, then `notes` notes of a sixteenth.
+    let sequence = |notes: usize| {
+        let mut bytes = vec![0xFE, 1];
+        bytes.extend((0..notes).flat_map(|_| [69, 1]));
+        bytes
+    };
+    let first = group.create_tone_player().unwrap();
+    first.set_tone_sequence(&sequence(100)).unwrap();
+    let held = group.memory_bytes();
+    assert!((1000..=4096).contains(&held), "{held}");
+    // Replacing it with another of the same size takes no more room.
+    first.set_tone_sequence(&sequence(100)).unwrap();
+    assert_eq!(group.memory_bytes(), held);
+    // A second player cannot take a sequence that no longer fits beside it.
+    let second = group.create_tone_player().unwrap();
+    let refused = second.set_tone_sequence(&sequence(100)).unwrap_err();
+    assert!(matches!(refused, AudioError::OutOfMemory(_)), "{refused}");
+    // And one that is bigger than the whole budget can never.
+    let refused = first.set_tone_sequence(&sequence(300)).unwrap_err();
+    assert!(matches!(refused, AudioError::TooLarge(_)), "{refused}");
+    // The first sequence is still the one in place.
+    assert_eq!(group.memory_bytes(), held + 8);
+    first.close();
+    second.set_tone_sequence(&sequence(100)).unwrap();
+}
