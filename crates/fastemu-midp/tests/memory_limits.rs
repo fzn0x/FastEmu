@@ -25,8 +25,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
-use fastemu_core::default_profile;
-use support::{Running, scratch, zip};
+use fastemu_core::{Frame, Key, default_profile};
+use support::{Running, rgb, scratch, zip};
 
 /// The bytes the process holds now, and the most it held since a test
 /// began.
@@ -128,7 +128,8 @@ MIDlet-7: GameBuffer, , m.GameBuffer\r\n\
 MIDlet-8: Customs, , m.Customs\r\n\
 MIDlet-9: SiemensBitmaps, , m.SiemensBitmaps\r\n\
 MIDlet-10: SiemensLayers, , m.SiemensLayers\r\n\
-MIDlet-11: SiemensSprites, , m.SiemensSprites\r\n";
+MIDlet-11: SiemensSprites, , m.SiemensSprites\r\n\
+MIDlet-12: Returns, , m.Returns\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 mod midlet {
@@ -143,6 +144,7 @@ mod midlet {
     pub const SIEMENS_BITMAPS: usize = 8;
     pub const SIEMENS_LAYERS: usize = 9;
     pub const SIEMENS_SPRITES: usize = 10;
+    pub const RETURNS: usize = 11;
 }
 
 /// What the back buffer of a shown canvas takes of the heap on the default
@@ -586,4 +588,45 @@ fn siemens_sprites_count_the_frame_sequences_they_keep() {
     let count = numbers(&copies, "siemens copies ")[0];
     assert!((1..20).contains(&count), "{log}");
     run.wait_log("done");
+}
+
+/// The colour of the focused row of a list, and a column it crosses.
+const HIGHLIGHT: u32 = 0x1F_5FAF;
+const ROW_COLUMN: u32 = 230;
+
+/// The first row of `frame` where the focused row of a list shows.
+fn focused_row(frame: &Frame) -> Option<u32> {
+    (0..frame.height()).find(|&y| rgb(frame, ROW_COLUMN, y) == HIGHLIGHT)
+}
+
+fn same_pixels(a: &Frame, b: &Frame) -> bool {
+    a.width() == b.width()
+        && a.height() == b.height()
+        && (0..a.height()).all(|y| (0..a.width()).all(|x| rgb(a, x, y) == rgb(b, x, y)))
+}
+
+#[test]
+fn a_screen_that_was_hidden_paints_all_of_its_content_when_it_is_shown_again() {
+    let _alone = Alone::new();
+    let Some(jar) = suite("returns", &[]) else {
+        return;
+    };
+    let mut run = launch(&jar, midlet::RETURNS, HEAP);
+    run.wait_log("menu shown");
+    let first = run.wait_frame(|f| focused_row(f).is_some());
+    let row = focused_row(&first).expect("a focused row");
+    // The alert covers the menu, which gives its buffer back.
+    run.tap(Key::Fire);
+    run.wait_log("selected");
+    let alert = run.wait_frame(|f| f.serial() > first.serial() && focused_row(f).is_none());
+    // Showing the menu again paints it as it was.
+    run.tap(Key::Fire);
+    run.wait_log("dismissed");
+    let again = run.wait_frame(|f| f.serial() > alert.serial() && focused_row(f).is_some());
+    let log = run.dump();
+    assert_eq!(focused_row(&again), Some(row), "{log}");
+    assert!(
+        same_pixels(&first, &again),
+        "the menu looks different; {log}"
+    );
 }
