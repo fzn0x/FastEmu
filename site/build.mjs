@@ -20,7 +20,7 @@ const SITE = 'https://fastemu.functionx.dev';
 const REPO = 'https://github.com/fzn0x/FastEmu';
 
 /** The guides in reading order. The first heading of each file is its title. */
-const GUIDES = ['getting-started', 'playing', 'settings', 'compatibility', 'building', 'building-android', 'faq'];
+const GUIDES = ['getting-started', 'playing', 'settings', 'compatibility', 'benchmark', 'building', 'building-android', 'faq'];
 
 const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const stripTags = (s) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
