@@ -102,7 +102,9 @@ once. Crossings are exact integer fractions. The sides' `drawLine` pixels
 are then added. Nokia's `fillPolygon` uses the same rule with the
 even-odd fill Nokia documents; `drawPolygon` and `drawTriangle` draw only
 the sides. A coverage mask makes each pixel of a polygon or outline draw
-once, so translucent colours do not stack where pieces meet.
+once, so translucent colours do not stack where pieces meet. No limit
+bounds the time one polygon or triangle fill takes: it walks every row
+of the shape inside the clip, and every edge on each row.
 
 **Dotted strokes.** MIDP leaves the pattern to the implementation and
 lets end points and corners go undrawn. FastEmu draws every other pixel,
