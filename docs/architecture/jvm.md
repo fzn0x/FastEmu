@@ -835,22 +835,25 @@ load.
 
 What the loader builds before it knows the size stays within a small
 multiple of the class file and of the classes already loaded, so a class
-that is then refused costs little. A method keeps two numbers of its descriptor and not its parse, since a descriptor can name
-tens of thousands of parameters and every method can share it. A
-descriptor is walked once for each text that names it, in the class file
-parser (by the index of its pool entry) and in `define` (by its `Arc`),
-and `descriptor::method_shape` walks it without making a `String` for
-each parameter, so a class of 65535 methods that share one descriptor of
-65532 parameters costs a few milliseconds, not six minutes. The parser
-walks a field descriptor once for each pool entry as well. The names of
-a class, its superclass and its interfaces are the `Arc` of their pool
-entries, not copies, since a class can name one interface of 65535 bytes
-65535 times. A text constant is copied to UTF-16 once for each text of
-the pool, however many string entries and fields name it. An interface a
-class names more than once is added once. The file itself, which the JAR source caps at 4 MiB
+that is then refused costs little. A method keeps two numbers of its
+descriptor and not its parse, since a descriptor can name tens of
+thousands of parameters and every method can share it. A descriptor is
+walked once for each text that names it, in the class file parser (by
+the index of its pool entry) and in `define` (by its `Arc`), and
+`descriptor::method_shape` walks it without making a `String` for each
+parameter, so a class of 65535 methods that share one descriptor of
+65532 parameters costs a few milliseconds, not six minutes. The
+interpreter sizes a call with `method_shape` too, when it checks the
+stack of a method. The parser walks a field descriptor once for each
+pool entry as well. The names of a class, its superclass and its
+interfaces are the `Arc` of their pool entries, not copies, since a
+class can name one interface of 65535 bytes 65535 times. A text constant
+is copied to UTF-16 once for each text of the pool, however many string
+entries and fields name it. An interface a class names more than once is
+added once. The file itself, which the JAR source caps at 4 MiB
 (`MAX_CLASS_BYTES`; the largest class of the test folder has 200 KB), is
-parsed before any of this, and a refused class holds a few times its size
-while it is.
+parsed before any of this, and a refused class holds a few times its
+size while it is.
 
 **Diagnostics.** Something a game needs that FastEmu lacks throws the
 usual error and is reported once to the diagnostics hook and the log, by
