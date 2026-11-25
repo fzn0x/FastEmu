@@ -126,13 +126,13 @@ Each open connection of a game has a place, which `net::acquire` takes
 before anything opens and which is given back when the socket is closed:
 the connection and all its streams are closed, or the collector frees a
 connection the game never closed. A game at its limit gets one
-collection and a second try before the exception, because games written for phones
-open a connection for each request and close the stream but not the
-connection. A connection that fails to open gives its place back. A
-closed connection lets go of its socket at once, so the descriptor is
-free when the place is, not when the collector gets to the object. A
-server that has no place for a client leaves it in the listener's queue:
-`acceptAndOpen` throws before it accepts.
+collection and a second try before the exception, because games written
+for phones open a connection for each request and close the stream but
+not the connection. A connection that fails to open gives its place
+back. A closed connection lets go of its socket at once, so the
+descriptor is free when the place is, not when the collector gets to the
+object. A server that has no place for a client leaves it in the
+listener's queue: `acceptAndOpen` throws before it accepts.
 
 The counts are an extension of the VM (`ConnectionSlots`), so every game
 has its own, and they hold no Java references.
@@ -339,13 +339,13 @@ no alarm having been set before.
   game ends with an error, or when the VM stops), TCP and UDP echo peers,
   TLS servers with a test authority (and ones that send a handshake or a
   record one byte at a time, which end when the VM stops), and the `Deny`
-  policy. The limit
-  tests open a few more than the limits allow (65 sockets, 9 listeners,
-  17 UDP sockets) and write 5 MiB of body, all on loopback. Connects
-  that must fail go to port 0, which fails at once on every system. The programs
-  compile with `javac --release 8` against stubs of the javax.microedition
-  classes in `tests/io_java/stubs`; without a JDK the tests print why and
-  pass, unless `FASTEMU_REQUIRE_JAVA=1` is set.
+  policy. The limit tests open a few more than the limits allow (65
+  sockets, 9 listeners, 17 UDP sockets) and write 5 MiB of body, all on
+  loopback. Connects that must fail go to port 0, which fails at once on
+  every system. The programs compile with `javac --release 8` against
+  stubs of the javax.microedition classes in `tests/io_java/stubs`;
+  without a JDK the tests print why and pass, unless
+  `FASTEMU_REQUIRE_JAVA=1` is set.
 - Until the CLDC library has `java.io.DataInput` and `DataOutput`, the
   tests add stand-ins for both, so `Datagram` loads; the
   `openDataInputStream` case runs once `java.io.DataInputStream` exists
