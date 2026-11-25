@@ -791,13 +791,28 @@ twice what real code takes. The code of every method is counted when the
 class links, whether the method ever runs, so the interpreter needs no
 hook.
 
+The estimate is not exact. Methods that all have names of their own fill
+the table of selectors fastest, and a set of classes of 60000 such
+methods each held about a fifth more than the estimate says.
+
 By this model the JARs of the test game folder cost 3 KB to 29 MiB. The
 largest game (327 classes) costs 7.3 MiB. The 29 MiB is a desktop library
 of 1046 classes that is no game, and the largest single class, with
-thousands of fields, costs 2.8 MiB. What the limit is for stops at 128
-MiB: a class with 65535 constants takes 6.5 MiB, a method of 64 KiB of
-code 1.3 MiB, and a method table of 30000 methods 960 KB for each
-subclass.
+thousands of fields, costs 2.8 MiB. The limit is far above any game and
+stops a hostile set of classes: a class with 65535 constants takes 6.5
+MiB, a method of 64 KiB of code 1.3 MiB, and a method table of 30000
+methods 960 KB for each subclass, so about 20, 100 and 130 of them
+load.
+
+What the loader builds before it knows the size is bounded by the class
+file, so a class that is then refused costs little. A method keeps two
+numbers of its descriptor and not its parse, since a descriptor can name
+tens of thousands of parameters and every method can share it. A text
+constant is copied to UTF-16 once for each text of the pool, however many
+string entries and fields name it. An interface a class names more than
+once is added once. The file itself, which the zip reader caps at 64 MiB
+for an entry, is parsed before any of this, and a refused class holds a
+few times its size while it is.
 
 **Diagnostics.** Something a game needs that FastEmu lacks throws the
 usual error and is reported once to the diagnostics hook and the log, by
