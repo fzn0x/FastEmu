@@ -409,8 +409,10 @@ Events map to `PlayerListener` constants and event data:
 | `SoundListener.soundStateChanged`      | From the group's events: `Started` to `SOUND_PLAYING`, `Stopped` and `EndOfMedia { last: true, .. }` to `SOUND_STOPPED` |
 | `getConcurrentSoundCount(type)`        | Any small number the games accept; the engine plays as many as asked |
 
-Other vendor APIs (Siemens, Samsung, Motorola, Sony Ericsson) take bytes
-and a format the same way and map onto `create_player_as`.
+Samsung's `AudioClip` hands its bytes to `create_player`, which finds the
+format from them. Siemens' `Melody` plays the MIDI file its
+`MelodyComposer` builds, through `create_player_as`. Motorola, LG and Sony
+Ericsson have no sound API of their own.
 
 ## Licenses
 
