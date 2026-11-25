@@ -7,15 +7,18 @@
 # Then, for each line it reads, a list of process ids (or the word
 # "audiodg", the Windows audio engine), it prints one line:
 #
-#   UNIXMS sys IDLE KERNEL USER | PID CYCLES PEAK_WS WS PRIVATE | PID gone | ...
+#   UNIXMS sys IDLE KERNEL USER | PID CYCLES TIME PEAK_WS WS PRIVATE | PID gone | ...
 #
 # IDLE, KERNEL and USER are GetSystemTimes, in 100 ns units over every
 # processor. CYCLES is QueryProcessCycleTime, which counts every burst a
-# thread runs, where Windows' tick based CPU times miss short ones. PEAK_WS,
-# WS and PRIVATE are the peak working set, the working set and the private
-# bytes; "-" when Windows refuses to tell. A process that has ended, or
-# that cannot be opened, is "gone". It waits on its input between lines,
-# so it costs nothing between samples.
+# thread runs, where Windows' tick based CPU times miss short ones. TIME
+# is GetProcessTimes, kernel plus user in 100 ns units: counted by the
+# clock tick, as the system's times are, so the bench takes it from them
+# to find the other load. PEAK_WS, WS and PRIVATE are the peak working
+# set, the working set and the private bytes; "-" when Windows refuses
+# to tell. A process that has ended, or that cannot be opened, is "gone".
+# It waits on its input between lines, so it costs nothing between
+# samples.
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -48,6 +51,8 @@ public static class FastEmuBench {
     public static extern IntPtr GetCurrentThread();
     [DllImport("kernel32.dll")]
     public static extern bool GetSystemTimes(out long idle, out long kernel, out long user);
+    [DllImport("kernel32.dll")]
+    public static extern bool GetProcessTimes(IntPtr process, out long creation, out long exit, out long kernel, out long user);
     [DllImport("kernel32.dll", EntryPoint = "K32GetProcessMemoryInfo")]
     public static extern bool GetProcessMemoryInfo(IntPtr process, out Counters counters, uint size);
 }
@@ -99,12 +104,15 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         if ($code -ne 259) { $out += ('{0} gone' -f $id); continue }
         $cycles = [uint64]0
         [void][FastEmuBench]::QueryProcessCycleTime($h, [ref]$cycles)
+        $created = [long]0; $ended = [long]0; $pk = [long]0; $pu = [long]0
+        [void][FastEmuBench]::GetProcessTimes($h, [ref]$created, [ref]$ended, [ref]$pk, [ref]$pu)
+        $time = $pk + $pu
         $c = New-Object FastEmuBench+Counters
         $c.cb = [uint32]$size
         if ([FastEmuBench]::GetProcessMemoryInfo($h, [ref]$c, [uint32]$size)) {
-            $out += ('{0} {1} {2} {3} {4}' -f $id, $cycles, $c.PeakWorkingSetSize, $c.WorkingSetSize, $c.PrivateUsage)
+            $out += ('{0} {1} {2} {3} {4} {5}' -f $id, $cycles, $time, $c.PeakWorkingSetSize, $c.WorkingSetSize, $c.PrivateUsage)
         } else {
-            $out += ('{0} {1} - - -' -f $id, $cycles)
+            $out += ('{0} {1} {2} - - -' -f $id, $cycles, $time)
         }
     }
     [Console]::Out.WriteLine(($out -join ' | '))

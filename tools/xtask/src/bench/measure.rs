@@ -853,7 +853,7 @@ impl<'a> Bench<'a> {
             let own = sample::usage(a, b, self.sampler.rate, &[procs + 1]);
             m.sampler_ms_per_s = Some(own.cpu_ms_per_s);
             let all: Vec<usize> = (0..procs + 2).collect();
-            m.other = Some(sample::other_load(a, b, self.sampler.rate, &all));
+            m.other = Some(sample::other_load(a, b, &all));
         } else if procs > 0 {
             m.problems.push("fewer than two samples".into());
         }
@@ -908,9 +908,12 @@ fn sample_text(s: &Sample) -> String {
             sample::Proc::Alive {
                 pid,
                 cycles,
+                time,
                 memory: Some(x),
-            } => format!("{pid} {cycles} {} {} {}", x.peak_ws, x.ws, x.private),
-            sample::Proc::Alive { pid, cycles, .. } => format!("{pid} {cycles} - - -"),
+            } => format!("{pid} {cycles} {time} {} {} {}", x.peak_ws, x.ws, x.private),
+            sample::Proc::Alive {
+                pid, cycles, time, ..
+            } => format!("{pid} {cycles} {time} - - -"),
             sample::Proc::Gone { asked } => format!("{asked} gone"),
         })
         .collect();

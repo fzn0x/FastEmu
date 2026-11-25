@@ -4,6 +4,13 @@
 //! times count by the clock tick and miss most of the short bursts game
 //! threads run in, and turns cycles into milliseconds at the rate a busy
 //! thread runs them.
+//!
+//! The other load is the exception. Windows gives the whole system's busy
+//! time only by the clock tick, so the bench takes away the measured
+//! processes' tick based times too. Their cycles can be far more: in a
+//! kernel run FastEmu ran 984 ms a second by its cycles and 637 by the
+//! tick, and taking its cycles away read the other load about 350 ms a
+//! second too low.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -24,6 +31,9 @@ pub enum Proc {
     Alive {
         pid: u32,
         cycles: u64,
+        /// Kernel plus user time from GetProcessTimes, in 100 ns units:
+        /// counted by the clock tick, as the system's times are.
+        time: u64,
         /// Peak working set, working set and private bytes, when Windows
         /// tells them.
         memory: Option<Memory>,
@@ -67,14 +77,16 @@ impl Sample {
                 [asked, "gone"] => Proc::Gone {
                     asked: (*asked).to_owned(),
                 },
-                [pid, cycles, "-", "-", "-"] => Proc::Alive {
+                [pid, cycles, time, "-", "-", "-"] => Proc::Alive {
                     pid: pid.parse().ok()?,
                     cycles: cycles.parse().ok()?,
+                    time: time.parse().ok()?,
                     memory: None,
                 },
-                [pid, cycles, peak, ws, private] => Proc::Alive {
+                [pid, cycles, time, peak, ws, private] => Proc::Alive {
                     pid: pid.parse().ok()?,
                     cycles: cycles.parse().ok()?,
+                    time: time.parse().ok()?,
                     memory: Some(Memory {
                         peak_ws: peak.parse().ok()?,
                         ws: ws.parse().ok()?,
@@ -104,10 +116,14 @@ impl Sample {
 pub struct Usage {
     /// Milliseconds between the samples.
     pub span_ms: f64,
-    /// CPU time the processes used between the samples, in milliseconds.
+    /// CPU time the processes used between the samples, in milliseconds,
+    /// from their cycles.
     pub cpu_ms: f64,
     /// That per second of the span.
     pub cpu_ms_per_s: f64,
+    /// Their CPU per second by Windows' tick based process times: the
+    /// basis of [`system_busy`], so what [`other_load`] takes from it.
+    pub tick_ms_per_s: f64,
     /// Memory at the second sample, summed over the processes; `None` if
     /// one of them did not tell.
     pub memory: Option<Memory>,
@@ -121,6 +137,7 @@ pub struct Usage {
 pub fn usage(a: &Sample, b: &Sample, rate: f64, indices: &[usize]) -> Usage {
     let span_ms = b.unix_ms.saturating_sub(a.unix_ms) as f64;
     let mut cycles = 0u64;
+    let mut ticks = 0u64;
     let mut memory = Some(Memory::default());
     let mut gone = Vec::new();
     for &i in indices {
@@ -129,15 +146,18 @@ pub fn usage(a: &Sample, b: &Sample, rate: f64, indices: &[usize]) -> Usage {
                 Some(Proc::Alive {
                     pid: p0,
                     cycles: c0,
+                    time: t0,
                     ..
                 }),
                 Some(Proc::Alive {
                     pid: p1,
                     cycles: c1,
+                    time: t1,
                     memory: m,
                 }),
             ) if p0 == p1 => {
                 cycles += c1.saturating_sub(*c0);
+                ticks += t1.saturating_sub(*t0);
                 memory = match (memory, m) {
                     (Some(sum), Some(m)) => Some(Memory {
                         peak_ws: sum.peak_ws + m.peak_ws,
@@ -162,14 +182,18 @@ pub fn usage(a: &Sample, b: &Sample, rate: f64, indices: &[usize]) -> Usage {
     } else {
         0.0
     };
+    let per_s = |ms: f64| {
+        if span_ms > 0.0 {
+            ms * 1000.0 / span_ms
+        } else {
+            0.0
+        }
+    };
     Usage {
         span_ms,
         cpu_ms,
-        cpu_ms_per_s: if span_ms > 0.0 {
-            cpu_ms * 1000.0 / span_ms
-        } else {
-            0.0
-        },
+        cpu_ms_per_s: per_s(cpu_ms),
+        tick_ms_per_s: per_s(ticks as f64 / 10_000.0),
         memory,
         gone,
     }
@@ -187,10 +211,12 @@ pub fn system_busy(a: &Sample, b: &Sample) -> f64 {
 
 /// The busy CPU time per second of everything but the processes at
 /// `indices`: the other load on the machine while they were measured.
-pub fn other_load(a: &Sample, b: &Sample, rate: f64, indices: &[usize]) -> f64 {
+/// It takes their tick based times from the system's, which Windows
+/// counts the same way, not their cycles.
+pub fn other_load(a: &Sample, b: &Sample, indices: &[usize]) -> f64 {
     let all: Vec<usize> = (0..b.procs.len()).collect();
     let indices = if indices.is_empty() { &all } else { indices };
-    (system_busy(a, b) - usage(a, b, rate, indices).cpu_ms_per_s).max(0.0)
+    (system_busy(a, b) - usage(a, b, 0.0, indices).tick_ms_per_s).max(0.0)
 }
 
 /// The running sampler.
@@ -290,20 +316,22 @@ mod tests {
     fn cpu_and_memory_from_two_samples() {
         // At 2e9 cycles a second over 2 s: the first process used 4e8
         // cycles (200 ms, 100 ms a second), the second 2e9 (1000 ms, 500
-        // ms a second). The system was busy (kernel - idle + user) 18e6
-        // units of 100 ns, 1800 ms, 900 ms a second.
+        // ms a second). By the tick they used 180 ms and 1000 ms, 590 ms
+        // a second together. The system was busy (kernel - idle + user)
+        // 18e6 units of 100 ns, 1800 ms, 900 ms a second.
         let a = Sample::parse(
-            "1000 sys 100000000 150000000 20000000 | 11 1000 5 4 3 | 22 0 10 9 8 | audiodg gone",
+            "1000 sys 100000000 150000000 20000000 | 11 1000 0 5 4 3 | 22 0 100 10 9 8 | audiodg gone",
         )
         .unwrap();
         let b = Sample::parse(
-            "3000 sys 132000000 190000000 30000000 | 11 400001000 50 40 30 | 22 2000000000 100 90 80 | audiodg gone",
+            "3000 sys 132000000 190000000 30000000 | 11 400001000 1800000 50 40 30 | 22 2000000000 10000100 100 90 80 | audiodg gone",
         )
         .unwrap();
         let both = usage(&a, &b, 2e9, &[0, 1]);
         assert!((both.span_ms - 2000.0).abs() < 1e-9);
         assert!((both.cpu_ms - 1200.0).abs() < 1e-6, "{both:?}");
         assert!((both.cpu_ms_per_s - 600.0).abs() < 1e-6, "{both:?}");
+        assert!((both.tick_ms_per_s - 590.0).abs() < 1e-6, "{both:?}");
         assert_eq!(
             both.memory,
             Some(Memory {
@@ -314,19 +342,64 @@ mod tests {
         );
         assert!(both.gone.is_empty());
         assert!((system_busy(&a, &b) - 900.0).abs() < 1e-9);
-        assert!((other_load(&a, &b, 2e9, &[0, 1]) - 300.0).abs() < 1e-6);
+        // The other load takes the tick based times away, not the cycles.
+        assert!((other_load(&a, &b, &[0, 1]) - 310.0).abs() < 1e-6);
         // A process that is gone is reported gone, not as zero.
         let audio = usage(&a, &b, 2e9, &[2]);
         assert_eq!(audio.gone, ["audiodg"]);
         assert_eq!(audio.memory, None);
-        let c = Sample::parse("5000 sys 1 2 3 | 11 gone | 22 3000000000 - - -").unwrap();
+        let c = Sample::parse("5000 sys 1 2 3 | 11 gone | 22 3000000000 10000200 - - -").unwrap();
         let after = usage(&b, &c, 2e9, &[0, 1]);
         assert_eq!(after.gone, ["11"]);
         assert_eq!(after.memory, None);
-        // Lines that are not the sampler's.
+        // Lines that are not the sampler's, and one without the time.
         assert_eq!(Sample::parse("rate 2000"), None);
-        assert_eq!(Sample::parse("1 sys 1 2 3 | 11 x 1 2 3"), None);
+        assert_eq!(Sample::parse("1 sys 1 2 3 | 11 x 1 2 3 4"), None);
         assert_eq!(Sample::parse("1 sys 1 2 3 | 11 1 2"), None);
+        assert_eq!(Sample::parse("1 sys 1 2 3 | 11 1 2 3 4"), None);
+    }
+
+    /// Over 10 s on 20 processors, a measured process keeps one core busy:
+    /// 1000 ms a second by its cycles, 980 by the tick. A second process
+    /// the bench does not measure keeps another core busy, 985 ms a second
+    /// by the tick, and the rest of the machine adds 15. The system was
+    /// busy 1980 ms a second. Then come audiodg, gone, and the sampler.
+    #[test]
+    fn other_load_shows_a_second_busy_process() {
+        let a =
+            Sample::parse("0 sys 0 0 0 | 4242 0 0 1 1 1 | audiodg gone | 77 0 0 1 1 1").unwrap();
+        let b = Sample::parse(
+            "10000 sys 1802000000 1804000000 196000000 | 4242 30000000000 98000000 1 1 1 | audiodg gone | 77 3000000 0 1 1 1",
+        )
+        .unwrap();
+        let measured = usage(&a, &b, 3e9, &[0]);
+        assert!(
+            (measured.cpu_ms_per_s - 1000.0).abs() < 1e-6,
+            "{measured:?}"
+        );
+        assert!((system_busy(&a, &b) - 1980.0).abs() < 1e-6);
+        let other = other_load(&a, &b, &[0, 1, 2]);
+        assert!((other - 1000.0).abs() < 1e-6, "{other}");
+        assert!((other - 985.0).abs() < 50.0, "{other}");
+    }
+
+    /// The kernel run that showed the bias: over 64 s the system was busy
+    /// 984.5 ms a second, less than the measured process's 994 by its
+    /// cycles. By the tick that process used 975, so the other load is
+    /// near 0, and stays above it.
+    #[test]
+    fn other_load_of_a_busy_process_alone_is_near_zero() {
+        let a =
+            Sample::parse("0 sys 0 0 0 | 4242 0 0 1 1 1 | audiodg gone | 77 0 0 1 1 1").unwrap();
+        // 20 processors over 64 s: 12_800_000_000 units, 630_080_000 busy.
+        let b = Sample::parse(
+            "64000 sys 12169920000 12171920000 628080000 | 4242 190848000000 624000000 1 1 1 | audiodg gone | 77 3000000 0 1 1 1",
+        )
+        .unwrap();
+        assert!((system_busy(&a, &b) - 984.5).abs() < 1e-6);
+        assert!((usage(&a, &b, 3e9, &[0]).cpu_ms_per_s - 994.0).abs() < 1e-6);
+        let other = other_load(&a, &b, &[0, 1, 2]);
+        assert!((other - 9.5).abs() < 1e-6, "{other}");
     }
 
     /// The real sampler, on this test's own process and on a child that
@@ -352,6 +425,7 @@ mod tests {
                 pid,
                 cycles,
                 memory,
+                ..
             } => {
                 assert_eq!(*pid, std::process::id());
                 assert!(*cycles > 0);
