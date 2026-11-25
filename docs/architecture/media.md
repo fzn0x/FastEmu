@@ -203,6 +203,28 @@ silent player's loops and end, a stop time reached) and says when it
 next needs one, and the thread sleeps until the earliest, at most 200
 milliseconds, so a stopping VM is noticed quickly.
 
+The channel is bounded by a count, because a game can make events faster
+than its listener takes them (a volume that flips, a start and a stop in
+a loop, a sound that loops a few frames) and the Java heap would never
+show it. Each note that waits adds one to a count, and the thread takes
+one off before it handles the note, so a batch it is working through
+still counts. Past 1024 waiting notes the repeats are dropped: `STARTED`,
+`VOLUME_CHANGED` and the `END_OF_MEDIA` of a pass that another follows.
+Past 2048 the events that end a run are dropped too: `STOPPED`,
+`STOPPED_AT_TIME`, the last `END_OF_MEDIA` and `ERROR`. Then the player
+stays held until its next run ends or it closes. `CLOSED` is never
+dropped, and neither is the notice that an object was collected. The
+engine's own queue ahead of this one holds 4096 events for all games and
+drops in the same order (see [audio.md](audio.md)). A listener that keeps
+up hears every event. A wake is queued once, however many starts ask for
+one.
+
+A start that fails (the game has 32 players started) lets go of the
+player at once: no event would end a run that never began. An `ERROR`
+event is also written to the host log as a warning, 16 times for an
+instance, so a decoder that gave up or a sound that panicked leaves a
+trace.
+
 ## Keeping players alive
 
 Games create hundreds of players: one per effect, often never closed,
