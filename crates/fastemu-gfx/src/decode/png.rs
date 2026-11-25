@@ -188,21 +188,33 @@ const ADAM7: [(u32, u32, u32, u32); 7] = [
 ];
 
 impl Layout {
+    /// The layout an IHDR promises, `None` unless it is one PNG allows: a
+    /// colour type with one of its bit depths, the standard compression
+    /// and filter methods and one of the two interlace methods. The `png`
+    /// crate refuses everything else, so there is nothing to repair.
     fn of(header: &[u8]) -> Option<Self> {
         let field = |at: usize| Some(u32::from_be_bytes(header.get(at..at + 4)?.try_into().ok()?));
         let depth = usize::from(*header.get(8)?);
-        let channels = match header.get(9)? {
-            0 | 3 => 1,
-            4 => 2,
-            2 => 3,
-            6 => 4,
+        let channels = match (*header.get(9)?, depth) {
+            (0, 1 | 2 | 4 | 8 | 16) | (3, 1 | 2 | 4 | 8) => 1,
+            (4, 8 | 16) => 2,
+            (2, 8 | 16) => 3,
+            (6, 8 | 16) => 4,
             _ => return None,
         };
+        let interlaced = match header.get(12)? {
+            0 => false,
+            1 => true,
+            _ => return None,
+        };
+        if *header.get(10)? != 0 || *header.get(11)? != 0 {
+            return None;
+        }
         Some(Self {
             width: field(0)?,
             height: field(4)?,
             bits_per_pixel: channels * depth,
-            interlaced: *header.get(12)? == 1,
+            interlaced,
         })
     }
 
@@ -538,8 +550,78 @@ pub(crate) mod tests {
         // 3x3 RGB interlaced: passes 1, 4, 5, 6 and 7 hold 1, 1, 2, 2
         // and 3 pixels in one row each, except pass 6 with two rows.
         assert_eq!(header(3, 3, 8, 2, 1).raw_len(), 4 + 4 + 7 + 2 * 4 + 10);
-        assert!(Layout::of(&[0; 13]).is_some());
         assert!(Layout::of(&[0, 0, 0, 1, 0, 0, 0, 1, 8, 5, 0, 0, 0]).is_none());
+        assert!(Layout::of(&[0; 12]).is_none());
+    }
+
+    /// A PNG with a hand-made header, a stored image stream of `raw` and
+    /// the chunks in `extra` between them.
+    fn crafted(header: [u8; 13], extra: &[Vec<u8>], raw: &[u8]) -> Vec<u8> {
+        let mut file = SIGNATURE.to_vec();
+        file.extend(chunk(*b"IHDR", &header));
+        for part in extra {
+            file.extend_from_slice(part);
+        }
+        file.extend(chunk(*b"IDAT", &zlib_stored(raw)));
+        file.extend(chunk(*b"IEND", &[]));
+        file
+    }
+
+    /// An IHDR body.
+    fn ihdr(width: u32, height: u32, depth: u8, color: u8, interlace: u8) -> [u8; 13] {
+        let mut out = [0; 13];
+        out[..4].copy_from_slice(&width.to_be_bytes());
+        out[4..8].copy_from_slice(&height.to_be_bytes());
+        out[8..].copy_from_slice(&[depth, color, 0, 0, interlace]);
+        out
+    }
+
+    #[test]
+    fn only_the_depths_png_allows_make_a_layout() {
+        let allowed: [(u8, &[u8]); 5] = [
+            (0, &[1, 2, 4, 8, 16]),
+            (2, &[8, 16]),
+            (3, &[1, 2, 4, 8]),
+            (4, &[8, 16]),
+            (6, &[8, 16]),
+        ];
+        for color in 0..=7_u8 {
+            for depth in [0, 1, 2, 3, 4, 5, 8, 12, 16, 17, 32, 255] {
+                let legal = allowed
+                    .iter()
+                    .any(|&(c, depths)| c == color && depths.contains(&depth));
+                let layout = Layout::of(&ihdr(4, 4, depth, color, 0));
+                assert_eq!(
+                    layout.is_some(),
+                    legal,
+                    "colour type {color}, depth {depth}"
+                );
+            }
+        }
+        // Only the two interlace methods PNG has.
+        assert!(Layout::of(&ihdr(4, 4, 8, 2, 1)).is_some());
+        assert!(Layout::of(&ihdr(4, 4, 8, 2, 2)).is_none());
+    }
+
+    #[test]
+    fn an_invalid_bit_depth_is_not_repaired() {
+        // The png crate refuses depth 255, and the repair used to size
+        // three buffers from it: 3 x 127.5 bytes a pixel. Scaled down
+        // from the 72 byte file with 16384 x 2048 pixels that wanted
+        // 12.8 GB, this one wanted 190 MB.
+        let file = crafted(ihdr(1024, 512, 255, 6, 0), &[], &[0, 1, 2, 3]);
+        assert!(matches!(Surface::decode(&file), Err(GfxError::Decode(_))));
+        let chunks = Chunks::read(&file).unwrap();
+        assert!(refill(&chunks).is_none());
+    }
+
+    /// The audit's 72 byte file. Before the fix it made the repair ask for
+    /// three buffers of 4.28 GB each, and a failed allocation aborts.
+    #[test]
+    fn the_72_byte_depth_bomb_fails_fast() {
+        let file = crafted(ihdr(16384, 2048, 255, 6, 0), &[], &[0, 1, 2, 3]);
+        assert_eq!(file.len(), 72);
+        assert!(matches!(Surface::decode(&file), Err(GfxError::Decode(_))));
     }
 
     #[test]
