@@ -185,7 +185,9 @@ fn decode_in_turn<R>(
 
 /// Checks the image `bytes` declares against the heap, then decodes it
 /// with the VM lock released, as decoding is slow and touches nothing of
-/// the VM. A size the heap cannot hold is `OutOfMemoryError`. Runs inside
+/// the VM. A size the heap cannot hold is `OutOfMemoryError`; a GIF whose
+/// first frame has more pixels than the image and is more than the heap
+/// can hold is a file that does not decode. Runs inside
 /// [`decode_in_turn`] only.
 fn decode_checked(ctx: &mut Ctx<'_>, bytes: Vec<u8>) -> JResult<Result<Surface, GfxError>> {
     debug_assert!(IN_TURN.get(), "an image decoded outside its game's turn");
@@ -194,6 +196,20 @@ fn decode_checked(ctx: &mut Ctx<'_>, bytes: Vec<u8>) -> JResult<Result<Surface, 
     // decoder, which refuses it for the same reason.
     if let Some((width, height)) = fastemu_gfx::probe_size(&bytes) {
         reserve_pixels(ctx, width.into(), height.into())?;
+    }
+    // The frame is decoded whole before it is cut to the image: 160 MiB
+    // for a file of 34 bytes. One the heap could hold decodes as ever.
+    if let Some(frame) = fastemu_gfx::probe_frame_bytes(&bytes) {
+        match ctx.check_alloc(usize::try_from(frame).unwrap_or(usize::MAX)) {
+            Ok(()) => {}
+            Err(Throw::Stop) => return Err(Throw::Stop),
+            Err(Throw::Exception(_)) => {
+                return Ok(Err(GfxError::Decode(
+                    "GIF: the heap cannot hold the first frame, which is larger than the image"
+                        .into(),
+                )));
+            }
+        }
     }
     Ok(ctx.without_lock(move || Surface::decode(&bytes)))
 }
