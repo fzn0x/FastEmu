@@ -355,8 +355,9 @@ than 16384 pixels, fail with `OutOfMemoryError` before their pixels are
 allocated. zune-jpeg refuses a JPEG frame header over 16384 pixels a side
 while it reads the headers, so such a JPEG is a decode error. A GIF's
 first frame is decoded at its own size before it is placed on the logical
-screen: the `gif` crate's memory limit holds it to 2^25 pixels, and the
-heap check sees only the screen. The wrapper checks the declared size
+screen: the `gif` crate's memory limit holds it to 2^25 pixels, and a
+frame with more pixels than the screen is checked against the heap too.
+The wrapper checks the declared size
 against the heap first, as the Images section says, so a PNG that declares
 2^25 pixels does not make `decode_stream` reserve its 128 MiB buffer on a
 heap of a few MiB.
