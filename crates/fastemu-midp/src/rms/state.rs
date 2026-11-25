@@ -34,6 +34,12 @@ pub const DEFAULT_QUOTA: u64 = 1 << 20;
 /// stores of its own would take a place in the map.
 const MAX_OTHER_OWNERS: usize = 16;
 
+/// How many record stores a suite may have. Each is a file, and the quota
+/// counts the bytes in them, so without a limit a game that makes empty
+/// stores gets tens of thousands of files for its megabyte. Phones allowed
+/// a few dozen at most and games make fewer than ten.
+pub(crate) const MAX_STORES: usize = 64;
+
 /// Whose stores a store belongs to.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Owner {
@@ -135,6 +141,11 @@ impl Rms {
     /// The contents of a store that is in memory.
     pub(crate) fn data(&self, key: &StoreKey) -> Option<&StoreData> {
         self.suites.get(&key.owner)?.get(&key.name)?.data.as_ref()
+    }
+
+    /// Whether `owner` may make one more store than it has now.
+    pub(crate) fn may_add_store(&self, owner: &Owner) -> bool {
+        self.suites.get(owner).map_or(0, BTreeMap::len) < MAX_STORES
     }
 
     /// The bytes an owner's stores take.
@@ -526,6 +537,38 @@ mod tests {
             // ones kept still load.
             assert!(!load(ctx, &key("nobody")).unwrap());
             assert!(load(ctx, &key("vendor 0")).unwrap());
+        });
+    }
+
+    #[test]
+    fn a_suite_with_64_stores_makes_no_more_and_keeps_the_ones_it_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = |i: usize| StoreKey {
+            owner: Owner::Own,
+            name: StoreName::from_text(&format!("s{i}")).unwrap(),
+        };
+        // 70 stores, made before there was a limit.
+        let folder = disk::rms_dir(dir.path());
+        for i in 0..70 {
+            let file = StoreData::new(key(i).name, 0).encode();
+            disk::write_atomic(&disk::store_path(&folder, &key(i).name), &file).unwrap();
+        }
+        with_ctx(dir.path(), |ctx| {
+            scan(ctx, &Owner::Own).unwrap();
+            assert!(!rms(ctx).may_add_store(&Owner::Own));
+            for i in 0..70 {
+                assert!(load(ctx, &key(i)).unwrap(), "store {i}");
+            }
+            // Deleting makes room only once the suite is under the limit.
+            for i in 0..6 {
+                assert!(delete(ctx, &key(i)).unwrap());
+                assert!(!rms(ctx).may_add_store(&Owner::Own), "{} left", 69 - i);
+            }
+            assert!(delete(ctx, &key(6)).unwrap());
+            assert!(rms(ctx).may_add_store(&Owner::Own));
+            // The limit is each suite's own, and a suite with no store
+            // is under it.
+            assert!(rms(ctx).may_add_store(&other("vendor", "game")));
         });
     }
 }

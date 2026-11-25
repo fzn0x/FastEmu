@@ -249,6 +249,12 @@ fn open(ctx: &mut Ctx<'_>, key: StoreKey, create: Option<Mode>) -> JResult<Value
         let mut data = StoreData::new(key.name.clone(), now_millis());
         data.shared = mode.shared;
         data.writable = mode.writable;
+        if !rms(ctx).may_add_store(&key.owner) {
+            return ctx.throw(
+                RECORD_STORE_FULL_EXCEPTION,
+                &format!("a suite may have {} record stores", state::MAX_STORES),
+            );
+        }
         if !rms(ctx).fits(&key.owner, 0, data.size()) {
             return ctx.throw(
                 RECORD_STORE_FULL_EXCEPTION,
