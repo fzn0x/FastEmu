@@ -207,6 +207,16 @@ impl ConstantPool {
         }
     }
 
+    /// [`ConstantPool::class_name`] as the pool's own `Arc`, not a copy. A
+    /// class file can name one class 65535 times, and its name can take
+    /// 65535 bytes: a copy for each mention is four gigabytes.
+    pub fn class_name_arc(&self, index: u16) -> Result<Arc<str>, FormatError> {
+        match self.get(index) {
+            Some(Constant::Class(name)) => self.utf8_arc(*name),
+            _ => Err(Self::bad(index, "a class")),
+        }
+    }
+
     pub fn name_and_type(&self, index: u16) -> Result<(&str, &str), FormatError> {
         match self.get(index) {
             Some(Constant::NameAndType { name, descriptor }) => {

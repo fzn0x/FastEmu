@@ -146,12 +146,12 @@ impl ClassFile {
         }
         let cp = ConstantPool::parse(&mut r)?;
         let access = r.u16()?;
-        let name: Arc<str> = cp.class_name(r.u16()?)?.into();
+        let name = cp.class_name_arc(r.u16()?)?;
         let super_index = r.u16()?;
         let super_name = if super_index == 0 {
             None
         } else {
-            Some(cp.class_name(super_index)?.into())
+            Some(cp.class_name_arc(super_index)?)
         };
         if super_name.is_none() && &*name != "java/lang/Object" {
             return Err(FormatError::new(format!("{name} has no superclass")));
@@ -159,7 +159,7 @@ impl ClassFile {
         let interface_count = r.u16()?;
         let mut interfaces = Vec::with_capacity(interface_count as usize);
         for _ in 0..interface_count {
-            interfaces.push(cp.class_name(r.u16()?)?.into());
+            interfaces.push(cp.class_name_arc(r.u16()?)?);
         }
         let field_count = r.u16()?;
         let mut fields = Vec::with_capacity(field_count as usize);
@@ -433,6 +433,61 @@ mod tests {
         let class = ClassFile::parse(&bytes).unwrap();
         assert_eq!(class.methods.len(), 3000);
         assert_eq!(take_shapes(), 2, "one walk for each descriptor");
+    }
+
+    /// The start of a class file `T` that extends `Object`, with the
+    /// pool entries 1 to 4 and then the text entries `texts`, from 5 on.
+    fn class_head(texts: &[&str]) -> Vec<u8> {
+        let mut b = vec![0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 49];
+        let utf8 = |b: &mut Vec<u8>, s: &str| {
+            b.push(1);
+            b.extend((s.len() as u16).to_be_bytes());
+            b.extend(s.as_bytes());
+        };
+        b.extend((5 + texts.len() as u16).to_be_bytes());
+        utf8(&mut b, "T"); // 1
+        b.extend([7, 0, 1]); // 2: class T
+        utf8(&mut b, "java/lang/Object"); // 3
+        b.extend([7, 0, 3]); // 4: class Object
+        for text in texts {
+            utf8(&mut b, text); // 5 and on
+        }
+        b
+    }
+
+    /// A class file `T` that names the interface `I` of `name_len` bytes
+    /// `mentions` times.
+    fn class_of_interfaces(name_len: usize, mentions: usize) -> Vec<u8> {
+        let name = "a".repeat(name_len);
+        let mut b = class_head(&[&name]);
+        // The class entry for the text at 5 goes after the texts.
+        b[8..10].copy_from_slice(&7u16.to_be_bytes());
+        b.extend([7, 0, 5]); // 6: class `name`
+        b.extend(0x0421u16.to_be_bytes());
+        b.extend(2u16.to_be_bytes());
+        b.extend(4u16.to_be_bytes());
+        b.extend((mentions as u16).to_be_bytes());
+        for _ in 0..mentions {
+            b.extend(6u16.to_be_bytes());
+        }
+        b.extend([0; 6]); // no fields, no methods, no attributes
+        b
+    }
+
+    #[test]
+    fn interfaces_that_name_one_class_share_its_name() {
+        // A class file can name one interface 65535 times, and the name can
+        // take 65535 bytes. A copy for each mention is four gigabytes.
+        let bytes = class_of_interfaces(60_000, 2000);
+        let class = ClassFile::parse(&bytes).unwrap();
+        assert_eq!(class.interfaces.len(), 2000);
+        assert_eq!(class.interfaces[0].len(), 60_000);
+        assert!(
+            class
+                .interfaces
+                .iter()
+                .all(|name| Arc::ptr_eq(name, &class.interfaces[0]))
+        );
     }
 
     #[test]
