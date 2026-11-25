@@ -10,7 +10,7 @@ use super::layer::{
 use super::model::GameError;
 use super::model::collide::{self, Footprint};
 use super::model::sprite::Sprite;
-use crate::lcdui::image::new_image;
+use crate::lcdui::image::{new_image, snapshot_of};
 use crate::lcdui::throw_gfx;
 
 const CLASS: &str = "javax/microedition/lcdui/game/Sprite";
@@ -75,6 +75,12 @@ fn construct(
 fn copy(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let this = ctx.non_null(a[0])?;
     let other = layer_arg(ctx, a[1])?;
+    // The copy has a frame sequence of its own.
+    let sequence_bytes = match &ctx.payload::<LayerData>(other)?.shape {
+        Shape::Sprite(sprite) => sprite.heap_bytes(),
+        Shape::Tiled(_) => 0,
+    };
+    ctx.check_alloc(sequence_bytes)?;
     let (sprite, image) = {
         let data = ctx.payload::<LayerData>(other)?;
         match &data.shape {
@@ -89,11 +95,7 @@ fn copy(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
         Some(image) => {
             let image = ctx.root(image);
             let pixels = image_pixels(ctx, image)?;
-            let snapshot = {
-                let surface = pixels.lock();
-                surface.is_mutable().then(|| surface.to_immutable())
-            };
-            Some(match snapshot {
+            Some(match snapshot_of(ctx, &pixels)? {
                 Some(surface) => new_image(ctx, surface)?,
                 None => image,
             })
@@ -103,15 +105,25 @@ fn copy(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let data = ctx.payload_mut::<LayerData>(this)?;
     data.image = image;
     data.shape = Shape::Sprite(sprite);
+    ctx.recount(this);
     Ok(Value::Void)
 }
 
 fn set_frame_sequence(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
+    let this = ctx.non_null(a[0])?;
+    // The sprite keeps a copy of the array, which the heap counts a second
+    // time, so a game cannot give many sprites the same big array.
     let sequence = match a[1].obj() {
-        Some(array) => Some(ctx.array::<i32>(array)?.to_vec()),
+        Some(array) => {
+            let length = ctx.array::<i32>(array)?.len();
+            ctx.check_alloc(length.saturating_mul(4))?;
+            Some(ctx.array::<i32>(array)?.to_vec())
+        }
         None => None,
     };
-    checked(ctx, a[0], |s| s.set_frame_sequence(sequence.as_deref()))
+    let done = checked(ctx, a[0], |s| s.set_frame_sequence(sequence.as_deref()))?;
+    ctx.recount(this);
+    Ok(done)
 }
 
 fn set_image(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
