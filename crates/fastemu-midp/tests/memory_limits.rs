@@ -517,10 +517,7 @@ fn custom_items_count_their_surfaces_and_screens_not_shown_give_their_buffers_ba
     assert!(run.has("custom forms 10 shown"), "{log}");
     let forms = run.wait_log("custom forms count ");
     let counted = numbers(&forms, "custom forms count ")[0];
-    assert!(
-        counted < 2 * SCREEN_BYTES && counted >= SCREEN_BYTES,
-        "{log}"
-    );
+    assert!((SCREEN_BYTES..2 * SCREEN_BYTES).contains(&counted), "{log}");
 }
 
 #[test]
