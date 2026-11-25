@@ -364,8 +364,11 @@ pub fn classes() -> Vec<NativeClass> {
             Ok(Value::Void)
         })
         .method_with("notifyPaused", "()V", final_method, |ctx, _| {
-            ctx.log(LogLevel::Info, "the MIDlet paused itself");
-            env(ctx).host.set_status(InstanceStatus::Paused);
+            // Logged when it pauses the MIDlet, not on every call of a game
+            // that calls it in a loop.
+            if env(ctx).host.set_status(InstanceStatus::Paused) {
+                ctx.log(LogLevel::Info, "the MIDlet paused itself");
+            }
             Ok(Value::Void)
         })
         .method_with("resumeRequest", "()V", final_method, |ctx, _| {
@@ -499,6 +502,34 @@ mod tests {
         );
         assert_eq!(host.peek_status(), InstanceStatus::Running);
         assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn notify_paused_logs_only_when_it_pauses_the_midlet() {
+        let (vm, host) = machine(Arc::default());
+        let notify = |times: usize| {
+            vm.attach("test", |ctx| -> JResult<()> {
+                let midlet = midlet(ctx).expect("the MIDlet");
+                for _ in 0..times {
+                    ctx.call_virtual(midlet, "notifyPaused", "()V", &[])?;
+                }
+                Ok(())
+            })
+            .expect("notifyPaused");
+        };
+        let logged = || {
+            host.drain_log()
+                .iter()
+                .filter(|l| l.text == "the MIDlet paused itself")
+                .count()
+        };
+        host.set_status(InstanceStatus::Running);
+        notify(1000);
+        assert_eq!(logged(), 1, "one pause, one line");
+        assert_eq!(host.peek_status(), InstanceStatus::Paused);
+        host.set_status(InstanceStatus::Running);
+        notify(1000);
+        assert_eq!(logged(), 1, "the next pause has its own line");
     }
 
     #[test]

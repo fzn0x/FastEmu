@@ -295,15 +295,17 @@ impl HostLink {
     }
 
     /// Changes the status. A finished status (exited or crashed) is final.
-    pub(crate) fn set_status(&self, status: InstanceStatus) {
+    /// Returns whether the status changed.
+    pub(crate) fn set_status(&self, status: InstanceStatus) -> bool {
         {
             let mut state = self.0.state.lock();
             if state.status.is_finished() || state.status == status {
-                return;
+                return false;
             }
             state.status = status;
         }
         self.changed();
+        true
     }
 
     /// Sets the status to `Running` as a `startApp` starts, unless
