@@ -101,14 +101,15 @@ pub(super) fn from_native(native: NativeClass) -> Result<ClassDef, LoadError> {
 
 pub(super) fn from_class_file(file: ClassFile) -> Result<ClassDef, LoadError> {
     let cp = &file.constant_pool;
+    let mut strings = HashMap::new();
     let mut fields = Vec::with_capacity(file.fields.len());
     for f in file.fields {
         let constant = match f.constant_value {
-            Some(index) if f.access & access::STATIC != 0 => {
-                Some(constant_value(cp, index, &f.descriptor).ok_or_else(|| {
+            Some(index) if f.access & access::STATIC != 0 => Some(
+                constant_value(cp, index, &f.descriptor, &mut strings).ok_or_else(|| {
                     format_error(&file.name, format!("bad constant value of {}", f.name))
-                })?)
-            }
+                })?,
+            ),
             _ => None,
         };
         fields.push(FieldDef {
@@ -156,14 +157,28 @@ pub(super) fn from_class_file(file: ClassFile) -> Result<ClassDef, LoadError> {
     })
 }
 
-fn constant_value(cp: &ConstantPool, index: u16, desc: &str) -> Option<ConstValue> {
+/// The value of the `ConstantValue` attribute of a static field. A string
+/// is made once for every field that names it: a class file can give
+/// thousands of fields one long string, and each would otherwise hold a
+/// copy.
+fn constant_value(
+    cp: &ConstantPool,
+    index: u16,
+    desc: &str,
+    strings: &mut HashMap<u16, Arc<[u16]>>,
+) -> Option<ConstValue> {
     Some(ConstValue::Value(match (cp.get(index)?, kind_of(desc)) {
         (Constant::Integer(v), Kind::Int) => Value::Int(*v),
         (Constant::Long(v), Kind::Long) => Value::Long(*v),
         (Constant::Float(v), Kind::Float) => Value::Float(*v),
         (Constant::Double(v), Kind::Double) => Value::Double(*v),
         (Constant::String(_), Kind::Ref) => {
-            return Some(ConstValue::String(cp.string(index).ok()?.into()));
+            if let Some(text) = strings.get(&index) {
+                return Some(ConstValue::String(Arc::clone(text)));
+            }
+            let text: Arc<[u16]> = cp.string(index).ok()?.into();
+            strings.insert(index, Arc::clone(&text));
+            return Some(ConstValue::String(text));
         }
         _ => return None,
     }))
@@ -416,5 +431,66 @@ impl ClassTable {
             }
         }
         (vtable, vmap)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::classfile::{FieldInfo, Utf8};
+
+    fn utf8(text: &str) -> Constant {
+        Constant::Utf8(Utf8 {
+            text: text.into(),
+            exact: None,
+        })
+    }
+
+    /// A class file whose static fields `f0`, `f1`, ... name the string
+    /// constants `constants`: entry 2 and entry 4 of its pool.
+    fn with_string_constants(constants: &[u16]) -> ClassFile {
+        let fields = constants
+            .iter()
+            .enumerate()
+            .map(|(i, &constant)| FieldInfo {
+                access: access::STATIC | access::FINAL,
+                name: format!("f{i}").into(),
+                descriptor: "Ljava/lang/String;".into(),
+                constant_value: Some(constant),
+            })
+            .collect();
+        ClassFile {
+            minor_version: 0,
+            major_version: 49,
+            constant_pool: ConstantPool::from_entries(vec![
+                Constant::Unused,
+                utf8(&"x".repeat(1000)),
+                Constant::String(1),
+                utf8("short"),
+                Constant::String(3),
+            ]),
+            access: access::PUBLIC | access::SUPER,
+            name: "a/A".into(),
+            super_name: Some("java/lang/Object".into()),
+            interfaces: Vec::new(),
+            fields,
+            methods: Vec::new(),
+            source_file: None,
+        }
+    }
+
+    #[test]
+    fn fields_that_name_one_string_constant_share_its_text() {
+        let def = from_class_file(with_string_constants(&[2, 2, 4, 2])).unwrap();
+        let text = |i: usize| match &def.fields[i].constant {
+            Some(ConstValue::String(text)) => Arc::clone(text),
+            other => panic!("{other:?}"),
+        };
+        // Each field holding a copy would make a class of 65535 fields
+        // that name a long string take gigabytes.
+        assert!(Arc::ptr_eq(&text(0), &text(1)));
+        assert!(Arc::ptr_eq(&text(0), &text(3)));
+        assert!(!Arc::ptr_eq(&text(0), &text(2)));
+        assert_eq!((text(0).len(), text(2).len()), (1000, 5));
     }
 }
