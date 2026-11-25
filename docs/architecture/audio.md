@@ -42,12 +42,14 @@ why, and how the MIDP layer should map each MMAPI call onto it.
 
 ## Threads and locking
 
-All mixer state sits behind one lock, a `parking_lot` mutex. It is fair:
-a caller that has waited a moment gets it next, so a thread that takes it
+All mixer state sits behind one lock, a `parking_lot` mutex. It is fair
+over about a millisecond: a caller that has waited that long gets it
+next, so a thread that takes it
 again and again (a game that seeks a big MIDI file in a loop) cannot keep
 the audio thread or another game's calls out. API calls hold it briefly.
 The audio thread renders a buffer in slices of 128 frames and frees the
-lock between them, so a call waits for one slice at most. Decoding and
+lock between them, so a call waits for the slice under way, or about a
+millisecond while the slices are short. Decoding and
 parsing happen before the lock is taken (when a player is created), so
 the only work under the lock is rendering, which is the work the audio
 thread must do anyway. The lock has no poison: a panic while it was held
@@ -58,12 +60,12 @@ What one game can make the lock cost is bounded:
 - a game has at most 32 players started, and all games together 128 (see
   Players);
 - a MIDI file of a few frames plays once, a file sends at most 512
-  messages for each call to render, and a file holds at most 65,536
+  messages for each call to render, and a file holds at most 65536
   events (see Formats);
 - listeners hear of a loop at most every 20 ms of output per player.
 
 A seek in a MIDI file replays the controllers before the new position. It
-is up to 65,536 events under the lock, about a millisecond. That stays a
+is up to 65536 events under the lock, about a millisecond. That stays a
 known limit, and the fair lock keeps it from starving anyone.
 
 [SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists the
@@ -202,7 +204,10 @@ should report.
   data size of zero or past the end runs to the end of the file, a RIFF
   size is ignored, a missing pad byte after an odd chunk is noticed, a
   torn last frame is dropped, and a lost chunk walk searches for `data`.
-  Wider than stereo keeps the front left and right. A file decodes up
+  Wider than stereo keeps the front left and right. A rate of 0 or above
+  384 kHz is `Malformed`: the mixer reads a source at its rate over the
+  output rate, so a garbage rate would read billions of frames for each
+  frame played. A file decodes up
   front, to at most four times its size (ADPCM) and twice for mu-law,
   A-law and 8-bit PCM. What it will decode to is worked out from the
   bytes there are, never from a size the header claims, and a file that
@@ -217,7 +222,7 @@ should report.
   wrong: the track is read to its end-of-track event instead. Seeking
   resets the synthesizer and replays program changes, controllers and
   pitch bends before the new position (not notes). A file of more than
-  65,536 events, tempo and time signature changes counted, is `TooLarge`;
+  65536 events, tempo and time signature changes counted, is `TooLarge`;
   game music has some thousands. Starting a file over for a loop sends all
   its events again, so a file shorter than 20 ms (`Source::min_loop_frames`)
   plays once whatever its loop count, and ends with the last
@@ -228,7 +233,8 @@ should report.
   sent in order over the next blocks.
 - **MP3**: MPEG-1 and MPEG-2 layer III. The length comes from the Xing or
   LAME header without the encoder delay and padding (which the decoder
-  trims), or else from the frame headers. ID3v2 tags are skipped.
+  trims), or else from the frame headers. ID3v2 tags are skipped. An MP3
+  that fails to decode 16 frames in a row ends there, with an `Error` event.
 - **AMR narrowband**: the RFC 4867 storage format (`#!AMR\n`), mono 8 kHz,
   decoded up front. Frames of other codecs are concealed like lost frames;
   a file cut short keeps what decoded. AMR wideband (`#!AMR-WB\n`) and the
@@ -241,7 +247,8 @@ should report.
   optional `TEMPO` (5 to 127, times 4 bpm) and `RESOLUTION` (1 to 127) in
   either order, blocks (`BLOCK_START n ... BLOCK_END n`, defined before
   use, not nested), `PLAY_BLOCK`, `SET_VOLUME` (0 to 100), `REPEAT` (2 to
-  127), notes 0 to 127 and `SILENCE`. A note lasts
+  127), notes 0 to 127 and `SILENCE`. A sequence or a block holds at most 65536 tones, and all its
+  lists together 262144, `SET_VOLUME` entries included. A note lasts
   `duration * 60000 * 4 / (resolution * tempo)` ms. Errors carry the byte
   offset where reading stopped. Sequences that unroll past 65536 tones are
   refused, since blocks that play blocks grow without bound.
