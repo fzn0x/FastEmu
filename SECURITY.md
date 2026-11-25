@@ -63,7 +63,7 @@ it as untrusted.
 FastEmu holds each game to the limits below, so that a hostile game ends
 in an error of its own and the other games run on. A game that gets past
 one of them, or that makes FastEmu hold memory that none of them counts,
-is in scope.
+beyond what [Known limits](#known-limits) lists, is in scope.
 Each limit is per game unless its row says otherwise. No setting changes
 them, except the phone profile, which sets the heap. The last column
 links to the page that describes the limit.
