@@ -22,7 +22,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use fastemu_audio::{Engine, EngineConfig, NullOutput};
+use fastemu_audio::{Engine, EngineConfig, NullOutput, RenderBudget};
 use fastemu_core::{
     Frame, InputEvent, Instance, InstanceSettings, InstanceStatus, Key, KeyAction, LaunchRequest,
     LogLevel, Notify,
@@ -750,7 +750,8 @@ fn cpu_share(before: Option<Usage>, after: Option<Usage>, length: Duration) -> S
 /// `FASTEMU_SOAK_SECONDS` (60 by default), then each alone for up to
 /// 20 s, all with the same key script. Prints per game the frames, the
 /// errors, the final status and the frame rate together and alone, with
-/// the process's CPU time and memory. Run it with
+/// the process's CPU time and memory, and how many times a sound waited
+/// for the render budget while they ran together. Run it with
 /// `cargo test --release -p fastemu-midp --test many_instances -- --ignored --nocapture`.
 #[test]
 #[ignore = "runs real games from FASTEMU_GAMES_DIR for minutes; see CONTRIBUTING.md"]
@@ -773,6 +774,8 @@ fn soak_real_games() {
     assert!(!jars.is_empty(), "no JARs in {}", dir.display());
     let data = tempfile::tempdir().expect("a data folder");
     let engine = Engine::default();
+    // As the apps set it.
+    engine.set_render_budget(Some(RenderBudget::DEFAULT));
     let _output = NullOutput::start(&engine);
     let launcher = MidpLauncher::new(Some(engine.clone()));
 
@@ -786,6 +789,7 @@ fn soak_real_games() {
         solo,
     );
     let after = usage();
+    let sound_waits = engine.budget_waits();
     let mut alone = Vec::new();
     let mut solo_cpu = Vec::new();
     for (i, jar) in jars.iter().enumerate() {
@@ -850,12 +854,13 @@ fn soak_real_games() {
     let slowest = |of: fn(&Outcome) -> Duration| together.iter().map(of).max().unwrap_or_default();
     println!(
         "\ntogether: cpu {}, peak memory {}, memory after they stopped {}, \
-         slowest send {:.1?}, slowest poll {:.1?}",
+         slowest send {:.1?}, slowest poll {:.1?}, sound waits {}",
         cpu_share(before, after, length),
         after.map_or("n/a".to_owned(), |u| mib(u.peak_bytes)),
         after.map_or("n/a".to_owned(), |u| mib(u.now_bytes)),
         slowest(|o| o.slowest_send),
         slowest(|o| o.slowest_poll),
+        sound_waits,
     );
     for outcome in together.iter().chain(&alone) {
         assert!(

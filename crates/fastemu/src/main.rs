@@ -65,6 +65,8 @@ fn launcher(mock: bool) -> (Arc<dyn Launcher>, Option<audio::Output>) {
         return (Arc::new(fastemu_core::mock::MockLauncher), None);
     }
     let engine = fastemu_audio::Engine::default();
+    // One game's sound may not take the time the others need to play.
+    engine.set_render_budget(Some(fastemu_audio::RenderBudget::DEFAULT));
     let output = audio::start(&engine);
     (Arc::new(MidpLauncher::new(Some(engine))), Some(output))
 }

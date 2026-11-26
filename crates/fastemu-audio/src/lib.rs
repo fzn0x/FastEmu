@@ -36,6 +36,7 @@
 //! `AudioOutput` plays through the system's audio device.
 
 mod amr;
+mod budget;
 mod engine;
 pub mod error;
 mod event;
@@ -55,6 +56,7 @@ mod tone;
 mod voice;
 mod wav;
 
+pub use budget::RenderBudget;
 pub use engine::{Engine, EngineConfig};
 pub use error::AudioError;
 pub use event::{EventCallback, EventClass, MAX_QUEUED, PlayerEvent, PlayerEventKind, PlayerId};

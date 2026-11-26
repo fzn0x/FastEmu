@@ -178,8 +178,11 @@ their ratio, the CPU time per second alone, the errors, the slowest
 frame: `frame`, `status`, `wants_text`, `drain_log` and
 `take_link_request`), whether every thread ended and the virtual machine
 was freed, and the final status. Then it prints the CPU time per second
-and the peak memory of the run side by side, on Linux and Windows, and
-the slowest send and poll of any game. A ratio well under 1 means the
+and the peak memory of the run side by side, on Linux and Windows, the
+slowest send and poll of any game, and how many times a sound waited for
+the render budget. That count should be 0 for games a phone could play;
+a few waits on a busy machine come from the system pausing the thread
+that renders the sound. A ratio well under 1 means the
 game slows down when others run. A slow send or poll means the app's
 window waited on a game. Run it on an
 otherwise idle machine: other work that starts or stops between the two

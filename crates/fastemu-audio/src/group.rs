@@ -285,7 +285,7 @@ impl Group {
     /// call makes goes through here, so the limits hold for them all:
     /// MMAPI players, tone players, and the Nokia, Samsung and Siemens
     /// sounds.
-    fn insert(&self, voice: Voice) -> Result<PlayerId, AudioError> {
+    fn insert(&self, mut voice: Voice) -> Result<PlayerId, AudioError> {
         let engine = &self.inner.engine;
         let mut mixer = engine.lock();
         if voice.one_shot {
@@ -295,6 +295,11 @@ impl Group {
             }
         } else {
             admit(&mixer, self.inner.id, voice.source.memory_bytes(), 0, true)?;
+        }
+        if voice.state == PlayerState::Started {
+            // A tone starts as it is made: it takes its place in the order
+            // the game's voices started.
+            voice.start_order = mixer.next_start_order();
         }
         let id = PlayerId(engine.next_id());
         mixer.slots.insert(

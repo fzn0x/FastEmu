@@ -131,8 +131,12 @@ impl Player {
             }
             let group = mixer.slots.get(&self.id).expect("checked by with").group;
             check_started_room(mixer, group)?;
+            let order = mixer.next_start_order();
             let voice = self.voice(mixer);
             voice.start();
+            // A start, even a restart, goes to the back of the game's
+            // voices: under a render budget the newest waits first.
+            voice.start_order = order;
             let media_time_us = voice.media_time_us();
             mixer.emit(events, self.id, PlayerEventKind::Started { media_time_us });
             Ok(())
