@@ -196,7 +196,28 @@ fn overrides(m_package: &str, sup: &Method) -> bool {
 
 impl ClassTable {
     /// Links `def`, loading its superclass and interfaces first.
+    ///
+    /// A class of a class file is charged what it holds on its own before
+    /// they load, and gets it back if it does not link. It waits here,
+    /// parsed, while the classes above it load, and a load of a class
+    /// before its chain nests up to 256 of them: charged only once linked,
+    /// they could all be held before the first one was judged.
     pub(super) fn define(&mut self, def: ClassDef) -> Result<ClassId, LoadError> {
+        let own = if def.pool.is_some() {
+            Self::own_class_bytes(&def)
+        } else {
+            0
+        };
+        self.budget.charge(own)?;
+        let linked = self.link(def);
+        if linked.is_err() {
+            self.budget.release(own);
+        }
+        linked
+    }
+
+    /// [`ClassTable::define`] once what `def` holds on its own is charged.
+    fn link(&mut self, def: ClassDef) -> Result<ClassId, LoadError> {
         let is_interface = def.access & access::INTERFACE != 0;
         let superclass = match &def.super_name {
             Some(name) => {
@@ -297,10 +318,17 @@ impl ClassTable {
             shapes.push(shape);
         }
         // The classes a game can make count against its class memory; the
-        // library's, which are fixed, do not.
+        // library's, which are fixed, do not. `define` charged what the
+        // class holds on its own; this is what it copies from above.
+        // Nothing after this fails, so a class that is charged both parts
+        // links.
         if def.pool.is_some() {
-            let bytes =
-                self.class_file_bytes(&def, superclass.as_deref(), &all_interfaces, supers.len());
+            let bytes = self.inherited_class_bytes(
+                &def,
+                superclass.as_deref(),
+                &all_interfaces,
+                supers.len(),
+            );
             self.budget.charge(bytes)?;
         }
 

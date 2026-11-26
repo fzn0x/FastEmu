@@ -44,7 +44,7 @@ pub(crate) struct ThreadStack {
     pub(crate) native_depth: u32,
     pub(crate) max_native_depth: u32,
     /// The most slots the thread may have ([`crate::VmLimits::max_stack_slots`]);
-    /// `slots` never grows past it.
+    /// `slots`, and the buffer that holds it, never grow past it.
     pub(crate) max_slots: usize,
 }
 
@@ -85,7 +85,9 @@ impl ThreadStack {
     /// Makes sure slots up to `needed` exist, or says the thread may not
     /// have that many. The stack keeps what it grew to, so a thread that
     /// once recursed deep holds up to `max_slots` slots (16 bytes each)
-    /// until it ends.
+    /// until it ends. The stack doubles as it grows, cut at `max_slots`,
+    /// and its buffer holds exactly its slots, so the buffer is never more
+    /// than those 16 bytes a slot either.
     #[inline]
     pub(crate) fn reserve(&mut self, needed: usize) -> Result<(), StackFull> {
         // `slots` is never longer than `max_slots`, so this is also the
@@ -97,6 +99,9 @@ impl ThreadStack {
             return Err(StackFull);
         }
         let len = needed.max(self.slots.len() * 2).min(self.max_slots);
+        // `resize` alone doubles the buffer, which is twice `max_slots`
+        // when the limit cut the length: 4 MiB for a stack of 2 MiB.
+        self.slots.reserve_exact(len - self.slots.len());
         self.slots.resize(len, Value::Void);
         Ok(())
     }
@@ -350,6 +355,36 @@ mod tests {
         assert_eq!(stack.reserve(1000), Ok(()));
         assert_eq!(stack.reserve(1001), Err(StackFull));
         assert_eq!(stack.slots.len(), 1000);
+    }
+
+    #[test]
+    fn the_buffer_of_a_stack_never_outgrows_its_limit() {
+        // Doubling 512 slots makes 1024, which the limit cuts to 1000: the
+        // buffer must be cut too.
+        let mut stack = ThreadStack::new(16, 1000);
+        assert_eq!(stack.reserve(300), Ok(()));
+        assert_eq!(stack.reserve(600), Ok(()));
+        assert_eq!(stack.slots.len(), 1000);
+        assert!(stack.slots.capacity() <= 1000, "{}", stack.slots.capacity());
+        // A frame of all the slots but one, then one more slot: the buffer
+        // would double to 1998.
+        let mut stack = ThreadStack::new(16, 1000);
+        assert_eq!(stack.reserve(999), Ok(()));
+        assert_eq!(stack.reserve(1000), Ok(()));
+        assert!(stack.slots.capacity() <= 1000, "{}", stack.slots.capacity());
+        // The default limit: 131071 slots, then 131072, made a buffer of
+        // 262142 slots, 4 MiB, for a stack of 2 MiB.
+        let mut stack = ThreadStack::new(16, 131_072);
+        assert_eq!(stack.reserve(131_071), Ok(()));
+        assert_eq!(stack.reserve(131_072), Ok(()));
+        let capacity = stack.slots.capacity();
+        assert!(capacity <= 131_072, "{capacity}");
+        // Below the limit the buffer follows the length, doubling.
+        let mut stack = ThreadStack::new(16, 131_072);
+        for (needed, len) in [(300, 512), (600, 1024), (5000, 5000), (5001, 10_000)] {
+            assert_eq!(stack.reserve(needed), Ok(()));
+            assert_eq!((stack.slots.len(), stack.slots.capacity()), (len, len));
+        }
     }
 
     #[test]

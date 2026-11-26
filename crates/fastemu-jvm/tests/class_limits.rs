@@ -10,11 +10,13 @@
 
 mod support;
 
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use fastemu_jvm::{
-    ArrayType, Ctx, JResult, MemorySource, NativeClass, Throw, Value, Vm, VmConfig, VmLimits,
+    ArrayType, ClassSource, Ctx, JResult, MemorySource, NativeClass, Throw, Value, Vm, VmConfig,
+    VmLimits,
 };
 use support::{ClassBuilder, PUBLIC, STATIC, idx};
 
@@ -44,13 +46,28 @@ fn run_with<R: Send + 'static>(
     natives: fn() -> Vec<NativeClass>,
     body: impl FnOnce(&mut Ctx<'_>) -> R + Send + 'static,
 ) -> R {
+    run_on(config, Arc::new(memory(classes)), natives, body)
+}
+
+/// A source that holds `classes`.
+fn memory(classes: Classes) -> MemorySource {
+    let mut source = MemorySource::new();
+    for (name, bytes) in classes {
+        source.add_class(name, bytes);
+    }
+    source
+}
+
+/// [`run`] on a machine of `config` that reads its classes from `source`.
+fn run_on<R: Send + 'static>(
+    config: VmConfig,
+    source: Arc<dyn ClassSource>,
+    natives: fn() -> Vec<NativeClass>,
+    body: impl FnOnce(&mut Ctx<'_>) -> R + Send + 'static,
+) -> R {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let mut source = MemorySource::new();
-        for (name, bytes) in classes {
-            source.add_class(name, bytes);
-        }
-        let vm = Vm::new(config, std::sync::Arc::new(source), natives());
+        let vm = Vm::new(config, source, natives());
         let (result_tx, result_rx) = mpsc::channel();
         vm.spawn("probe", move |ctx| {
             let _ = result_tx.send(body(ctx));
@@ -734,4 +751,77 @@ fn arrays_of_every_class_stop_at_the_limit_and_primitive_arrays_do_not() {
     });
     assert!((1..10).contains(&made), "{made} of 40 arrays were made");
     assert_eq!(primitives, [true; 3]);
+}
+
+/// `C0` to `C<len - 1>`, each extending the one before, each with a method
+/// of 60000 bytes of code: about 1.2 MiB each by the model, so one fits in
+/// 2 MiB and three in 4 MiB.
+fn code_chain(len: usize) -> Classes {
+    let mut code = vec![0x00; 59_999];
+    code.push(0xb1);
+    (0..len)
+        .map(|i| {
+            let name = format!("C{i}");
+            let parent = match i {
+                0 => "java/lang/Object".to_owned(),
+                _ => format!("C{}", i - 1),
+            };
+            let mut c = ClassBuilder::new(&name, &parent, 49, 0);
+            c.method(PUBLIC | STATIC, "m", "()V", 0, 0, &code, &[]);
+            (name, c.build())
+        })
+        .collect()
+}
+
+/// A source of `classes` that counts the class files it is asked for.
+struct Counted {
+    classes: MemorySource,
+    asked: Arc<AtomicUsize>,
+}
+
+impl ClassSource for Counted {
+    fn class_bytes(&self, name: &str) -> Option<Vec<u8>> {
+        self.asked.fetch_add(1, Ordering::Relaxed);
+        self.classes.class_bytes(name)
+    }
+
+    fn resource(&self, path: &str) -> Option<Vec<u8>> {
+        self.classes.resource(path)
+    }
+}
+
+const LIMIT_REACHED: &str = "java.lang.OutOfMemoryError: class memory limit reached";
+
+#[test]
+fn a_class_is_charged_while_it_waits_for_its_superclass() {
+    // Loaded from its leaf, the classes of a chain wait for the ones above
+    // them. The second one to wait does not fit, so the 248 above it are
+    // never read; charged only once linked, all 250 were read first. The
+    // bound leaves room for a change of the model by a class or so.
+    let asked = Arc::new(AtomicUsize::new(0));
+    let source = Counted {
+        classes: memory(code_chain(250)),
+        asked: Arc::clone(&asked),
+    };
+    let (line, read) = run_on(limited(2 << 20), Arc::new(source), no_natives, move |ctx| {
+        asked.store(0, Ordering::Relaxed);
+        let loaded = ctx.find_class("C249");
+        (outcome(ctx, loaded), asked.load(Ordering::Relaxed))
+    });
+    assert_eq!(line, LIMIT_REACHED);
+    assert!((1..=3).contains(&read), "{read} class files read");
+}
+
+#[test]
+fn the_classes_of_a_refused_chain_give_back_what_they_took() {
+    // Three classes of the chain fit. The leaf of ten is refused, and the
+    // classes that waited for the ones above them took nothing with them:
+    // the first three still load, and the fourth still does not.
+    let lines = run_with(limited(4 << 20), code_chain(10), no_natives, |ctx| {
+        ["C9", "C2", "C3"].map(|name| {
+            let loaded = ctx.find_class(name);
+            outcome(ctx, loaded)
+        })
+    });
+    assert_eq!(lines, [LIMIT_REACHED, "ok", LIMIT_REACHED]);
 }

@@ -184,8 +184,10 @@ impl ClassFile {
         for _ in 0..attr_count {
             let (attr_name, body) = attribute(&mut r, &cp)?;
             if attr_name == "SourceFile" && body.len() == 2 {
+                // The pool's own `Arc`, which the class memory counts: a
+                // copy of a name of up to 65535 bytes would not be.
                 let index = u16::from_be_bytes([body[0], body[1]]);
-                source_file = cp.utf8(index).ok().map(Arc::from);
+                source_file = cp.utf8_arc(index).ok();
             }
         }
         // Trailing bytes after the last attribute are tolerated: some
@@ -303,16 +305,23 @@ fn parse_code(body: &[u8], cp: &ConstantPool) -> Result<CodeAttr, FormatError> {
             catch_type: r.u16()?,
         });
     }
+    // The class memory counts the 4 bytes of each line number, and the
+    // list stays for as long as the class: it must not keep the spare room
+    // of a list that doubled as it grew. Code can have many tables, so
+    // the list grows as usual and is cut to its length once.
     let mut lines = Vec::new();
     for _ in 0..r.u16()? {
         let (attr_name, attr) = attribute(&mut r, cp)?;
         if attr_name == "LineNumberTable" {
             let mut lr = Reader::new(attr);
-            for _ in 0..lr.u16()? {
+            let count = lr.u16()?;
+            lines.reserve(usize::from(count));
+            for _ in 0..count {
                 lines.push((lr.u16()?, lr.u16()?));
             }
         }
     }
+    lines.shrink_to_fit();
     Ok(CodeAttr {
         max_stack,
         max_locals,
@@ -368,6 +377,12 @@ mod tests {
     /// A hand-assembled `public class T { static int f() { return 7; } }`
     /// with a `SourceFile` and a `LineNumberTable`.
     fn tiny_class(major: u16, minor: u16) -> Vec<u8> {
+        class_with_lines(major, minor, &[1])
+    }
+
+    /// [`tiny_class`] with a `LineNumberTable` of each length of `tables`
+    /// in the code of `f`, every entry line 3 from offset 0.
+    fn class_with_lines(major: u16, minor: u16, tables: &[u16]) -> Vec<u8> {
         let mut b = vec![0xCA, 0xFE, 0xBA, 0xBE];
         b.extend(minor.to_be_bytes());
         b.extend(major.to_be_bytes());
@@ -397,22 +412,26 @@ mod tests {
         b.extend(6u16.to_be_bytes());
         b.extend(1u16.to_be_bytes());
         b.extend(7u16.to_be_bytes());
-        let mut line_table = Vec::new();
-        line_table.extend(8u16.to_be_bytes());
-        line_table.extend(6u32.to_be_bytes());
-        line_table.extend(1u16.to_be_bytes());
-        line_table.extend(0u16.to_be_bytes());
-        line_table.extend(3u16.to_be_bytes());
+        let mut line_tables = Vec::new();
+        for &entries in tables {
+            line_tables.extend(8u16.to_be_bytes());
+            line_tables.extend((2 + 4 * u32::from(entries)).to_be_bytes());
+            line_tables.extend(entries.to_be_bytes());
+            for _ in 0..entries {
+                line_tables.extend(0u16.to_be_bytes());
+                line_tables.extend(3u16.to_be_bytes());
+            }
+        }
         let code = [0x10, 7, 0xAC]; // bipush 7; ireturn
-        let code_attr_len = 2 + 2 + 4 + code.len() + 2 + 2 + line_table.len();
+        let code_attr_len = 2 + 2 + 4 + code.len() + 2 + 2 + line_tables.len();
         b.extend((code_attr_len as u32).to_be_bytes());
         b.extend(1u16.to_be_bytes());
         b.extend(0u16.to_be_bytes());
         b.extend((code.len() as u32).to_be_bytes());
         b.extend(code);
         b.extend(0u16.to_be_bytes());
-        b.extend(1u16.to_be_bytes());
-        b.extend(line_table);
+        b.extend((tables.len() as u16).to_be_bytes());
+        b.extend(line_tables);
         b.extend(1u16.to_be_bytes());
         b.extend(9u16.to_be_bytes());
         b.extend(2u32.to_be_bytes());
@@ -430,6 +449,26 @@ mod tests {
         assert_eq!((&*method.name, &*method.descriptor), ("f", "()I"));
         let code = method.code.as_ref().unwrap();
         assert_eq!(code.code, [0x10, 7, 0xAC]);
+        assert_eq!(code.line_at(2), Some(3));
+    }
+
+    #[test]
+    fn the_source_file_name_is_the_text_of_the_pool() {
+        // The class memory counts the text of the pool once. A name of
+        // 65535 bytes copied for the class would not be counted.
+        let class = ClassFile::parse(&tiny_class(49, 0)).unwrap();
+        let name = class.source_file.as_ref().unwrap();
+        assert!(Arc::ptr_eq(name, &class.constant_pool.utf8_arc(1).unwrap()));
+    }
+
+    #[test]
+    fn line_numbers_take_no_more_room_than_they_hold() {
+        // The class memory counts 4 bytes a line number. Lines added one at
+        // a time leave a list room for twice as many: 65537 lines from two
+        // tables kept room for 131072.
+        let class = ClassFile::parse(&class_with_lines(49, 0, &[65535, 2])).unwrap();
+        let code = class.methods[0].code.as_ref().unwrap();
+        assert_eq!((code.lines.len(), code.lines.capacity()), (65537, 65537));
         assert_eq!(code.line_at(2), Some(3));
     }
 
