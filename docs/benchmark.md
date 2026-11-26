@@ -223,10 +223,11 @@ a folder that holds other files.
 - `--fastemu-only` measures FastEmu alone, with no MicroEmulator.
 - `--runs N` changes the number of runs.
 - If MicroEmulator rejects a class with `VerifyError`, add
-  `--me-jvm-arg -XX:-BytecodeVerificationRemote`. If it cannot load
-  images without a display, add `--me-no-headless-awt`; it still opens
-  no window. Each applies to every MicroEmulator process of the run,
-  and `bench.md` lists it.
+  `--me-jvm-arg -XX:+UnlockDiagnosticVMOptions --me-jvm-arg
+  -XX:-BytecodeVerificationRemote`; JDK 17 refuses the second without
+  the first. If it cannot load images without a display, add
+  `--me-no-headless-awt`; it still opens no window. Each applies to
+  every MicroEmulator process of the run, and `bench.md` lists it.
 - `--windows --app .\target\release\fastemu.exe` measures the app and
   MicroEmulator's own windows instead. It opens windows, so do not touch
   the mouse while it runs. It refuses to start while FastEmu is open,
