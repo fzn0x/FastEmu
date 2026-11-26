@@ -5,14 +5,17 @@
 //! image elsewhere reach the same pixels, and natives can hold the pixels
 //! while they borrow other parts of the VM.
 
+use std::cell::Cell;
 use std::sync::Arc;
+use std::time::Duration;
 
-use fastemu_gfx::{Surface, SurfaceKind};
-use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Payload, Value};
+use fastemu_gfx::{GfxError, Surface, SurfaceKind};
+use fastemu_jvm::{Ctx, JResult, NativeClass, ObjRef, Payload, Throw, Value};
 use parking_lot::Mutex;
 
 use super::graphics::new_graphics;
 use super::throw_gfx;
+use crate::stream_bytes::CountedBytes;
 use crate::suite::source::normalize;
 
 const CLASS: &str = "javax/microedition/lcdui/Image";
@@ -82,66 +85,209 @@ pub(crate) fn snapshot_of(ctx: &mut Ctx<'_>, pixels: &SharedSurface) -> JResult<
     Ok(Some(pixels.lock().to_immutable()))
 }
 
-/// [`reserve_pixels`] for the image `data` declares in its header, read
-/// without decoding it. A file whose size cannot be read goes to the
-/// decoder, which refuses it for the same reason. A small file can declare
-/// an image of 128 MiB, so the decoder must not be the first to look.
-pub(crate) fn reserve_decoded(ctx: &mut Ctx<'_>, data: &[u8]) -> JResult<()> {
-    match fastemu_gfx::probe_size(data) {
-        Some((width, height)) => reserve_pixels(ctx, width.into(), height.into()),
-        None => Ok(()),
+/// The image decodes of one game take turns: one runs at a time.
+///
+/// A decode holds host memory that the heap counts only once the image is
+/// made: the file it read or copied, the decoder's buffers and the pixels.
+/// The heap check before it reserves nothing, and the decode runs with the
+/// VM lock released, so without turns every thread of a game could hold
+/// that much at once, each checked against the same free room: eight
+/// threads held 67 to 83 MiB where one held 17 MiB. With turns a game's
+/// image calls hold one file and one decode beside the heap.
+#[derive(Default)]
+struct DecodeTurn(Arc<Mutex<()>>);
+
+thread_local! {
+    /// Whether this thread holds its game's decode turn now.
+    // clippy 1.99 calls this const initializer missing when it checks the
+    // Android build, where thread_local! expands differently.
+    #[allow(clippy::missing_const_for_thread_local)]
+    static IN_TURN: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Marks this thread as holding its game's decode turn while it lives,
+/// unwinding included.
+struct InTurn;
+
+impl InTurn {
+    fn enter() -> Self {
+        IN_TURN.set(true);
+        Self
     }
 }
 
-/// [`reserve_decoded`] for the part of `data` that `Image.createImage(byte[],
-/// int, int)` reads. A range outside the array passes: the decoder refuses
-/// it with the exception MIDP names.
-pub(crate) fn reserve_decoded_range(
-    ctx: &mut Ctx<'_>,
-    data: &[u8],
-    offset: i32,
-    length: i32,
-) -> JResult<()> {
-    let range = usize::try_from(offset)
-        .ok()
-        .zip(usize::try_from(length).ok())
-        .and_then(|(offset, length)| data.get(offset..offset.checked_add(length)?));
-    match range {
-        Some(range) => reserve_decoded(ctx, range),
-        None => Ok(()),
+impl Drop for InTurn {
+    fn drop(&mut self) {
+        IN_TURN.set(false);
     }
+}
+
+/// How long a thread waits for its turn before it looks again whether its
+/// game is stopping.
+const TURN_SLICE: Duration = Duration::from_millis(100);
+
+/// Runs `decode` in the game's decode turn: from before it reads or copies
+/// the file to after the image is counted on the heap.
+///
+/// The rules that keep this free of deadlocks:
+///
+/// - Nothing waits for the turn while it holds the VM lock. The turn is
+///   taken at once when it is free; otherwise the thread waits for it
+///   with the VM lock released, which the thread in its turn needs to
+///   finish. So the order is always the turn, then the VM lock, then (in
+///   `Ctx::read_resource`) the source's inflating lock, which waits on
+///   nothing.
+/// - `decode` never calls Java: a game's code that made an image there
+///   would wait for the turn its own thread holds. Reading a resource,
+///   asking the heap, decoding and making the `Image` run no game code.
+/// - It is not reentrant: a thread in its turn must not ask for it again.
+///   Debug builds panic on that; release builds run the inner decode in
+///   the turn the thread holds, rather than wait for themselves.
+///
+/// A thread that waited while its game was stopped returns `Throw::Stop`
+/// without decoding.
+fn decode_in_turn<R>(
+    ctx: &mut Ctx<'_>,
+    decode: impl FnOnce(&mut Ctx<'_>) -> JResult<R>,
+) -> JResult<R> {
+    let nested = IN_TURN.get();
+    debug_assert!(!nested, "a decode asked for its game's turn again");
+    if nested {
+        return decode(ctx);
+    }
+    if ctx.extension::<DecodeTurn>().is_none() {
+        ctx.set_extension(DecodeTurn::default());
+    }
+    let turns = Arc::clone(&ctx.extension::<DecodeTurn>().expect("set above").0);
+    let _turn = match turns.try_lock() {
+        Some(turn) => turn,
+        None => {
+            let vm = ctx.vm();
+            let waited = ctx.without_lock(|| {
+                loop {
+                    if let Some(turn) = turns.try_lock_for(TURN_SLICE) {
+                        break Some(turn);
+                    }
+                    if vm.is_stopping() {
+                        break None;
+                    }
+                }
+            });
+            match waited {
+                Some(turn) => turn,
+                None => return Err(Throw::Stop),
+            }
+        }
+    };
+    // A thread that waited while its game was closed decodes nothing: the
+    // game's code would not run on anyway.
+    if ctx.is_stopping() {
+        return Err(Throw::Stop);
+    }
+    let _inside = InTurn::enter();
+    decode(ctx)
+}
+
+/// Checks the image `bytes` declares against the heap, then decodes it
+/// with the VM lock released, as decoding is slow and touches nothing of
+/// the VM. A size the heap cannot hold is `OutOfMemoryError`; a GIF whose
+/// first frame has more pixels than the image and is more than the heap
+/// can hold is a file that does not decode. Runs inside
+/// [`decode_in_turn`] only.
+fn decode_checked(ctx: &mut Ctx<'_>, bytes: Vec<u8>) -> JResult<Result<Surface, GfxError>> {
+    debug_assert!(IN_TURN.get(), "an image decoded outside its game's turn");
+    // A small file can declare an image of 128 MiB, so the decoder must not
+    // be the first to look. A file whose size cannot be read goes to the
+    // decoder, which refuses it for the same reason.
+    if let Some((width, height)) = fastemu_gfx::probe_size(&bytes) {
+        reserve_pixels(ctx, width.into(), height.into())?;
+    }
+    // The frame is decoded whole before it is cut to the image: 160 MiB
+    // for a file of 34 bytes. One the heap could hold decodes as ever.
+    if let Some(frame) = fastemu_gfx::probe_frame_bytes(&bytes) {
+        match ctx.check_alloc(usize::try_from(frame).unwrap_or(usize::MAX)) {
+            Ok(()) => {}
+            Err(Throw::Stop) => return Err(Throw::Stop),
+            Err(Throw::Exception(_)) => {
+                return Ok(Err(GfxError::Decode(
+                    "GIF: the heap cannot hold the first frame, which is larger than the image"
+                        .into(),
+                )));
+            }
+        }
+    }
+    Ok(ctx.without_lock(move || Surface::decode(&bytes)))
+}
+
+/// Makes the image decoded from the resource `path` in the game's decode
+/// turn: `None` when there is no such resource.
+pub(crate) fn image_from_resource(
+    ctx: &mut Ctx<'_>,
+    path: &str,
+) -> JResult<Option<Result<ObjRef, GfxError>>> {
+    decode_in_turn(ctx, |ctx| {
+        let Some(bytes) = ctx.read_resource(path)? else {
+            return Ok(None);
+        };
+        Ok(Some(match decode_checked(ctx, bytes)? {
+            Ok(surface) => Ok(new_image(ctx, surface)?),
+            Err(e) => Err(e),
+        }))
+    })
+}
+
+/// Makes an image of `kind` decoded from the `byte[]` `data`, or from the
+/// part `offset .. offset + length` of it, in the game's decode turn. The
+/// bytes are copied once the turn has come, and only the part. A part
+/// outside the array is `ArrayIndexOutOfBoundsException`, before the heap
+/// is asked.
+pub(crate) fn image_from_array(
+    ctx: &mut Ctx<'_>,
+    data: ObjRef,
+    range: Option<(i32, i32)>,
+    kind: SurfaceKind,
+) -> JResult<Result<ObjRef, GfxError>> {
+    decode_in_turn(ctx, |ctx| {
+        let array = ctx.array::<i8>(data)?;
+        let part = match range {
+            None => Some(array),
+            Some((offset, length)) => usize::try_from(offset)
+                .ok()
+                .zip(usize::try_from(length).ok())
+                .and_then(|(offset, length)| array.get(offset..offset.checked_add(length)?)),
+        };
+        let Some(part) = part else {
+            return Ok(Err(GfxError::ArrayIndexOutOfBounds));
+        };
+        let bytes: Vec<u8> = part.iter().map(|&b| b as u8).collect();
+        Ok(match decode_checked(ctx, bytes)? {
+            Ok(surface) => Ok(new_image(ctx, surface.into_kind(kind))?),
+            Err(e) => Err(e),
+        })
+    })
 }
 
 /// Turns a decode or size error of `createImage(String)` and
 /// `createImage(InputStream)` into the `IOException` MIDP names, keeping
 /// `OutOfMemoryError` as it is.
-fn as_io_error(ctx: &mut Ctx<'_>, e: &fastemu_gfx::GfxError) -> fastemu_jvm::Throw {
+fn as_io_error(ctx: &mut Ctx<'_>, e: &GfxError) -> Throw {
     match e {
-        fastemu_gfx::GfxError::OutOfMemory => throw_gfx(ctx, e),
+        GfxError::OutOfMemory => throw_gfx(ctx, e),
         _ => ctx.new_exception("java/io/IOException", Some(&e.to_string())),
     }
-}
-
-/// Decodes `bytes` with the VM lock released, as image decoding is slow
-/// and touches nothing of the VM.
-fn decode(ctx: &mut Ctx<'_>, bytes: Vec<u8>) -> Result<Surface, fastemu_gfx::GfxError> {
-    ctx.without_lock(move || Surface::decode(&bytes))
 }
 
 fn create_from_resource(ctx: &mut Ctx<'_>, name: Value) -> JResult<Value> {
     let name = ctx.non_null(name)?;
     let name = ctx.string(name)?;
     let path = normalize(&name);
-    let Some(bytes) = ctx.read_resource(&path)? else {
-        return ctx.throw(
+    match image_from_resource(ctx, &path)? {
+        Some(Ok(image)) => Ok(image.into()),
+        Some(Err(e)) => Err(as_io_error(ctx, &e)),
+        None => ctx.throw(
             "java/io/IOException",
             &format!("resource not found: {name}"),
-        );
-    };
-    reserve_decoded(ctx, &bytes)?;
-    match decode(ctx, bytes) {
-        Ok(surface) => Ok(new_image(ctx, surface)?.into()),
-        Err(e) => Err(as_io_error(ctx, &e)),
+        ),
     }
 }
 
@@ -158,10 +304,15 @@ const MAX_EMPTY_READS: u32 = 1000;
 /// Reads a Java `InputStream` to its end through its `read([BII)I`, at most
 /// [`MAX_IMAGE_FILE`] bytes: an image stream that goes on is an
 /// `IOException`, as a phone's would end in one, and not a Vec that grows
-/// until the host is out of memory.
-fn read_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<Vec<u8>> {
+/// until the host is out of memory. The bytes grow in a holder the heap
+/// counts, which this returns, and the heap is asked before they grow, so
+/// data the heap cannot hold is an `OutOfMemoryError` at about the heap's
+/// size. The game's `read` runs between the reads, and so do its other
+/// threads, which would each hold a stream of their own otherwise.
+fn read_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<CountedBytes> {
     let buffer = ctx.new_array(fastemu_jvm::ArrayType::Byte, 4096)?;
-    let mut bytes = Vec::new();
+    let bytes = CountedBytes::new(ctx)?;
+    let mut chunk = [0u8; 4096];
     let mut empty_reads = 0;
     loop {
         let n = ctx
@@ -175,8 +326,8 @@ fn read_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<Vec<u8>> {
         if n < 0 {
             break;
         }
-        let chunk = ctx.array::<i8>(buffer)?;
-        let n = (n as usize).min(chunk.len());
+        let read = ctx.array::<i8>(buffer)?;
+        let n = (n as usize).min(read.len());
         if n == 0 {
             empty_reads += 1;
             if empty_reads >= MAX_EMPTY_READS {
@@ -185,35 +336,44 @@ fn read_stream(ctx: &mut Ctx<'_>, stream: ObjRef) -> JResult<Vec<u8>> {
             continue;
         }
         empty_reads = 0;
-        if bytes.len() + n > MAX_IMAGE_FILE {
+        for (to, &from) in chunk.iter_mut().zip(&read[..n]) {
+            *to = from as u8;
+        }
+        if bytes.len(ctx)? + n > MAX_IMAGE_FILE {
             return ctx.throw(
                 "java/io/IOException",
                 "the image data is larger than 16 MiB",
             );
         }
-        bytes.extend(chunk[..n].iter().map(|&b| b as u8));
+        bytes.push(ctx, &chunk[..n], MAX_IMAGE_FILE)?;
     }
     Ok(bytes)
 }
 
 fn create_from_stream(ctx: &mut Ctx<'_>, stream: Value) -> JResult<Value> {
     let stream = ctx.non_null(stream)?;
-    let bytes = read_stream(ctx, stream)?;
-    reserve_decoded(ctx, &bytes)?;
-    match decode(ctx, bytes) {
-        Ok(surface) => Ok(new_image(ctx, surface)?.into()),
+    // Read before the turn, as reading runs the game's code. The bytes stay
+    // counted while the thread waits for its turn; in the turn they are its
+    // file, which the next collection no longer counts.
+    let read = read_stream(ctx, stream)?;
+    let made = decode_in_turn(ctx, |ctx| {
+        let bytes = read.take(ctx)?;
+        Ok(match decode_checked(ctx, bytes)? {
+            Ok(surface) => Ok(new_image(ctx, surface)?),
+            Err(e) => Err(e),
+        })
+    })?;
+    match made {
+        Ok(image) => Ok(image.into()),
         Err(e) => Err(as_io_error(ctx, &e)),
     }
 }
 
 fn create_from_bytes(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
     let data = ctx.non_null(a[0])?;
-    let (offset, length) = (a[1].int(), a[2].int());
-    let bytes: Vec<u8> = ctx.array::<i8>(data)?.iter().map(|&b| b as u8).collect();
-    reserve_decoded_range(ctx, &bytes, offset, length)?;
-    let result = ctx.without_lock(move || Surface::decode_range(&bytes, offset, length));
-    match result {
-        Ok(surface) => Ok(new_image(ctx, surface)?.into()),
+    let range = Some((a[1].int(), a[2].int()));
+    match image_from_array(ctx, data, range, SurfaceKind::Immutable)? {
+        Ok(image) => Ok(image.into()),
         Err(e) => Err(throw_gfx(ctx, &e)),
     }
 }
@@ -364,4 +524,137 @@ pub fn class() -> NativeClass {
             Ok(Value::from(pixels.lock().kind() != SurfaceKind::Immutable))
         })
         .method("getRGB", "([IIIIIII)V", get_rgb)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
+    use std::sync::{Arc, mpsc};
+    use std::time::{Duration, Instant};
+
+    use fastemu_jvm::{JResult, MemorySource, Throw, Vm, VmConfig};
+
+    use super::decode_in_turn;
+
+    /// How long a test waits for something that comes at once when the
+    /// turns work. It only matters when they deadlock: the test then fails
+    /// instead of hanging.
+    const PATIENCE: Duration = Duration::from_secs(30);
+
+    fn vm() -> Vm {
+        let config = VmConfig {
+            log: Arc::new(|_| {}),
+            ..VmConfig::default()
+        };
+        Vm::new(config, Arc::new(MemorySource::new()), Vec::new())
+    }
+
+    /// Spins until `done`, or until [`PATIENCE`] has passed.
+    fn spin_until(done: impl Fn() -> bool) {
+        let deadline = Instant::now() + PATIENCE;
+        while !done() && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+    }
+
+    /// Runs `body` on a thread attached to `vm` as `name` and returns where
+    /// its result will arrive.
+    fn attached(
+        vm: &Vm,
+        name: &str,
+        body: impl FnOnce(&mut fastemu_jvm::Ctx<'_>) -> JResult<()> + Send + 'static,
+    ) -> mpsc::Receiver<JResult<()>> {
+        let (vm, name) = (vm.clone(), name.to_owned());
+        let (done, result) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(vm.attach(&name, body));
+        });
+        result
+    }
+
+    /// The result `thread` sent, or a failure when none came in time.
+    fn joined(thread: &mpsc::Receiver<JResult<()>>) -> JResult<()> {
+        thread
+            .recv_timeout(PATIENCE)
+            .expect("the decode turn deadlocked")
+    }
+
+    #[test]
+    fn the_threads_of_a_game_decode_one_image_at_a_time() {
+        const THREADS: usize = 4;
+        let vm = vm();
+        let asked = Arc::new(AtomicUsize::new(0));
+        // How many are inside now, and the most that were at once.
+        let inside = Arc::new((AtomicUsize::new(0), AtomicUsize::new(0)));
+        let threads: Vec<_> = (0..THREADS)
+            .map(|i| {
+                let (asked, inside) = (Arc::clone(&asked), Arc::clone(&inside));
+                attached(&vm, &format!("decoder {i}"), move |ctx| {
+                    asked.fetch_add(1, SeqCst);
+                    decode_in_turn(ctx, |ctx| {
+                        let now = inside.0.fetch_add(1, SeqCst) + 1;
+                        inside.1.fetch_max(now, SeqCst);
+                        // The first decode lasts until every thread has
+                        // asked for its turn, with the VM lock released as
+                        // a decode runs: without turns they would all be
+                        // inside now.
+                        ctx.without_lock(|| spin_until(|| asked.load(SeqCst) == THREADS));
+                        inside.0.fetch_sub(1, SeqCst);
+                        Ok(())
+                    })
+                })
+            })
+            .collect();
+        for thread in &threads {
+            assert!(joined(thread).is_ok());
+        }
+        assert_eq!(asked.load(SeqCst), THREADS);
+        assert_eq!(inside.1.load(SeqCst), 1, "two decodes ran at once");
+    }
+
+    #[test]
+    fn a_thread_that_waits_for_its_turn_while_the_game_stops_decodes_nothing() {
+        let vm = vm();
+        let first_inside = Arc::new(AtomicBool::new(false));
+        let second_asked = Arc::new(AtomicBool::new(false));
+        let second_ran = Arc::new(AtomicBool::new(false));
+        let first = {
+            let (stopping, first_inside, second_asked) = (
+                vm.clone(),
+                Arc::clone(&first_inside),
+                Arc::clone(&second_asked),
+            );
+            attached(&vm, "first", move |ctx| {
+                decode_in_turn(ctx, |ctx| {
+                    first_inside.store(true, SeqCst);
+                    // Holds the turn until the second thread asked for it
+                    // and the game is stopping.
+                    ctx.without_lock(|| {
+                        spin_until(|| second_asked.load(SeqCst) && stopping.is_stopping());
+                    });
+                    Ok(())
+                })
+            })
+        };
+        spin_until(|| first_inside.load(SeqCst));
+        assert!(first_inside.load(SeqCst), "the first thread never decoded");
+        let second = {
+            let (second_asked, second_ran) = (Arc::clone(&second_asked), Arc::clone(&second_ran));
+            attached(&vm, "second", move |ctx| {
+                second_asked.store(true, SeqCst);
+                decode_in_turn(ctx, |_| {
+                    second_ran.store(true, SeqCst);
+                    Ok(())
+                })
+            })
+        };
+        spin_until(|| second_asked.load(SeqCst));
+        vm.stop();
+        assert!(joined(&first).is_ok());
+        assert!(matches!(joined(&second), Err(Throw::Stop)));
+        assert!(
+            !second_ran.load(SeqCst),
+            "a decode ran after the game stopped"
+        );
+    }
 }

@@ -129,7 +129,10 @@ MIDlet-8: Customs, , m.Customs\r\n\
 MIDlet-9: SiemensBitmaps, , m.SiemensBitmaps\r\n\
 MIDlet-10: SiemensLayers, , m.SiemensLayers\r\n\
 MIDlet-11: SiemensSprites, , m.SiemensSprites\r\n\
-MIDlet-12: Returns, , m.Returns\r\n";
+MIDlet-12: Returns, , m.Returns\r\n\
+MIDlet-13: DecodeThreads, , m.DecodeThreads\r\n\
+MIDlet-14: StreamThreads, , m.StreamThreads\r\n\
+MIDlet-15: SoundThreads, , m.SoundThreads\r\n";
 
 /// Which `MIDlet-<n>` (from zero) runs each program.
 mod midlet {
@@ -145,6 +148,9 @@ mod midlet {
     pub const SIEMENS_LAYERS: usize = 9;
     pub const SIEMENS_SPRITES: usize = 10;
     pub const RETURNS: usize = 11;
+    pub const DECODE_THREADS: usize = 12;
+    pub const STREAM_THREADS: usize = 13;
+    pub const SOUND_THREADS: usize = 14;
 }
 
 /// What the back buffer of a shown canvas takes of the heap on the default
@@ -163,6 +169,7 @@ fn classes() -> Option<&'static Path> {
             tests.join("java").join("stubs"),
             tests.join("screens_java").join("stubs"),
             tests.join("vendor_stubs"),
+            tests.join("media_stubs"),
         ])
         .expect("joining the stub folders");
         let out = scratch("memory-classes");
@@ -293,6 +300,50 @@ fn declared_bmp(width: i32, height: i32) -> Vec<u8> {
     bmp
 }
 
+/// A GIF of 34 bytes with a screen of one pixel whose first frame declares
+/// 8192 by 4096 pixels and whose image data ends at once. Decoded whole,
+/// the frame and its index would hold 160 MiB.
+fn gif_frame_bomb() -> Vec<u8> {
+    let mut gif = b"GIF89a".to_vec();
+    // The screen, 1 by 1 with a palette of two colours, and the palette.
+    gif.extend_from_slice(&[1, 0, 1, 0, 0x80, 0, 0]);
+    gif.extend_from_slice(&[0, 0, 0, 255, 255, 255]);
+    // The frame at 0, 0.
+    gif.push(0x2C);
+    gif.extend_from_slice(&[0, 0, 0, 0]);
+    gif.extend_from_slice(&8192_u16.to_le_bytes());
+    gif.extend_from_slice(&4096_u16.to_le_bytes());
+    // No palette of its own; LZW code size 2; one data block that holds
+    // only a clear code and the end code; the trailer.
+    gif.extend_from_slice(&[0, 2, 1, 0x2C, 0, 0x3B]);
+    gif
+}
+
+/// A PNG of `width` by `height` transparent black pixels, which deflate to
+/// a few kilobytes.
+fn blank_png(width: u32, height: u32) -> Vec<u8> {
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut chunk = |kind: &[u8], data: &[u8]| {
+        png.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        let mut body = kind.to_vec();
+        body.extend_from_slice(data);
+        png.extend_from_slice(&body);
+        png.extend_from_slice(&crc32fast::hash(&body).to_be_bytes());
+    };
+    let mut header = Vec::new();
+    header.extend_from_slice(&width.to_be_bytes());
+    header.extend_from_slice(&height.to_be_bytes());
+    header.extend_from_slice(&[8, 6, 0, 0, 0]);
+    chunk(b"IHDR", &header);
+    let rows = vec![0; (1 + 4 * width as usize) * height as usize];
+    chunk(
+        b"IDAT",
+        &miniz_oxide::deflate::compress_to_vec_zlib(&rows, 6),
+    );
+    chunk(b"IEND", &[]);
+    png
+}
+
 /// The numbers after `prefix` in `line`, which starts with it.
 fn numbers(line: &str, prefix: &str) -> Vec<i64> {
     line[prefix.len()..]
@@ -343,9 +394,13 @@ fn a_file_that_declares_more_pixels_than_the_heap_holds_is_refused_before_it_is_
     let bmp = declared_bmp(16384, 2048);
     assert_eq!(fastemu_gfx::probe_size(&png), Some((16384, 2048)));
     assert_eq!(fastemu_gfx::probe_size(&bmp), Some((16384, 2048)));
+    let gif = gif_frame_bomb();
+    assert_eq!(gif.len(), 34);
+    assert_eq!(fastemu_gfx::probe_size(&gif), Some((1, 1)));
     let resources = [
         ("bomb.png", png),
         ("bomb.bmp", bmp),
+        ("bomb.gif", gif),
         ("dot.png", support::test_png()),
     ];
     let Some(jar) = suite("image-file", &resources) else {
@@ -355,44 +410,67 @@ fn a_file_that_declares_more_pixels_than_the_heap_holds_is_refused_before_it_is_
     run.wait_log("done");
     let log = run.dump();
     for file in ["/bomb.png", "/bomb.bmp"] {
-        for how in ["by name", "by bytes", "by stream"] {
+        for how in ["by name", "by bytes", "by nokia bytes", "by stream"] {
             let line = format!("{file} {how} OutOfMemoryError");
             assert!(run.has(&line), "no {line:?}; the log:\n{log}");
         }
     }
-    // A real image still loads, the three ways.
-    for how in ["by name", "by bytes", "by stream"] {
+    // The GIF's image is one pixel, but its first frame would hold 160 MiB
+    // while it decodes, which the heap cannot: a file that does not decode,
+    // by the exception each way names for one.
+    for (how, error) in [
+        ("by name", "IOException"),
+        ("by bytes", "IllegalArgumentException"),
+        ("by nokia bytes", "IllegalArgumentException"),
+        ("by stream", "IOException"),
+    ] {
+        let line = format!("/bomb.gif {how} {error}");
+        assert!(run.has(&line), "no {line:?}; the log:\n{log}");
+    }
+    // A real image still loads, the four ways.
+    for how in ["by name", "by bytes", "by nokia bytes", "by stream"] {
         let line = format!("/dot.png {how} ok 2x2");
         assert!(run.has(&line), "no {line:?}; the log:\n{log}");
     }
-    // Six files that declare 128 MiB each were read, and none was decoded.
+    // Two files that declare 128 MiB were read eight times and never
+    // decoded, and no GIF frame was decoded at its own size.
     assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
 }
 
 #[test]
-fn an_image_stream_that_never_ends_is_an_io_exception_at_16_mib() {
+fn an_image_stream_that_never_ends_ends_at_the_heap_or_at_16_mib() {
     let alone = Alone::new();
     let Some(jar) = suite("streams", &[]) else {
         return;
     };
+    // The bytes read count on the heap of 1 MiB as they grow, so the stream
+    // ends in OutOfMemoryError once they would pass it: 4 KiB a read, the
+    // 257th read at most.
     let mut run = launch(&jar, midlet::STREAMS, HEAP);
     let line = run.wait_log("endless ");
     let log = run.dump();
-    assert!(
-        line.starts_with("endless IOException the image data is larger than 16 MiB calls "),
-        "{log}"
-    );
-    // 4 KiB a read: 4096 reads fill 16 MiB and the next one is refused.
-    let message = "endless IOException the image data is larger than 16 MiB";
-    assert_eq!(numbers(&line, message), [4097, 4097 * 4096], "{log}");
+    let prefix = "endless OutOfMemoryError calls ";
+    assert!(line.starts_with(prefix), "{log}");
+    let counts = numbers(&line, prefix);
+    assert!((2..=257).contains(&counts[0]), "{log}");
+    assert_eq!(counts[1], counts[0] * 4096, "{log}");
     // A stream that gives no bytes ends after 1000 reads in a row.
     let empty = run.wait_log("empty ");
     assert_eq!(
         empty, "empty IOException the stream gives no data calls 1000",
         "{log}"
     );
+    drop(run);
+    // A heap of 16 MiB holds 16 MiB of them, and the stream ends where it
+    // always did: 4096 reads fill 16 MiB and the next one is refused.
+    let mut run = launch(&jar, midlet::STREAMS, 16 << 20);
+    let line = run.wait_log("endless ");
+    let log = run.dump();
+    let message = "endless IOException the image data is larger than 16 MiB";
+    assert!(line.starts_with(message), "{log}");
+    assert_eq!(numbers(&line, message), [4097, 4097 * 4096], "{log}");
     // The bytes read are held once and are 16 MiB at most; the vector they
-    // grow in may hold its old and its new block at a doubling.
+    // grow in holds its old and its new block at a doubling.
     assert!(alone.peak_mib() < 40, "{} MiB", alone.peak_mib());
 }
 
@@ -537,7 +615,7 @@ fn custom_items_count_their_surfaces_and_screens_not_shown_give_their_buffers_ba
 #[test]
 fn siemens_bitmaps_and_tiled_layers_the_heap_cannot_hold_are_refused_before_they_are_made() {
     let alone = Alone::new();
-    let Some(jar) = suite("siemens-bitmaps", &[]) else {
+    let Some(jar) = suite("siemens-bitmaps", &[("bomb.gif", gif_frame_bomb())]) else {
         return;
     };
     // The packed bitmap is 1 MiB, so the heap is 2 MiB.
@@ -547,6 +625,13 @@ fn siemens_bitmaps_and_tiled_layers_the_heap_cannot_hold_are_refused_before_they
     // 32 MiB of pixels and 64 MiB of cells.
     assert!(run.has("siemens bitmap OutOfMemoryError"), "{log}");
     assert!(run.has("siemens layer OutOfMemoryError"), "{log}");
+    // A GIF whose first frame would hold 160 MiB to decode is a file that
+    // does not decode, by Siemens' loaders too.
+    assert!(run.has("siemens gif by name IOException"), "{log}");
+    assert!(
+        run.has("siemens gif by bytes IllegalArgumentException"),
+        "{log}"
+    );
     assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
 }
 
@@ -629,4 +714,80 @@ fn a_screen_that_was_hidden_paints_all_of_its_content_when_it_is_shown_again() {
         same_pixels(&first, &again),
         "the menu looks different; {log}"
     );
+}
+
+/// The line each of the eight threads of an `AtOnce` MIDlet printed once
+/// they all finished: `name id outcome count`.
+fn thread_lines(run: &mut Running, name: &str) -> Vec<String> {
+    run.wait_log("done");
+    (0..8)
+        .map(|id| run.wait_log(&format!("{name} {id} ")))
+        .collect()
+}
+
+#[test]
+fn threads_that_decode_images_at_once_take_turns() {
+    let alone = Alone::new();
+    let Some(jar) = suite("decode-threads", &[("big.png", blank_png(1024, 1024))]) else {
+        return;
+    };
+    // A heap of 16 MiB holds an image of 4 MiB and the next one's decode;
+    // eight threads each make it three times and drop it.
+    let mut run = launch(&jar, midlet::DECODE_THREADS, 16 << 20);
+    let lines = thread_lines(&mut run, "decode");
+    let log = run.dump();
+    // Each thread made its three images, unless the images the others held
+    // at that moment left no room: a phone's error.
+    for (id, line) in lines.iter().enumerate() {
+        assert!(
+            *line == format!("decode {id} made 3") || line.contains(" OutOfMemoryError "),
+            "{log}"
+        );
+    }
+    // One decode holds the PNG's rows and the image's pixels, 8 MiB, beside
+    // the heap. Eight at once held 66 MiB and more.
+    assert!(alone.peak_mib() < 40, "{} MiB", alone.peak_mib());
+}
+
+#[test]
+fn threads_that_read_image_streams_at_once_share_the_heap() {
+    let alone = Alone::new();
+    let Some(jar) = suite("stream-threads", &[]) else {
+        return;
+    };
+    let mut run = launch(&jar, midlet::STREAM_THREADS, HEAP);
+    let lines = thread_lines(&mut run, "stream");
+    let log = run.dump();
+    // The bytes of every thread count on the heap of 1 MiB, so each stream
+    // that never ends is an OutOfMemoryError once it gave 1 MiB at most,
+    // and the read that did not fit.
+    for (id, line) in lines.iter().enumerate() {
+        let prefix = format!("stream {id} OutOfMemoryError ");
+        assert!(line.starts_with(&prefix), "{log}");
+        assert!(numbers(line, &prefix)[0] <= (1 << 20) + 4096, "{log}");
+    }
+    // Eight threads held 16 MiB each beside the heap: 128 MiB.
+    assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
+}
+
+#[test]
+fn threads_that_read_sound_streams_at_once_share_the_heap() {
+    let alone = Alone::new();
+    let Some(jar) = suite("sound-threads", &[]) else {
+        return;
+    };
+    // A heap of 4 MiB: each stream alone could fill it.
+    let mut run = launch(&jar, midlet::SOUND_THREADS, 4 << 20);
+    let lines = thread_lines(&mut run, "sound");
+    let log = run.dump();
+    // Every stream that never ends is an OutOfMemoryError once it gave
+    // the heap's size at most, and the read of 16 KiB that did not fit.
+    for (id, line) in lines.iter().enumerate() {
+        let prefix = format!("sound {id} OutOfMemoryError ");
+        assert!(line.starts_with(&prefix), "{log}");
+        assert!(numbers(line, &prefix)[0] <= (4 << 20) + (16 << 10), "{log}");
+    }
+    // Their bytes count on the heap, so together they hold about twice
+    // the heap at most. Eight threads held 4 MiB each beside it: 32 MiB.
+    assert!(alone.peak_mib() < LIMIT_MIB, "{} MiB", alone.peak_mib());
 }

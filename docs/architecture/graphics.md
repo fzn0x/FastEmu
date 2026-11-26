@@ -185,6 +185,35 @@ counts already. A file is checked by the size its header declares,
 declares 16384 by 2048 pixels never reaches the decoder on a small heap.
 A file whose size cannot be read goes to the decoder, which refuses it.
 
+A GIF's first frame is decoded whole, at its own size, before it is cut
+to the image ([Decoding](#decoding)). When the frame has more pixels than
+the image, the wrapper also asks the heap for the frame and its index, 5
+bytes a pixel (`probe_frame_bytes`). A frame the heap cannot hold is a
+file that does not decode, and no pixel of it is read: 34 bytes can
+declare a frame of 160 MiB on an image of one pixel.
+
+The image decodes of one game take turns, one at a time, as its resource
+reads do. A turn runs from before the file is read or copied until the
+image is counted on the heap. The decode runs with the VM lock released,
+and the heap check before it reserves nothing, so threads that decoded at
+once could each hold a file and an image the heap had not counted. A
+thread whose turn has not come waits without the VM lock. It holds none
+of its file yet, except the bytes of a stream it read, which the heap
+counts. A thread that waited while its game was closed
+decodes nothing. So a game's image calls hold one file and one decode
+beside its heap at most. `createImage(byte[], offset, length)` and
+`DirectUtils.createImage` copy only the part of the array they decode.
+
+The bytes `Image.createImage(InputStream)` reads are held by an object on
+the heap, counted at the room of their vector, and the heap is asked
+before the vector grows. A stream the heap cannot hold ends in
+`OutOfMemoryError`: on a heap of 1 MiB after 1 MiB at most. Threads that
+read streams at once share the heap's room. The stream is read before the
+decode turn, as reading runs the game's code, and its bytes stay counted
+while the thread waits for its turn. In the turn they are its file: the
+next collection, which another thread can start while the decode runs,
+no longer counts them.
+
 `Image.createImage(InputStream)` reads at most 16 MiB. A stream that gives
 more ends with `IOException`, and so does one whose `read` returns no
 bytes 1000 times in a row.
@@ -311,7 +340,12 @@ throws as `IllegalArgumentException` (or `IOException` for
   segments again after every marker, which took 4.8 s for a 1.6 MB file
   of thousands of them.
 - **GIF**: the first frame, placed on the logical screen, transparent
-  index clear.
+  index clear. The frame is decoded whole, at its own size, before it is
+  cut to the screen, so a frame with more pixels than the screen holds
+  more than the image does while it decodes: the wrapper asks the heap
+  for it first, as the Images section says. The standard has every frame
+  fit in the logical screen. A frame partly outside it, or of another
+  shape with no more pixels, is cut to the screen.
 - **BMP**: 1, 4, 8, 16, 24 and 32 bits, bit-field masks, bottom-up or
   top-down; run-length compressed files are refused. 32-bit files whose
   alpha mask is set but all zero are shown opaque.
@@ -321,8 +355,9 @@ than 16384 pixels, fail with `OutOfMemoryError` before their pixels are
 allocated. zune-jpeg refuses a JPEG frame header over 16384 pixels a side
 while it reads the headers, so such a JPEG is a decode error. A GIF's
 first frame is decoded at its own size before it is placed on the logical
-screen: the `gif` crate's memory limit holds it to 2^25 pixels, and the
-heap check sees only the screen. The wrapper checks the declared size
+screen: the `gif` crate's memory limit holds it to 2^25 pixels, and a
+frame with more pixels than the screen is checked against the heap too.
+The wrapper checks the declared size
 against the heap first, as the Images section says, so a PNG that declares
 2^25 pixels does not make `decode_stream` reserve its 128 MiB buffer on a
 heap of a few MiB.
@@ -358,6 +393,15 @@ inside an APP1 block or a block the `gif` crate skips, is no size here.
   picture is empty, and when a crate panics. Decoding such a file fails
   too. The size is only what the file claims. It can be far over the
   decoder's limits, which `Surface::decode` still enforces.
+
+`probe_frame_bytes(data) -> Option<u64>` gives the bytes
+`Surface::decode` holds for a GIF's first frame when that frame has more
+pixels than the image `probe_size` gives: 4 bytes a pixel, and 1 for the
+index the `gif` crate reads it into first. It reads the file up to the
+frame header with the options decoding uses, as the probe does. Every
+other file is `None`, a GIF whose frame has no more pixels than its image
+too: those decoders hold a few times the image's own size at most. It is
+exported from the crate root.
 
 ## Nokia DirectGraphics
 

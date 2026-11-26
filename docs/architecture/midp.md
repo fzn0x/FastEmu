@@ -130,9 +130,12 @@ named.
   would let through at that moment, never more than the heap. The JAR
   source stops inflating there, and a bigger resource is an
   `OutOfMemoryError` once the read passes that size. One resource
-  inflates at a time for each game, so the buffers of its threads never
-  add up: the host holds at most one buffer of the heap's size beyond
-  what the heap counts.
+  inflates at a time for each game, so the inflating of its threads
+  never adds up. A buffer that is read stays the host's until the native
+  makes it a Java array, a player or an image, once it has the VM lock
+  again, so threads of a game that read at once can each hold one
+  meanwhile. Image calls hold theirs through the decode, and take turns
+  ([graphics.md](graphics.md#images)): their files never add up.
 
 Natives that read resources by name use `env(ctx).source` (the same
 `JarSource`) inside `Ctx::without_lock`. `Image.createImage(String)`
@@ -781,6 +784,14 @@ on, and a `LayerManager` scene checked frame by frame.
    `tests/support` compiles the Java under `tests/java` with stubs of the
    MIDP classes (signatures and constant values from the inventory; javac
    inlines constants), packs JARs and drives an instance.
+7. Make an image from a game's file only through
+   `lcdui::image::image_from_resource` or `image_from_array`, never with
+   `Surface::decode` itself. They take the game's decode turn before the
+   file is read or copied, weigh the size it declares against the heap,
+   and decode with the VM lock released. Nothing may wait for the turn
+   while it holds the VM lock, and nothing inside a turn may call Java.
+   A stream is read before the turn, into a `stream_bytes::CountedBytes`
+   that the heap counts, as `Image.createImage(InputStream)` does.
 
 ## Not done yet
 

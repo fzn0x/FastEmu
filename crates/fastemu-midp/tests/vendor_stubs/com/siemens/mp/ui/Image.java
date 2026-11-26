@@ -7,6 +7,8 @@ public class Image extends com.siemens.mp.misc.NativeMem {
 
     public Image(byte[] bytes, int width, int height, boolean transparent) {}
 
+    public Image(byte[] imageData) {}
+
     public int getWidth() {
         return 0;
     }
@@ -16,6 +18,11 @@ public class Image extends com.siemens.mp.misc.NativeMem {
     }
 
     public static javax.microedition.lcdui.Image createImageFromBitmap(byte[] data, int w, int h) {
+        return null;
+    }
+
+    public static javax.microedition.lcdui.Image createImageWithoutScaling(String name)
+            throws java.io.IOException {
         return null;
     }
 

@@ -47,7 +47,7 @@ pub mod transform;
 
 pub use anchor::{Anchor, AnchorPolicy};
 pub use color::{OPAQUE, blend, display_color, gray_of};
-pub use decode::{ImageFormat, probe_size};
+pub use decode::{ImageFormat, probe_frame_bytes, probe_size};
 pub use error::{GfxError, Result, non_null};
 pub use font::{Face, Font, FontLibrary, Size, Style, TextRendering};
 pub use graphics::{Graphics, StrokeStyle};
