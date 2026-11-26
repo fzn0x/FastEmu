@@ -199,8 +199,14 @@ apps pass one with output, the headless runner and tests pass none.
 - **The control thread** is a host thread that owns the `Vm` and applies
   the app's input, pause, resume and stop, and `notifyDestroyed`,
   `resumeRequest` and crashes, one at a time in the order they came.
-  `Instance` methods only send it a message over a channel, which never
-  blocks, so the app's thread never waits for the VM lock.
+  `Instance` methods only add a message to its queue, which never blocks,
+  so the app's thread never waits for the VM lock. Every message of the
+  app waits its turn. The game's are merged: a `resumeRequest` right
+  behind another that still waits is part of it, and once
+  `notifyDestroyed` or a crash waits, the game's later messages are
+  dropped. However often a game calls them, at most one `resumeRequest`
+  waits between two messages of the app, and one `notifyDestroyed` or
+  crash.
 
 ## The event loop
 
@@ -354,11 +360,23 @@ name: OK, Back, Cancel, Exit, Help, Stop or Select.
 | constructor returns | `startApp` | `Running` |
 | `startApp` throws `MIDletStateChangeException` | logged; the MIDlet waits for a resume | `Paused` |
 | class missing, constructor or `startApp` throws, VM internal error | logged; `destroyApp(true)` if there is a MIDlet; every thread stops | `Crashed { message }` |
-| `Instance::pause` | `hideNotify`, `pauseApp` (each up to 1 s), then the VM and sound group freeze | `Paused` |
-| `Instance::resume` or `resumeRequest` | VM and sound thaw, `showNotify` and a full repaint, `startApp` | `Running` |
-| `notifyPaused` | logged | `Paused` |
+| `Instance::pause` | `hideNotify`, `pauseApp` (each up to 1 s), then the VM and sound group freeze; a MIDlet that paused itself gets no `pauseApp` | `Paused` |
+| `Instance::resume`, or `resumeRequest` after the MIDlet paused itself | VM and sound thaw, `showNotify` and a full repaint, `startApp` in its turn | `Running` |
+| `resumeRequest` while the app has the instance paused | ignored; the app's resume resumes it | `Paused` |
+| `notifyPaused` | logged when it changes the status | `Paused` |
 | `Instance::stop` | `destroyApp(true)` (up to 1 s), then every thread stops and the sound group closes | `Exited` |
 | `notifyDestroyed` | every thread stops, no `destroyApp` | `Exited` |
+
+A MIDlet that paused itself, with `notifyPaused` or a `startApp` that
+threw `MIDletStateChangeException`, still freezes when the app pauses
+it. MIDP calls `pauseApp` only on an active MIDlet, so it gets
+`hideNotify` and the freeze alone. A `startApp` whose turn comes while
+the app has the instance paused, such as one the MIDlet's own
+`resumeRequest` asked for just before, waits for the resume before it
+sets `Running`: the status never shows a frozen game as running. The
+apps' pause button and background pause act on the status the instance
+shows. On a game that shows `Paused` because it paused itself, the
+button resumes it, and the background pause leaves it as it is.
 
 The message of `Crashed` is the game's own text, an exception's message
 for one. It is cut to 1 KiB and its control characters are escaped, as
@@ -497,7 +515,7 @@ that instance. The process shares:
 
 The app's threads never wait on an instance's VM lock, which a Java
 thread gives up only at its next safepoint or wait. Input, pause, resume
-and stop go through the control thread's channel. `frame`, `status`,
+and stop go through the control thread's queue. `frame`, `status`,
 `wants_text`, `drain_log` and `take_link_request` take only the
 `HostLink`'s own lock or an atomic; the VM's threads hold that lock only
 to swap in a frame, add a log line, set the status or a link, never

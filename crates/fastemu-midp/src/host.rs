@@ -9,14 +9,14 @@
 //! quickly; the ones the VM calls run with the VM lock held.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, mpsc};
 
 use fastemu_core::{
     Frame, InputEvent, InstanceId, InstanceStatus, LogLevel, LogLine, Notify, escape_control,
 };
 use fastemu_jvm::{VmLimits, cut_log_text};
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 
 /// The most log lines kept between two [`HostLink::drain_log`] calls; the
 /// oldest go first, so a game that prints in a loop cannot exhaust memory.
@@ -53,6 +53,101 @@ pub(crate) enum Control {
     Crashed(String),
 }
 
+/// The control thread's queue of [`Control`] messages, in the order they
+/// came. Sending never blocks and never waits for the VM lock.
+///
+/// The app's messages (input, pause, resume, stop) are all kept, in
+/// order. The game's own messages are merged, so however often a game
+/// sends them, at most one `ResumeRequest` waits between two messages of
+/// the app (or before the first, or after the last), and one message
+/// that ends the game:
+///
+/// - a `ResumeRequest` right behind another that still waits is part of
+///   it. The control thread reads the instance's status when it takes the
+///   request, after the game's later calls, so the merged one asks for
+///   nothing more;
+/// - once an `Exited` or a `Crashed` waits, the game's later messages are
+///   dropped: the control thread ends the instance at that one.
+///
+/// When the control thread ends it closes the queue: what waits is
+/// dropped, and so is what comes after, as with a channel whose receiver
+/// is gone.
+#[derive(Clone, Default)]
+pub(crate) struct ControlQueue(Arc<QueueShared>);
+
+#[derive(Default)]
+struct QueueShared {
+    state: Mutex<QueueState>,
+    ready: Condvar,
+}
+
+#[derive(Default)]
+struct QueueState {
+    messages: VecDeque<Control>,
+    /// Whether an `Exited` or a `Crashed` was queued.
+    ending: bool,
+    /// Whether the control thread has ended.
+    closed: bool,
+}
+
+impl ControlQueue {
+    /// Queues `message` for the control thread, or merges or drops it as
+    /// the type says.
+    pub(crate) fn send(&self, message: Control) {
+        let mut state = self.0.state.lock();
+        if state.closed {
+            return;
+        }
+        match message {
+            Control::ResumeRequest
+                if state.ending || state.messages.back() == Some(&Control::ResumeRequest) =>
+            {
+                return;
+            }
+            Control::Exited | Control::Crashed(_) if std::mem::replace(&mut state.ending, true) => {
+                return;
+            }
+            _ => {}
+        }
+        state.messages.push_back(message);
+        drop(state);
+        self.0.ready.notify_one();
+    }
+
+    /// Takes the next message, waiting for one. Only the control thread
+    /// takes messages, and it closes the queue only as it ends.
+    pub(crate) fn recv(&self) -> Control {
+        let mut state = self.0.state.lock();
+        loop {
+            if let Some(message) = state.messages.pop_front() {
+                return message;
+            }
+            self.0.ready.wait(&mut state);
+        }
+    }
+
+    /// Takes the next message if one waits.
+    pub(crate) fn try_recv(&self) -> Option<Control> {
+        self.0.state.lock().messages.pop_front()
+    }
+
+    /// Drops what waits, and every message sent from now on.
+    pub(crate) fn close(&self) {
+        let dropped = {
+            let mut state = self.0.state.lock();
+            state.closed = true;
+            std::mem::take(&mut state.messages)
+        };
+        drop(dropped);
+    }
+
+    /// How many messages wait.
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.0.state.lock().messages.len()
+    }
+}
+
 struct HostState {
     status: InstanceStatus,
     frame: Option<Frame>,
@@ -75,7 +170,7 @@ struct Inner {
     wants_text: AtomicBool,
     state: Mutex<HostState>,
     errors: AtomicU64,
-    control: Mutex<Option<mpsc::Sender<Control>>>,
+    control: Mutex<Option<ControlQueue>>,
 }
 
 /// One instance's side of the app: cheap to clone, shared by the VM's
@@ -201,15 +296,41 @@ impl HostLink {
     }
 
     /// Changes the status. A finished status (exited or crashed) is final.
-    pub(crate) fn set_status(&self, status: InstanceStatus) {
+    /// Returns whether the status changed.
+    pub(crate) fn set_status(&self, status: InstanceStatus) -> bool {
         {
             let mut state = self.0.state.lock();
             if state.status.is_finished() || state.status == status {
-                return;
+                return false;
             }
             state.status = status;
         }
         self.changed();
+        true
+    }
+
+    /// Sets the status to `Running` as a `startApp` starts, unless
+    /// `paused()` says the app has paused the virtual machine. Returns
+    /// `false` only then, and the `startApp` waits for the resume.
+    ///
+    /// `paused` is read under the status lock. The control thread pauses
+    /// the machine first and sets `Paused` after, under that lock, so a
+    /// `startApp` that comes during a pause never marks the frozen game
+    /// running: it either sets `Running` before the pause's `Paused`, or
+    /// it sees the pause.
+    pub(crate) fn set_running_unless(&self, paused: impl FnOnce() -> bool) -> bool {
+        {
+            let mut state = self.0.state.lock();
+            if paused() {
+                return false;
+            }
+            if state.status.is_finished() || state.status == InstanceStatus::Running {
+                return true;
+            }
+            state.status = InstanceStatus::Running;
+        }
+        self.changed();
+        true
     }
 
     /// Shows a new frame. The frame it replaces is freed after the lock is
@@ -263,21 +384,23 @@ impl HostLink {
     }
 
     /// Where the control thread listens.
-    pub(crate) fn set_control(&self, sender: mpsc::Sender<Control>) {
-        *self.0.control.lock() = Some(sender);
+    pub(crate) fn set_control(&self, queue: ControlQueue) {
+        *self.0.control.lock() = Some(queue);
     }
 
     /// Sends a message to the control thread, if there is one (tests that
     /// run natives without a launcher have none). A crash message is the
     /// game's text, so it is cut to [`MAX_CRASH_MESSAGE_BYTES`] and its
-    /// control characters are escaped.
+    /// control characters are escaped. The queue is taken out of its lock
+    /// before the send, so the two locks are never held together.
     pub(crate) fn control(&self, message: Control) {
         let message = match message {
             Control::Crashed(text) => Control::Crashed(clean_text(text, MAX_CRASH_MESSAGE_BYTES)),
             other => other,
         };
-        if let Some(sender) = &*self.0.control.lock() {
-            let _ = sender.send(message);
+        let queue = self.0.control.lock().clone();
+        if let Some(queue) = queue {
+            queue.send(message);
         }
     }
 
@@ -369,8 +492,8 @@ mod tests {
     #[test]
     fn uncaught_exceptions_count_and_internal_errors_crash() {
         let (link, _) = counting();
-        let (tx, rx) = mpsc::channel();
-        link.set_control(tx);
+        let queue = ControlQueue::default();
+        link.set_control(queue.clone());
         link.log(LogLine {
             level: LogLevel::Err,
             text: "Exception in thread \"main\" java.lang.Error".into(),
@@ -380,7 +503,7 @@ mod tests {
             text: format!("{INTERNAL_ERROR}: boom; stopping it"),
         });
         assert_eq!(link.error_count(), 2);
-        assert!(matches!(rx.try_recv(), Ok(Control::Crashed(_))));
+        assert!(matches!(queue.try_recv(), Some(Control::Crashed(_))));
     }
 
     #[test]
@@ -517,18 +640,99 @@ mod tests {
     #[test]
     fn a_crash_message_is_cut_and_escaped() {
         let (link, _) = counting();
-        let (tx, rx) = mpsc::channel();
-        link.set_control(tx);
+        let queue = ControlQueue::default();
+        link.set_control(queue.clone());
         link.control(Control::Crashed(format!(
             "boom\n\u{1b}[2J{}",
             "q".repeat(5000)
         )));
         link.control(Control::Stop);
-        let Ok(Control::Crashed(message)) = rx.try_recv() else {
+        let Some(Control::Crashed(message)) = queue.try_recv() else {
             panic!("a crash message");
         };
         assert!(message.len() <= MAX_CRASH_MESSAGE_BYTES);
         assert!(message.starts_with("boom\\n\u{fffd}[2Jqqq"));
-        assert!(matches!(rx.try_recv(), Ok(Control::Stop)));
+        assert!(matches!(queue.try_recv(), Some(Control::Stop)));
+    }
+
+    #[test]
+    fn a_flood_of_resume_requests_waits_as_one() {
+        let queue = ControlQueue::default();
+        for _ in 0..1_000_000 {
+            queue.send(Control::ResumeRequest);
+        }
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.try_recv(), Some(Control::ResumeRequest));
+        assert_eq!(queue.try_recv(), None);
+        // Once taken, the next request waits again.
+        queue.send(Control::ResumeRequest);
+        assert_eq!(queue.recv(), Control::ResumeRequest);
+    }
+
+    #[test]
+    fn the_apps_messages_keep_their_order_among_the_games() {
+        let queue = ControlQueue::default();
+        let text = InputEvent::Text("a".into());
+        let app = [
+            Control::Pause,
+            Control::Input(text.clone()),
+            Control::Input(text),
+            Control::Resume,
+            Control::Stop,
+        ];
+        let mut expected = Vec::new();
+        for message in app {
+            for _ in 0..1000 {
+                queue.send(Control::ResumeRequest);
+            }
+            expected.push(Control::ResumeRequest);
+            queue.send(message.clone());
+            expected.push(message);
+        }
+        let got: Vec<Control> = std::iter::from_fn(|| queue.try_recv()).collect();
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn only_the_first_end_of_the_game_waits() {
+        let queue = ControlQueue::default();
+        for i in 0..1000 {
+            queue.send(Control::Crashed(format!("crash {i}")));
+            queue.send(Control::Exited);
+            queue.send(Control::ResumeRequest);
+        }
+        // The app's stop still comes through.
+        queue.send(Control::Stop);
+        assert_eq!(queue.try_recv(), Some(Control::Crashed("crash 0".into())));
+        assert_eq!(queue.try_recv(), Some(Control::Stop));
+        assert_eq!(queue.try_recv(), None);
+    }
+
+    #[test]
+    fn a_closed_queue_keeps_nothing() {
+        let queue = ControlQueue::default();
+        queue.send(Control::Pause);
+        queue.close();
+        queue.send(Control::Stop);
+        queue.send(Control::ResumeRequest);
+        assert_eq!(queue.len(), 0);
+        assert_eq!(queue.try_recv(), None);
+    }
+
+    #[test]
+    fn a_crash_report_from_the_log_waits_once() {
+        // A game can print the virtual machine's crash line itself, in a
+        // loop: the queue keeps the first one.
+        let (link, _) = counting();
+        let queue = ControlQueue::default();
+        link.set_control(queue.clone());
+        for i in 0..1000 {
+            link.log(LogLine {
+                level: LogLevel::Err,
+                text: format!("{INTERNAL_ERROR}: {i}"),
+            });
+        }
+        assert_eq!(queue.len(), 1);
+        assert_eq!(link.error_count(), 1000);
     }
 }

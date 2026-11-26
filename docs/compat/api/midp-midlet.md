@@ -83,7 +83,10 @@ Checked exception declared by `startApp` and `destroyApp`.
 
 For FastEmu, closing an instance window maps to `destroyApp(true)`, and
 pausing an instance (or Android sending the app to the background) maps
-to `pauseApp` followed by `startApp` on resume.
+to `pauseApp` followed by `startApp` on resume. A MIDlet that paused
+itself is not Active, so the app's pause freezes it without `pauseApp`.
+A `resumeRequest` resumes a MIDlet that paused itself, and is ignored
+while the app has it paused: the app's resume calls `startApp` anyway.
 
 ## Suite attributes
 
