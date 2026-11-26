@@ -84,7 +84,17 @@ impl Probe {
 fn probe(instance: &MidpInstance) -> Probe {
     let deadline = Instant::now() + PROBE_WAIT;
     let ping = instance.ping();
-    watch(deadline, || ping.answered(), || instance.activity())
+    watch(deadline, || ping.answered(), || look(instance))
+}
+
+/// What the game's threads are doing now, `None` only when a thread holds
+/// the VM lock. A game that ended during the probe has no threads, and its
+/// machine may be freed already, which `MidpInstance::activity` also
+/// answers with `None`: that machine has no threads, it is not locked.
+fn look(instance: &MidpInstance) -> Option<Activity> {
+    instance
+        .activity()
+        .or_else(|| instance.vm_freed().then(Activity::default))
 }
 
 /// The verdict of a probe from whether the event thread `answered` and
