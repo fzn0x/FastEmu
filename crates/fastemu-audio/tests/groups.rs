@@ -50,6 +50,48 @@ fn group_volume_scales_its_players() {
     assert_eq!(group.volume(), 1.0);
 }
 
+/// A new volume reaches the mix at the next render and slides there over
+/// 3 ms, so turning a game down or muting it does not click.
+#[test]
+fn a_volume_change_slides_in_without_a_click() {
+    let engine = engine(8000);
+    let group = engine.create_group();
+    let player = group
+        .create_player(&constant_wav(8000, 8000, 16000), None)
+        .unwrap();
+    player.start().unwrap();
+    let full = render(&engine, 100)[99];
+    group.set_volume(0.0);
+    let after = render(&engine, 100);
+    // 3 ms at 8 kHz is 24 frames: no step is more than a 24th of the
+    // full level, and the sound is gone after them.
+    let largest = std::iter::once(full)
+        .chain(after.iter().copied())
+        .collect::<Vec<_>>()
+        .windows(2)
+        .map(|pair| (pair[0] - pair[1]).abs())
+        .fold(0.0f32, f32::max);
+    assert!(largest <= full / 24.0 + 1e-4, "{largest} {full}");
+    assert!(after[0] > 0.0, "the change jumped to silence");
+    assert!(after[30..].iter().all(|&v| v == 0.0));
+}
+
+/// The volume is kept outside the mixer, so a closed group still
+/// answers with the last one set; `is_closed` tells it is closed.
+#[test]
+fn a_closed_group_keeps_its_last_volume() {
+    let engine = engine(8000);
+    let group = engine.create_group();
+    group.set_volume(0.25);
+    group.close();
+    assert!(group.is_closed());
+    assert_eq!(group.volume(), 0.25);
+    // Setting it on a closed group is harmless and changes no sound.
+    group.set_volume(0.5);
+    assert_eq!(group.volume(), 0.5);
+    assert_eq!(peak(&render(&engine, 100)), 0.0);
+}
+
 #[test]
 fn a_volume_that_is_not_a_number_is_silence() {
     let engine = engine(8000);

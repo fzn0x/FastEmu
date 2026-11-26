@@ -8,7 +8,7 @@ use crate::engine::Engine;
 use crate::error::AudioError;
 use crate::event::{EventCallback, PlayerEvent, PlayerEventKind, PlayerId};
 use crate::format::Format;
-use crate::gain::unit_gain;
+use crate::gain::SharedGain;
 use crate::media;
 use crate::mixer::{GroupId, GroupState, Mixer, Slot};
 use crate::nokia;
@@ -122,6 +122,8 @@ pub struct Group {
 struct Inner {
     engine: Engine,
     id: GroupId,
+    /// The volume the mix reads, set here without the mixer lock.
+    volume: Arc<SharedGain>,
 }
 
 impl Drop for Inner {
@@ -155,9 +157,9 @@ fn close_group(engine: &Engine, id: GroupId) {
 }
 
 impl Group {
-    pub(crate) fn new(engine: Engine, id: GroupId) -> Self {
+    pub(crate) fn new(engine: Engine, id: GroupId, volume: Arc<SharedGain>) -> Self {
         Self {
-            inner: Arc::new(Inner { engine, id }),
+            inner: Arc::new(Inner { engine, id, volume }),
         }
     }
 
@@ -180,13 +182,18 @@ impl Group {
     }
 
     /// Sets the group's gain, from 0.0 (silent) to 1.0, on top of each
-    /// player's own level. It slides over a few milliseconds.
+    /// player's own level; a NaN is silence. It never waits for the mixer,
+    /// which the audio thread holds while it renders a slice and a game's
+    /// threads hold in player calls: the app calls it from its UI thread.
+    /// The mix takes it up at its next slice and slides to it over a few
+    /// milliseconds.
     pub fn set_volume(&self, volume: f32) {
-        self.with(|group| group.volume = unit_gain(volume));
+        self.inner.volume.set(volume);
     }
 
+    /// The last volume set, whether the group is open or closed.
     pub fn volume(&self) -> f32 {
-        self.with(|group| group.volume).unwrap_or(0.0)
+        self.inner.volume.get()
     }
 
     /// Silences the group without stopping it: players keep their place
@@ -529,5 +536,35 @@ mod tests {
             .insert(Voice::new(silence(MAX_DECODED_BYTES), false))
             .unwrap_err();
         assert!(matches!(full, AudioError::OutOfMemory(_)), "{full}");
+    }
+
+    /// The app sets a game's volume from its UI thread, so the call must
+    /// not wait for the mixer: the audio thread holds it while it renders
+    /// a slice, and a game's threads in every player call. Here the test
+    /// holds it for as long as it likes.
+    #[test]
+    fn set_volume_does_not_wait_for_the_mixer() {
+        let engine = Engine::new(EngineConfig { sample_rate: 8000 });
+        let group = engine.create_group();
+        let held = engine.lock();
+        let (done, returned) = mpsc::channel();
+        let setter = {
+            let group = group.clone();
+            std::thread::spawn(move || {
+                group.set_volume(0.25);
+                let _ = done.send(());
+            })
+        };
+        // The call takes microseconds. The bound only ends the test when
+        // the call waits for the lock, which it then never gets while the
+        // test holds it; the lock is let go before the join, so the test
+        // fails rather than hangs.
+        let in_time = returned
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .is_ok();
+        drop(held);
+        setter.join().unwrap();
+        assert!(in_time, "set_volume waited for the mixer lock");
+        assert_eq!(group.volume(), 0.25);
     }
 }

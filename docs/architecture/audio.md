@@ -16,7 +16,8 @@ why, and how the MIDP layer should map each MMAPI call onto it.
               v
   +--------------------------- Engine ----------------------------+
   |  Mixer (behind one mutex)                                     |
-  |    Group 1 (instance 1): volume, mute, pause, listener        |
+  |    Group 1 (instance 1): mute, pause, listener                |
+  |      volume: an atomic its Group handles set with no lock     |
   |      Player -> Voice -> Source (WAV, MP3, MIDI, tones, ...)   |
   |      Player -> Voice -> Source                                |
   |    Group 2 (instance 2) ...                                   |
@@ -42,8 +43,9 @@ why, and how the MIDP layer should map each MMAPI call onto it.
 
 ## Threads and locking
 
-All mixer state sits behind one lock, a `parking_lot` mutex. It is fair over
-about a millisecond: a caller that has waited that long gets it next, so a
+All mixer state but each group's volume sits behind one lock, a
+`parking_lot` mutex. It is fair over about a millisecond: a caller that
+has waited that long gets it next, so a
 thread that takes it again and again (a game that seeks a big MIDI file in a
 loop) cannot keep the audio thread or another game's calls out. API calls
 hold it briefly. The audio thread renders a buffer in slices of 128 frames
@@ -72,6 +74,20 @@ What one game can make the lock cost is bounded:
 A seek in a MIDI file replays the controllers before the new position. It
 is up to 65536 events under the lock, about a millisecond. That stays a
 known limit, and the fair lock keeps it from starving anyone.
+
+A group's volume is the one value outside the lock. `Group::set_volume`
+stores it in an atomic that the group's handles share with the mixer,
+and the mix reads it for every slice. The app sets a game's volume from
+its UI thread, and mutes a game by setting its volume to 0, so that call
+never waits for the audio thread or for a game's player calls. The mix
+takes up a new volume at its next slice, and each voice slides to it
+over 3 ms like any gain change, so it does not click. A player's own
+level, `VolumeControl.setLevel`, stays under the lock: it comes from the
+game's threads, which wait for the mixer in every player call anyway,
+and its `VolumeChanged` event keeps its order among the player's other
+events. `Group::set_muted`, `Group::set_paused` and
+`Engine::set_master_volume` stay under the lock too; the app does not
+call them from its UI thread.
 
 [SECURITY.md](../../SECURITY.md#limits-a-game-cannot-pass) lists the
 limits of sound with every other limit a game meets, and its
@@ -490,7 +506,7 @@ the engine's view of it.
 | -------------------------------- | ----------- |
 | App start                        | `Engine::default()` and `engine.set_render_budget(Some(RenderBudget::DEFAULT))`, then `AudioOutput::open(&engine)` or `NullOutput::start(&engine)`; `engine.set_soundfont(...)` if the user chose one |
 | Instance launch                  | `let group = engine.create_group(); group.set_volume(settings.volume)`; the MIDP media module sets the group's listener on first use and reads events on its own thread, so nothing else subscribes |
-| `Instance::set_volume(v)`        | `group.set_volume(v)` (0.0 also mutes) |
+| `Instance::set_volume(v)`        | `group.set_volume(v)` (0.0 also mutes); it takes no lock, so the app's UI thread never waits for the mixer |
 | `Instance::pause` / `resume`     | `group.set_paused(true)` / `false`, besides `pauseApp` and `startApp` |
 | `Instance::stop`, crash, exit    | `group.close()` (or drop every clone) |
 

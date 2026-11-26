@@ -535,9 +535,9 @@ and stop go through the control thread's queue. `frame`, `status`,
 `wants_text`, `drain_log` and `take_link_request` take only the
 `HostLink`'s own lock or an atomic; the VM's threads hold that lock only
 to swap in a frame, add a log line, set the status or a link, never
-while they wait for anything. `set_volume` takes the mixer's lock, which
-the audio thread holds while it renders a buffer and game threads hold
-in player calls, but never while they wait for their VM lock.
+while they wait for anything. `set_volume` takes no lock: it stores the
+volume of the instance's sound group in an atomic, which the audio
+thread reads at its next slice of 128 frames.
 Stopping or dropping an instance ends its threads and closes its group,
 which takes its players out of the mixer; once the app lets go of the
 instance, its virtual machine is freed.
