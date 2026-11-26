@@ -57,7 +57,11 @@ The bench counts the processor time of every thread, so that cost shows.
   ```
 
   `microemulator.jar` alone lacks the Nokia classes that some games
-  need, since its manifest names no other jar. MeBench keeps saves in
+  need, since its manifest names no other jar. Even on the class path,
+  MicroEmulator's strict class loading for a JAR does not reach them, so
+  BombMan, built on Nokia's `FullCanvas`, ended before its first frame.
+  MeBench asks for relaxed class loading, as MicroEmulator uses for a
+  MIDlet started by its class name. MeBench keeps saves in
   files, as FastEmu does, in a home folder of its own for each process.
   MicroEmulator's own headless runner keeps them in memory.
 - MicroEmulator's development snapshot on GitHub was not measured, only

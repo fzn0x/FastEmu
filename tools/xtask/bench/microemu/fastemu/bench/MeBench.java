@@ -86,6 +86,12 @@ public final class MeBench {
         params.add("--rms");
         params.add("file");
         params.add("--quit");
+        // A MIDlet started from a JAR gets strict class loading, which
+        // never reaches the Nokia and Siemens APIs on the class path, so a
+        // game built on FullCanvas ends at once. Relaxed is what
+        // MicroEmulator uses for a MIDlet started by its class name.
+        params.add("--appclassloader");
+        params.add("relaxed");
         for (int i = 0; i < args.length; i++) {
             if ("--version".equals(args[i])) {
                 out("RUN version microemulator=" + Common.class.getPackage().getImplementationVersion());

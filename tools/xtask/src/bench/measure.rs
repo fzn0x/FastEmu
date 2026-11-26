@@ -354,7 +354,7 @@ impl<'a> Bench<'a> {
                 facts.push((
                     "MicroEmulator".into(),
                     format!(
-                        "{me}, headless through MeBench, class path {}",
+                        "{me}, headless through MeBench, relaxed class loading, class path {}",
                         MICROEMU_JARS.join(", ")
                     ),
                 ));
