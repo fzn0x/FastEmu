@@ -5,19 +5,20 @@
 //! repeats a bounded attempt with the lock released, and between
 //! attempts checks whether the VM is stopping, the thread was interrupted
 //! or the deadline passed. Name lookups and connects, which std::net
-//! cannot bound that way, run on a helper thread ([`off_thread`]).
+//! cannot bound that way, run on a helper thread ([`off_thread`]), and a
+//! game has at most [`MAX_HELPERS`] of those alive.
 
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use fastemu_core::NetworkPolicy;
 use fastemu_jvm::{Ctx, JResult, Throw};
 
-use super::tls;
+use super::{lock, tls};
 use crate::env;
 
 /// The longest one system call on a connection blocks with the VM lock
@@ -50,6 +51,13 @@ pub(crate) const MAX_DATAGRAMS: usize = 16;
 /// How many bytes of request bodies a game's HTTP connections may hold
 /// at once, before the requests go out.
 pub(crate) const MAX_PENDING_BYTES: usize = 8 << 20;
+
+/// How many helper threads of name lookups and connects a game may have
+/// alive at once ([`off_thread`]). A helper the game stopped waiting for,
+/// on an interrupt, at its deadline or at a stop, counts until it ends,
+/// since its thread and its socket live until then. Each game thread
+/// waits for one helper at a time, and a phone ran a handful of sockets.
+pub(crate) const MAX_HELPERS: usize = 16;
 
 /// The kinds of connection a game's count of open ones is kept for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,14 +94,40 @@ impl Kind {
     }
 }
 
-/// What a game has open, shared by its [`Slot`]s and [`Pending`]s.
+/// What a game has open, shared by its [`Slot`]s, [`Pending`]s and
+/// [`HelperPlace`]s.
 #[derive(Default)]
 struct Counts {
     open: [AtomicUsize; 3],
     pending: AtomicUsize,
+    /// The helper threads alive ([`off_thread`]).
+    helpers: Mutex<usize>,
+    /// Told when a helper ends and gives its place back.
+    helper_ended: Condvar,
 }
 
 impl Counts {
+    /// Takes a place for a helper thread. A game that has [`MAX_HELPERS`]
+    /// alive first waits up to `wait` for one of them to end, and gets
+    /// `None` if none did.
+    fn take_helper(self: &Arc<Self>, wait: Duration) -> Option<HelperPlace> {
+        let mut alive = lock(&self.helpers);
+        if *alive >= MAX_HELPERS {
+            alive = self
+                .helper_ended
+                .wait_timeout(alive, wait)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        if *alive >= MAX_HELPERS {
+            return None;
+        }
+        *alive += 1;
+        Some(HelperPlace {
+            counts: Arc::clone(self),
+        })
+    }
+
     /// Takes a place for a `kind` connection, if the game has one left.
     fn take(self: &Arc<Self>, kind: Kind) -> Option<Slot> {
         let counter = &self.open[kind.index()];
@@ -136,6 +170,24 @@ pub(crate) struct Slot {
 impl Drop for Slot {
     fn drop(&mut self) {
         self.counts.open[self.kind.index()].fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// A helper thread's place among the game's [`MAX_HELPERS`]. The helper
+/// holds it until its work returns, so the place comes back when the
+/// thread and any socket it opened go, whether or not the game still
+/// waits for them.
+struct HelperPlace {
+    counts: Arc<Counts>,
+}
+
+impl Drop for HelperPlace {
+    fn drop(&mut self) {
+        *lock(&self.counts.helpers) -= 1;
+        // Wakes one waiter, which takes the place unless a caller that did
+        // not wait took it first. Any other waiter looks again after its
+        // slice.
+        self.counts.helper_ended.notify_one();
     }
 }
 
@@ -322,19 +374,42 @@ pub(crate) fn io_exception(ctx: &mut Ctx<'_>, e: &io::Error) -> Throw {
 
 /// Runs `work` on a helper thread and waits for its result with the VM
 /// lock released, for blocking calls std::net cannot bound (name lookups
-/// and connects). If the VM stops or `deadline` passes first, the helper
-/// is left to finish on its own and its result is dropped.
+/// and connects). If the VM stops, the thread is interrupted or
+/// `deadline` passes first, the helper is left to finish on its own and
+/// its result is dropped.
+///
+/// The helper takes one of the game's [`MAX_HELPERS`] places before it
+/// starts and keeps it until `work` returns. A game that holds them all
+/// waits for one within `deadline`, in slices with the same checks, as it
+/// waits for a slow network, and starts no thread meanwhile. A stopping
+/// VM starts none at all.
 pub(crate) fn off_thread<T: Send + 'static>(
     ctx: &mut Ctx<'_>,
     deadline: Instant,
     what: &str,
     work: impl FnOnce() -> T + Send + 'static,
 ) -> JResult<T> {
+    if ctx.is_stopping() {
+        return Err(Throw::Stop);
+    }
+    let counts = counts(ctx);
+    let place = block_on(ctx, Some(deadline), || Ok(counts.take_helper(SLICE)))?;
+    // A place taken at once returns without the checks, and the VM may
+    // have begun to stop meanwhile.
+    if ctx.is_stopping() {
+        return Err(Throw::Stop);
+    }
     let (tx, rx) = mpsc::sync_channel(1);
+    // A thread that cannot start drops the closure, and the place with
+    // it.
     let spawned = std::thread::Builder::new()
         .name(format!("fastemu-{what}"))
         .spawn(move || {
+            // When the game no longer waits, `send` hands the result back
+            // and it is dropped here, a connect's socket with it, before
+            // the place goes back.
             let _ = tx.send(work());
+            drop(place);
         });
     if spawned.is_err() {
         let message = format!("cannot start a thread to {what}");
@@ -384,29 +459,43 @@ pub(crate) fn resolve(ctx: &mut Ctx<'_>, host: &str, port: u16) -> JResult<Socke
     }
 }
 
+/// Tries each of `addrs` in turn with `attempt` until one connects. The
+/// addresses share the time up to `deadline`: each gets what is left,
+/// and none is tried once it has passed, so a helper the game stopped
+/// waiting for ends by the game's deadline, not 30 s for each address.
+fn connect_each<S>(
+    addrs: impl IntoIterator<Item = SocketAddr>,
+    deadline: Instant,
+    mut attempt: impl FnMut(&SocketAddr, Duration) -> io::Result<S>,
+) -> Result<S, ConnectError> {
+    let mut last = None;
+    for addr in addrs {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            last = Some(io::ErrorKind::TimedOut.into());
+            break;
+        }
+        match attempt(&addr, left) {
+            Ok(s) => return Ok(s),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.map_or(ConnectError::Unknown, ConnectError::Io))
+}
+
 /// Connects to `host:port`, trying each of its addresses, and sets the
-/// slice timeouts on the new socket.
+/// slice timeouts on the new socket. The lookup, the wait for a helper's
+/// place and every address share one [`CONNECT_TIMEOUT`].
 pub(crate) fn connect(ctx: &mut Ctx<'_>, host: &str, port: u16) -> JResult<TcpStream> {
     let name = host.to_owned();
-    let result = off_thread(
-        ctx,
-        Instant::now() + CONNECT_TIMEOUT,
-        "connect",
-        move || {
-            let addrs: Vec<SocketAddr> = match (name.as_str(), port).to_socket_addrs() {
-                Ok(a) => a.collect(),
-                Err(_) => return Err(ConnectError::Unknown),
-            };
-            let mut last = None;
-            for addr in addrs {
-                match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
-                    Ok(s) => return Ok(s),
-                    Err(e) => last = Some(e),
-                }
-            }
-            Err(last.map_or(ConnectError::Unknown, ConnectError::Io))
-        },
-    )?;
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+    let result = off_thread(ctx, deadline, "connect", move || {
+        let addrs: Vec<SocketAddr> = match (name.as_str(), port).to_socket_addrs() {
+            Ok(a) => a.collect(),
+            Err(_) => return Err(ConnectError::Unknown),
+        };
+        connect_each(addrs, deadline, TcpStream::connect_timeout)
+    })?;
     let stream = match result {
         Ok(s) => s,
         Err(ConnectError::Unknown) => {
@@ -551,14 +640,23 @@ mod tests {
     use crate::env::InstanceEnv;
     use crate::io::connector::{Options, READ_WRITE};
 
-    /// Runs `f` on a VM with the MIDP classes whose instance may use the
-    /// network.
-    fn with_network(f: impl FnOnce(&mut Ctx<'_>)) {
-        let vm = Vm::new(
+    /// A VM with the MIDP classes.
+    fn machine() -> Vm {
+        Vm::new(
             VmConfig::default(),
             Arc::new(MemorySource::new()),
             crate::classes(&fastemu_core::default_profile()),
-        );
+        )
+    }
+
+    /// Runs `f` on a VM with the MIDP classes whose instance may use the
+    /// network.
+    fn with_network(f: impl FnOnce(&mut Ctx<'_>)) {
+        with_network_on(&machine(), f);
+    }
+
+    /// Runs `f` on `vm`, in an instance that may use the network.
+    fn with_network_on(vm: &Vm, f: impl FnOnce(&mut Ctx<'_>)) {
         vm.attach("test", |ctx| {
             let mut env = InstanceEnv::for_tests("unused");
             env.settings.network = NetworkPolicy::Allow;
@@ -690,5 +788,269 @@ mod tests {
             assert_eq!(kept, MAX_CONNECTIONS);
             assert_eq!(refused, "java.io.IOException: too many open connections");
         });
+    }
+
+    /// The gate of the helpers' works: each waits on it until the test
+    /// drops the sender.
+    fn gate() -> (mpsc::Sender<()>, Arc<std::sync::Mutex<mpsc::Receiver<()>>>) {
+        let (open, wait) = mpsc::channel();
+        (open, Arc::new(std::sync::Mutex::new(wait)))
+    }
+
+    /// What a call ended with, as `class: message`.
+    fn outcome<T>(ctx: &mut Ctx<'_>, result: JResult<T>) -> String {
+        match result {
+            Ok(_) => "returned".to_owned(),
+            Err(Throw::Exception(e)) => ctx.describe_exception(e),
+            Err(Throw::Stop) => "stopped".to_owned(),
+        }
+    }
+
+    /// Calls `off_thread` with a deadline that has passed, as an interrupt
+    /// or a slow network leaves the game, so it stops waiting after one
+    /// slice. The work tells `ran` it started, then waits for the gate.
+    fn give_up(
+        ctx: &mut Ctx<'_>,
+        gate: &Arc<std::sync::Mutex<mpsc::Receiver<()>>>,
+        ran: &mpsc::Sender<()>,
+    ) -> String {
+        let (gate, ran) = (Arc::clone(gate), ran.clone());
+        let result = off_thread(ctx, Instant::now(), "test", move || {
+            let _ = ran.send(());
+            let _ = gate.lock().unwrap().recv();
+        });
+        outcome(ctx, result)
+    }
+
+    /// How many works told `started` they ran, counted once the channel
+    /// closes: when every work that ran has ended and every one that never
+    /// ran was dropped. A helper that never ends fails the test rather
+    /// than hang it.
+    fn count_started(started: &mpsc::Receiver<()>) -> usize {
+        let mut count = 0;
+        loop {
+            match started.recv_timeout(Duration::from_secs(30)) {
+                Ok(()) => count += 1,
+                Err(RecvTimeoutError::Disconnected) => return count,
+                Err(RecvTimeoutError::Timeout) => panic!("a helper still runs after {count}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_game_keeps_at_most_16_helpers_it_stopped_waiting_for() {
+        with_network(|ctx| {
+            let (open, gate) = gate();
+            let (ran, started) = mpsc::channel();
+            for _ in 0..MAX_HELPERS + 4 {
+                assert_eq!(
+                    give_up(ctx, &gate, &ran),
+                    "java.io.InterruptedIOException: timed out"
+                );
+            }
+            drop(ran);
+            drop(open);
+            assert_eq!(count_started(&started), MAX_HELPERS);
+        });
+    }
+
+    #[test]
+    fn a_helper_that_ends_gives_its_place_back() {
+        with_network(|ctx| {
+            let (open, gate) = gate();
+            let (ran, started) = mpsc::channel();
+            for _ in 0..MAX_HELPERS {
+                give_up(ctx, &gate, &ran);
+            }
+            // The game holds every place. Whether the helpers end before
+            // the next call or while it waits, it gets one.
+            let release = std::thread::spawn(move || drop(open));
+            let deadline = Instant::now() + Duration::from_secs(30);
+            for i in 0..MAX_HELPERS + 4 {
+                assert_eq!(off_thread(ctx, deadline, "test", move || i).ok(), Some(i));
+            }
+            release.join().unwrap();
+            drop(ran);
+            assert_eq!(count_started(&started), MAX_HELPERS);
+        });
+    }
+
+    #[test]
+    fn a_helper_whose_work_panics_gives_its_place_back() {
+        with_network(|ctx| {
+            let (open, gate) = gate();
+            let (ran, started) = mpsc::channel();
+            for _ in 0..MAX_HELPERS - 1 {
+                give_up(ctx, &gate, &ran);
+            }
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let result = off_thread(ctx, deadline, "test", || -> u32 {
+                panic!("the work of a test helper panics")
+            });
+            assert_eq!(outcome(ctx, result), "java.io.IOException: test failed");
+            // Only the place of the helper that panicked is free.
+            assert_eq!(off_thread(ctx, deadline, "test", || 7).ok(), Some(7));
+            drop(open);
+            drop(ran);
+            assert_eq!(count_started(&started), MAX_HELPERS - 1);
+        });
+    }
+
+    #[test]
+    fn an_interrupt_ends_the_wait_for_a_helper_place() {
+        with_network(|ctx| {
+            let (open, gate) = gate();
+            let (ran, started) = mpsc::channel();
+            for _ in 0..MAX_HELPERS {
+                give_up(ctx, &gate, &ran);
+            }
+            // Thread.currentThread().interrupt(), as a game does.
+            let me = ctx.current_thread();
+            assert!(ctx.call_virtual(me, "interrupt", "()V", &[]).is_ok());
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let late = ran.clone();
+            let result = off_thread(ctx, deadline, "test", move || {
+                let _ = late.send(());
+            });
+            assert_eq!(
+                outcome(ctx, result),
+                "java.io.InterruptedIOException: interrupted"
+            );
+            drop(open);
+            drop(ran);
+            assert_eq!(count_started(&started), MAX_HELPERS);
+        });
+    }
+
+    #[test]
+    fn a_pending_interrupt_does_not_keep_a_helper_from_starting() {
+        with_network(|ctx| {
+            let (ran, started) = mpsc::channel();
+            let me = ctx.current_thread();
+            assert!(ctx.call_virtual(me, "interrupt", "()V", &[]).is_ok());
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let result = off_thread(ctx, deadline, "test", move || {
+                let _ = ran.send(());
+            });
+            // A connect that answers within its first slice returns, and
+            // one that takes longer sees the interrupt, but with a place
+            // free it is always tried.
+            let text = outcome(ctx, result);
+            assert!(
+                text == "returned" || text == "java.io.InterruptedIOException: interrupted",
+                "{text}"
+            );
+            assert_eq!(count_started(&started), 1);
+            ctx.take_interrupt();
+        });
+    }
+
+    #[test]
+    fn a_stopping_game_starts_no_helper() {
+        with_network(|ctx| {
+            let (ran, started) = mpsc::channel();
+            ctx.stop_vm();
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let result = off_thread(ctx, deadline, "test", move || {
+                let _ = ran.send(());
+            });
+            assert!(matches!(result, Err(Throw::Stop)));
+            assert_eq!(count_started(&started), 0);
+        });
+    }
+
+    #[test]
+    fn a_stop_ends_the_wait_for_a_helper_place() {
+        let vm = machine();
+        let stopper = vm.clone();
+        with_network_on(&vm, |ctx| {
+            let (open, gate) = gate();
+            let (ran, started) = mpsc::channel();
+            for _ in 0..MAX_HELPERS {
+                give_up(ctx, &gate, &ran);
+            }
+            // The user closes the game while it waits for a place. A stop
+            // that comes before the call starts nothing either.
+            let stop = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(300));
+                stopper.stop();
+            });
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let late = ran.clone();
+            let result = off_thread(ctx, deadline, "test", move || {
+                let _ = late.send(());
+            });
+            assert!(matches!(result, Err(Throw::Stop)));
+            stop.join().unwrap();
+            drop(open);
+            drop(ran);
+            assert_eq!(count_started(&started), MAX_HELPERS);
+        });
+    }
+
+    /// Ports 1 to `n` on 127.0.0.1.
+    fn addrs(n: u16) -> Vec<SocketAddr> {
+        (1..=n)
+            .map(|port| SocketAddr::from(([127, 0, 0, 1], port)))
+            .collect()
+    }
+
+    #[test]
+    fn the_addresses_of_a_name_share_the_connect_deadline() {
+        // Each attempt waits its whole timeout, as a connect to an address
+        // that drops packets does, but never more than 300 ms.
+        let deadline = Instant::now() + Duration::from_millis(200);
+        let mut given = Vec::new();
+        let result = connect_each(addrs(3), deadline, |_, timeout| {
+            given.push(timeout);
+            std::thread::sleep(timeout.min(Duration::from_millis(300)));
+            Err::<(), _>(io::Error::from(io::ErrorKind::TimedOut))
+        });
+        assert!(matches!(result, Err(ConnectError::Io(e)) if e.kind() == io::ErrorKind::TimedOut));
+        // A sleep never ends early, so the deadline has passed once the
+        // first attempt returns, however busy the machine is.
+        assert!(
+            given.iter().all(|t| *t <= Duration::from_millis(200)),
+            "{given:?}"
+        );
+        let total: Duration = given.iter().sum();
+        assert!(total < Duration::from_millis(400), "{given:?}");
+    }
+
+    #[test]
+    fn no_address_is_tried_after_the_deadline() {
+        let result = connect_each(addrs(3), Instant::now(), |_, _| -> io::Result<()> {
+            panic!("an address was tried after the deadline")
+        });
+        assert!(matches!(result, Err(ConnectError::Io(e)) if e.kind() == io::ErrorKind::TimedOut));
+    }
+
+    #[test]
+    fn connect_each_keeps_the_first_success_and_the_last_error() {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut tried = Vec::new();
+        let result = connect_each(addrs(3), deadline, |addr, _| {
+            tried.push(addr.port());
+            match addr.port() {
+                2 => Ok(addr.port()),
+                _ => Err(io::Error::from(io::ErrorKind::ConnectionRefused)),
+            }
+        });
+        assert!(matches!(result, Ok(2)));
+        assert_eq!(tried, [1, 2]);
+        let result = connect_each(addrs(2), deadline, |addr, _| -> io::Result<()> {
+            Err(io::Error::from(match addr.port() {
+                1 => io::ErrorKind::ConnectionRefused,
+                _ => io::ErrorKind::ConnectionReset,
+            }))
+        });
+        assert!(
+            matches!(result, Err(ConnectError::Io(e)) if e.kind() == io::ErrorKind::ConnectionReset)
+        );
+        // No address at all keeps the ConnectionNotFoundException.
+        let result = connect_each(Vec::new(), deadline, |_, _| -> io::Result<()> {
+            unreachable!("there is no address to try")
+        });
+        assert!(matches!(result, Err(ConnectError::Unknown)));
     }
 }

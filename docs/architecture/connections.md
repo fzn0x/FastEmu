@@ -72,14 +72,21 @@ work therefore runs through `io::net`:
   `InterruptedIOException("timed out")`.
 - Name lookups and connects cannot be bounded that way, so
   `net::off_thread` runs them on a helper thread and waits for its answer
-  in slices. A VM that stops meanwhile leaves the helper to finish on its
-  own; its result is dropped.
+  in slices. A thread that stops waiting, at a stop, an interrupt or its
+  deadline, leaves the helper to finish on its own; its result is
+  dropped, and a socket it opened is closed. Each helper holds one of
+  the game's 16 places for helpers until it ends (see [What a game may
+  hold](#what-a-game-may-hold)), and a stopping VM starts none.
 
-Deadlines: resolving and connecting may take 30 s. A read or write waits
-at most 30 s when the game opened the connection with `timeouts` set,
-and for as long as it takes otherwise (the VM's stop still ends it).
-HTTP waits at most 60 s for a response head whatever the flag says, as a
-phone's network gave up on a silent server too.
+Deadlines: resolving and connecting may take 30 s together, the wait for
+a helper's place included. The addresses of a name share them: each is
+tried with the time left and none after it, so a helper ends by then,
+unless the name lookup itself takes longer, which only the system's
+resolver bounds. A read or write waits at most 30 s when the game opened
+the connection with `timeouts` set, and for as long as it takes
+otherwise (the VM's stop still ends it). HTTP waits at most 60 s for a
+response head whatever the flag says, as a phone's network gave up on a
+silent server too.
 
 An attempt must end after one system call, whatever the peer sends. A
 loop inside one attempt would never get back to the three checks above,
@@ -108,14 +115,16 @@ host ...")`.
 ## What a game may hold
 
 A game that may use the network can still not make the host hold more
-than a phone would. Every limit throws `IOException` from the call that
-passes it, with a fixed text, and none of them is a setting.
+than a phone would. Every limit but the one on helpers throws
+`IOException` from the call that passes it, with a fixed text, and none
+of them is a setting.
 
 | What | Limit | Where it is checked |
 | --- | --- | --- |
 | open connections: sockets, secure sockets, accepted sockets and HTTP connections | 64 | `Connector.open`, `acceptAndOpen` |
 | open server sockets | 8 | `Connector.open` |
 | open datagram connections | 16 | `Connector.open` |
+| helper threads of name lookups and connects, the ones the game stopped waiting for included | 16 | `Connector.open`, the first HTTP request, `send` to a datagram address by name; past it the call waits |
 | the request body of one HTTP connection | 4 MiB | `OutputStream.write` |
 | the request bodies of all of a game's HTTP connections, not yet sent | 8 MiB | `OutputStream.write` |
 | request headers of one HTTP connection | 64, and 16 KiB of names and values | `setRequestProperty` |
@@ -132,13 +141,25 @@ connection the game never closed. A game at its limit gets one
 collection and a second try before the exception, because games written
 for phones open a connection for each request and close the stream but
 not the connection. A connection that fails to open gives its place
-back. A closed connection lets go of its socket at once, so the
-descriptor is free when the place is, not when the collector gets to the
-object. A server that has no place for a client leaves it in the
-listener's queue: `acceptAndOpen` throws before it accepts.
+back at once, while a helper still connecting for it keeps its own place
+among the 16 for helpers until it ends. A closed connection lets go of
+its socket at once, so the descriptor is free when the place is, not
+when the collector gets to the object. A server that has no place for a
+client leaves it in the listener's queue: `acceptAndOpen` throws before
+it accepts.
 
 The counts are an extension of the VM (`ConnectionSlots`), so every game
 has its own, and they hold no Java references.
+
+A name lookup or a connect takes one of the game's 16 places for helpers
+before its thread starts, and the helper gives it back when its work
+ends, not when the game stops waiting. The count keeps a game that
+interrupts its own connects in a loop from leaving a thread and a socket
+behind each time. At the limit the call does not throw: it waits for a
+helper to end, in slices with the same checks as any network wait, so
+an interrupt, a stop or its 30 s end it, and no thread starts meanwhile.
+The game sees what a slow network shows it, and a game that opens a few
+connections at a time never waits.
 
 A request body is kept in the host until the request goes out, and the
 heap does not count it, so it has its own two limits: 4 MiB for a
@@ -335,7 +356,13 @@ no alarm having been set before.
 
 - Unit tests sit beside the code: name parsing, the HTTP wire format and
   body decoding fed in every split, dates, datagram addresses and strict
-  modified UTF-8, segment counts, the interfaces' constants.
+  modified UTF-8, segment counts, the interfaces' constants. The helpers'
+  limit and the shared connect deadline are unit tests in `io::net`, not
+  tests against a slow network, since no loopback address drops packets
+  on every system: Windows refuses a full listener after 2 s of retries,
+  Linux and macOS drop the SYN. The limit tests hold helpers on a gate
+  the test opens, and the deadline tests run `connect_each` with a fake
+  connect.
 - `tests/io_*.rs` and `tests/wma_messages.rs` run Java programs from
   `tests/io_java` on the VM against peers on 127.0.0.1: a scripted HTTP
   server (GET, POST, HEAD, fixed, chunked and open-ended bodies, a reply
