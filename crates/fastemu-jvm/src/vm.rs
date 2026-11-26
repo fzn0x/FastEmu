@@ -216,7 +216,8 @@ pub(crate) struct VmState {
     pub(crate) thread_names: u32,
     pub(crate) monitors: HashMap<ObjRef, Monitor>,
     pub(crate) interned: HashMap<Box<[u16]>, ObjRef>,
-    /// `WeakReference` objects and their referents.
+    /// `WeakReference` objects and their referents, and each running
+    /// `Timer`'s queue and its timer (see `util::timer::reap`).
     pub(crate) weak: HashMap<ObjRef, Option<ObjRef>>,
     pub(crate) globals: Vec<Option<ObjRef>>,
     pub(crate) free_globals: Vec<u32>,

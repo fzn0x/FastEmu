@@ -202,8 +202,10 @@ VM lock) and one wait queue, which works as a condition variable
   reaches a safepoint every 256 passes.
 - Blocking operations wait on the wait queue, which releases the lock:
   `Thread.sleep`, `Object.wait`, `Thread.join`, a contended
-  `monitorenter`, class initialization another thread is running, and
-  natives that call `Ctx::wait_until`, `Ctx::sleep`, `Ctx::wait_posted`.
+  `monitorenter`, class initialization another thread is running,
+  `Thread.start` and `new Timer()` at the thread limit while the threads
+  of dropped or cancelled timers end, and natives that call
+  `Ctx::wait_until`, `Ctx::sleep`, `Ctx::wait_posted`.
 - Deadlines are precise to about a millisecond on every platform, so a
   game loop that sleeps 10 ms a frame gets its frame rate. Each waiting
   thread waits on a signal of its own: on Windows an event and a
@@ -237,14 +239,29 @@ again once there is room, and a refused `Timer` has no queue. The host
 has 16 more. `Vm::spawn` and `Ctx::spawn_host_thread` refuse only when
 the machine has `max_threads` plus 16 threads, so a game that has used up
 its share cannot keep the app from starting the event thread, a lifecycle
-thread or the media thread. A `Timer`'s thread lives until `cancel()`, as
-in Java, so a game that makes a `Timer` for each screen and never cancels
-one gets the error once the machine has 64 threads: after about 62
-timers, beside the event thread and a lifecycle thread. A thread's stack
-holds at most 2 MiB (see [Limits](#limits)), so 64 threads hold 128 MiB
-at worst, and the 80 the host may reach hold 160 MiB. The OS name of a
+thread or the media thread. A thread's stack holds at most 2 MiB (see
+[Limits](#limits)), so 64 threads hold 128 MiB at worst, and the 80 the
+host may reach hold 160 MiB. The OS name of a
 thread is `java ` and Java's name without control characters, cut to 32
 characters, since `std` panics on a NUL; the Java name stays as given.
+
+**Timer threads.** A `Timer`'s thread lives until `cancel()`, or, as in
+Java, until the game holds no reference to the timer and the timer has
+no task left. The collection that finds the timer dropped wakes its
+thread, which ends at its next turn without running Java. A repeating
+task keeps the thread of its dropped timer until the task is cancelled.
+When `Thread.start` or `new Timer()` finds the machine full while a
+timer has no task left, it waits for the threads of the dropped and
+cancelled timers to end. When none is ending yet, it first collects once
+to find the timers the game dropped. It refuses only if no thread can
+end. It never waits for a thread that runs the game's code, which could
+wait for a monitor the caller holds: one that runs a task, or reports
+what a task threw. During a pause it waits until the resume. No
+collection runs when every timer thread has a task. So a game that makes
+a `Timer` for each screen and drops it never runs out of threads. A game
+that keeps its timers, or makes them faster than their tasks run, gets
+the error once the machine has 64 threads: after about 62 timers, beside
+the event thread and a lifecycle thread.
 
 Monitors have an owner, a recursion count, threads waiting to enter and
 a wait set. `wait`, `notify` and `notifyAll` without owning the monitor
@@ -292,7 +309,10 @@ The collector is a precise, non-moving mark and sweep. Its roots:
 
 Payloads report the references they hold through `Payload::trace`.
 `WeakReference` referents are not roots; a collection clears the ones
-that died.
+that died. Each `Timer`'s queue holds its timer the same way, in the same
+table. The timer's thread keeps the queue and its tasks alive, not the
+timer. So the collection that finds a timer dropped marks its queue and
+wakes the thread (see [Threads and the VM lock](#threads-and-the-vm-lock)).
 
 **Allocation never collects.** It counts the object against the limit
 and asks for a collection when the heap fills up; the collection runs at
@@ -686,7 +706,9 @@ let thread = ctx.spawn_thread("event", |ctx| loop {
 ```
 
 `ctx.spawn_thread` starts a thread of the game's: it counts against
-`max_threads` and throws `OutOfMemoryError` past it, as `Timer` does. A
+`max_threads` and throws `OutOfMemoryError` past it at once. Unlike
+`Thread.start` and `new Timer()`, it never collects or waits for the
+threads of dropped timers, so it lets no other thread run. A
 thread the library runs for the game on its own account, which the game
 never starts, uses `ctx.spawn_host_thread` instead, which draws on the
 host's 16 more. `Vm::spawn` is the host's too.
@@ -1107,7 +1129,9 @@ What natives and games can rely on:
   `scheduledExecutionTime` is wall time (the wall time the machine
   started at, plus the run time, plus the pauses so far), so the
   javadoc's check `currentTimeMillis() - scheduledExecutionTime()` stays
-  small after a pause.
+  small after a pause. A timer the game drops ends its thread once it has
+  no task left, at the first collection after the drop, as on Java SE and
+  in J2ME Loader, whose `Timer` ends its thread from a finalizer.
 
 ## Testing
 

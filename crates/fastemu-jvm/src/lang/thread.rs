@@ -99,6 +99,9 @@ fn name_arg(ctx: &mut Ctx<'_>, v: Value) -> JResult<String> {
 }
 
 fn start(ctx: &mut Ctx<'_>, a: &[Value]) -> JResult<Value> {
+    // First, at the thread limit: it may collect and let other threads
+    // run, so `started` is read after it.
+    crate::util::timer::make_room(ctx)?;
     let obj = this(a);
     let d = data(ctx, a)?;
     if d.started {

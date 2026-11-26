@@ -8,7 +8,7 @@ mod hashtable;
 mod keys;
 mod random;
 mod time;
-mod timer;
+pub(crate) mod timer;
 mod timezone;
 mod vector;
 
