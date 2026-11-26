@@ -75,7 +75,7 @@ links to the page that describes the limit.
 | Java heap | 2, 4, 8 or 16 MiB, set by the phone profile | `OutOfMemoryError` | [jvm.md][jvm-heap] |
 | Memory the runtime makes for the game: strings, buffers, images, screens, sound bytes | counted on the heap | `OutOfMemoryError` | [jvm.md][jvm-heap] |
 | One request of the runtime | at most the heap, and at most twice the heap with what the heap counts already | `OutOfMemoryError` before anything is built | [jvm.md][jvm-heap] |
-| Java threads alive at once | 64, the event and lifecycle threads among them; the host may start 16 more, 80 in all | `OutOfMemoryError` from `Thread.start` or `new Timer()` | [jvm.md][jvm-threads] |
+| Java threads alive at once | 64, the event and lifecycle threads among them; the host may start 16 more, 80 in all | `OutOfMemoryError` from `Thread.start` or `new Timer()`, after one collection when a timer has no task left | [jvm.md][jvm-threads] |
 | Stack of one thread | 131072 slots, 2 MiB | `StackOverflowError` | [jvm.md][jvm-limits] |
 | Frames of one thread | 4096 | `StackOverflowError` | [jvm.md][jvm-config] |
 | Calls from the runtime back into Java, nested on one thread, the runtime's own calls included | 256 | `StackOverflowError` | [jvm.md][jvm-config] |
@@ -83,6 +83,7 @@ links to the page that describes the limit.
 | Stack trace of an exception | 256 frames | the rest is left out | [jvm.md][jvm-heap] |
 | Name of a thread | 255 characters | cut | [jvm.md][jvm-heap] |
 | Pause and resume calls waiting or running, besides the first `startApp` | 8 | later `pauseApp` and `startApp` calls are dropped, with one warning; the game still pauses and resumes | [midp.md][midp-threads] |
+| Messages of the game waiting for its control thread (`resumeRequest`, `notifyDestroyed`, a crash) | one `resumeRequest` between two messages of the app, and one `notifyDestroyed` or crash | a `resumeRequest` right behind another that still waits is merged into it, and a message of the game after `notifyDestroyed` or a crash is dropped; the app's own messages, such as input, pause and stop, are never merged or dropped | [midp.md][midp-threads] |
 | `callSerially` calls waiting, and posted tasks waiting | 10000 of each | `OutOfMemoryError` from `callSerially`; a posted task is dropped, with one warning | [midp.md][midp-events] |
 
 [jvm-heap]: docs/architecture/jvm.md#the-heap-and-the-collector
@@ -136,7 +137,9 @@ links to the page that describes the limit.
 | Pixels of an image | counted on the heap, 4 bytes a pixel | `OutOfMemoryError` before the pixels exist | [graphics.md][gfx-images] |
 | One image | 2^25 pixels | `OutOfMemoryError` | [graphics.md][gfx-images] |
 | Size an image file declares | checked against the heap before decoding; 16384 pixels a side | `OutOfMemoryError`; a JPEG over 16384 pixels a side that the heap could hold is a decode error instead: `IllegalArgumentException`, or `IOException` from `createImage(String)` and `createImage(InputStream)` | [graphics.md][gfx-decoding] |
-| `Image.createImage(InputStream)` | 16 MiB, or 1000 reads in a row that give no bytes | `IOException` | [graphics.md][gfx-images] |
+| `Image.createImage(InputStream)` | 16 MiB, or 1000 reads in a row that give no bytes; the bytes read are counted on the heap as they grow | `IOException`; `OutOfMemoryError` when the heap cannot hold the bytes | [graphics.md][gfx-images] |
+| Images one game decodes at once | one at a time: the other threads wait their turn with the VM lock released, before they read or copy their file; a stream is read first, and its bytes stay counted on the heap while the thread waits | no error of its own; streams read at once share the heap's room | [graphics.md][gfx-images] |
+| First frame of a GIF with more pixels than its image | checked against the heap before it decodes, 5 bytes a pixel | the image does not decode: `IllegalArgumentException`, or `IOException` from `createImage(String)` and `createImage(InputStream)` | [graphics.md][gfx-decoding] |
 | Repair of a damaged PNG | 64 MiB of rows | `OutOfMemoryError` | [graphics.md][gfx-decoding] |
 | Extended XMP segments of a JPEG | 16 | the image does not decode | [graphics.md][gfx-decoding] |
 | Nokia `drawPixels` block | 4194304 pixels | `IllegalArgumentException` | [graphics.md][gfx-nokia] |
@@ -171,6 +174,7 @@ instead, as they throw no `MediaException`.
 | One sound in any format: decoded samples, the file of an MP3, the events of a MIDI file or a list of tones | 16 MiB | `MediaException`; a Nokia `Sound` stays uninitialized, and a Samsung or Siemens sound stays silent, with a warning | [audio.md][audio-players] |
 | Sound of a game, every API together | 32 MiB and 128 players | `OutOfMemoryError`, after one collection; `ToneControl.setSequence` throws it without one | [audio.md][audio-players] |
 | Players started at once | 32 for a game, 128 for all games | `MediaException` from `Player.start`; a Nokia, Samsung or Siemens sound stays silent | [audio.md][audio-players] |
+| Time the audio thread spends rendering sound, in the desktop and Android apps | half of real time on average for all games together: an equal part for each game that plays sound; a game saves what it leaves unused, up to 20 ms of render time, and what it would save past that goes to the games that saved less; each game's oldest sound plays whatever it costs, and a game spends what it saved past its part, about a quarter of its part in each slice of 128 frames | the sounds the game started last fade out, or fall silent at once if nothing of them was heard, and wait in place, still started, with their media time held, until its sound fits again; no exception or event tells the game | [audio.md][audio-budget] |
 | `playTone` tones playing | 16 | the oldest stops | [audio.md][audio-players] |
 | Loop events of a player | one every 20 ms of sound | the loops between are not reported | [audio.md][audio-players] |
 | Events of a MIDI file | 65536 | `MediaException`; a Nokia `Sound` stays uninitialized, and a Samsung or Siemens sound stays silent, with a warning | [audio.md][audio-formats] |
@@ -181,15 +185,16 @@ instead, as they throw no `MediaException`.
 | Tones of a Nokia ringing tone | 65536 | `MediaException`; a Nokia `Sound` stays uninitialized, and a Samsung sound stays silent, with a warning | [audio.md][audio-formats] |
 | Tones of a tone sequence | 65536 in the sequence or in one block, 262144 in all its lists together | `IllegalArgumentException` from `setSequence`; a player of such data is silent | [audio.md][audio-formats] |
 | AMR file | 30000 frames, ten minutes | `MediaException`; a Nokia `Sound` stays uninitialized, and a Samsung sound stays silent, with a warning | [audio.md][audio-formats] |
-| Sound read from a stream | what one request of the runtime may take, never more than the heap or 32 MiB | `OutOfMemoryError` | [media.md][media-players] |
+| Sound read from a stream | counted on the heap as it is read, so streams read at once share the heap's room; never more than the heap or 32 MiB | `OutOfMemoryError` | [media.md][media-players] |
 | Sound events waiting | 1024 for a game, 4096 in the engine for all games; twice that for the events that end a run | the repeats are dropped first; `CLOSED` never is | [media.md][media-events] |
 | An MP3 seek the reader cannot do | 8 s of sound caught up in each render call | silence until the place is reached | [audio.md][audio-gaps] |
-| Hold of the audio thread on the shared mixer | one slice of 128 frames, with the lock free between slices | another game's call waits for the slice under way, or about a millisecond while the slices are short | [audio.md][audio-locking] |
+| Hold of the audio thread on the shared mixer | one slice of 128 frames, with the lock handed to a waiting call after each slice | another game's call waits for the slice under way; a volume or mute change from the app never waits | [audio.md][audio-locking] |
 
 [audio-players]: docs/architecture/audio.md#players
 [audio-formats]: docs/architecture/audio.md#formats
 [audio-gaps]: docs/architecture/audio.md#gaps
 [audio-locking]: docs/architecture/audio.md#threads-and-locking
+[audio-budget]: docs/architecture/audio.md#render-budget
 [media-players]: docs/architecture/media.md#players
 [media-events]: docs/architecture/media.md#listeners-and-the-event-thread
 
@@ -210,6 +215,7 @@ instead, as they throw no `MediaException`.
 | Chunk size line of a chunked body | 1 KiB, extensions included | `IOException` | [connections.md][net-hold] |
 | Wait for a response head | 60 s | `InterruptedIOException` | [connections.md][net-blocking] |
 | Name lookup and connect, TLS handshake, sending an HTTP request | 30 s each | `InterruptedIOException` | [connections.md][net-blocking] |
+| Name lookups and connects under way, the ones the game stopped waiting for included | 16 | the next one waits for one to end, within its own 30 s; if none ends in time, `InterruptedIOException` | [connections.md][net-hold] |
 | Datagram size | 65507 bytes | `IllegalArgumentException` from `newDatagram` | [connections.md][net-datagrams] |
 | Web link a game asks to open | `http` or `https` with a host, printable ASCII with no space, no backslash, no user name, a port from 1 to 65535, at most 4096 bytes, not a `.jad` or `.jar` | `ConnectionNotFoundException` | [midp.md][midp-links] |
 
@@ -274,47 +280,59 @@ section says is in scope.
   all games together: eight games running at once can hold 256 MiB.
 - Each running game keeps its whole JAR in memory, up to 64 MiB, outside
   its heap.
-- A class waits for its superclass and interfaces to load before the
-  class data is charged for it. A chain of up to 256 classes of up to
-  4 MiB each can be held parsed at once: up to 1 GiB of class files, and
-  a few times that while parsed, far past the 128 MiB of class data, for
-  a moment.
-- A GIF is checked against the heap by its logical screen. Its first
-  frame can be larger: it is decoded whole, up to 2^25 pixels and
-  128 MiB that the heap does not count, before it is cut to the screen. A
-  larger frame does not decode.
-- `Image.createImage(InputStream)` holds the data it reads, up to
-  16 MiB, outside the heap until the image is made. Each thread that
-  calls it holds its own.
-- Image decoding runs without the VM lock, and the heap check before it
-  reserves nothing. Threads that decode at once each pass the check
-  against the same free room, so each can hold an image of up to the
-  whole heap until its call returns.
+- While a game makes an image from a file, FastEmu holds the file and
+  the decoder's buffers beside the heap until the image is counted. A
+  game's image decodes take turns, so this is one file of up to the
+  heap's size and one decode for each game. A decode holds a few times
+  the image's pixels, and a GIF whose first frame has more pixels than
+  its image holds that frame too, of up to the heap's size.
+- A resource that a call reads by name stays outside the heap until
+  the thread gets the VM lock back and makes it a Java object. One
+  resource inflates at a time for each game, but threads that read with
+  `getResourceAsStream` or a sound locator at once can each hold one,
+  of up to the heap's size, for that moment. A Samsung `AudioClip` made
+  from a resource holds it until its sound is decoded, with the VM lock
+  released.
+- A Nokia `Sound` or a Samsung `AudioClip` made from a `byte[]` copies
+  the bytes outside the heap and decodes them with the VM lock
+  released. Threads that make such sounds at once can each hold a copy
+  of up to the heap's size until their sound is decoded.
 - The record stores a game holds open are kept in memory outside its heap
   count: at most about 1 MiB for its own suite and for each of the 16
   other suites it may open.
 - A class file of up to 4 MiB is parsed before its size is judged. A
   class that is then refused holds a few times its file size meanwhile.
+  The classes below it in a chain, which wait for it to load, are
+  counted in the class data already.
+- The class data is an estimate made from each class before it is
+  built, and it is not exact. A set of classes with 60000 methods each,
+  all with names of their own, held about a fifth more than it. A set of
+  classes with 65535 static fields each kept 3% more than the 128 MiB.
+  Just after the list of static values doubled, classes with instance
+  fields filled the rest and kept 9% more, and 15% more for a moment.
 - A game that has exited keeps its memory until you close its tile.
 
 **Threads and time**
 
 - A thread's stack holds at most 2 MiB. A game's machine has at most 80
   threads, 64 for the game and 16 more that only the host may start, so
-  their stacks can hold 160 MiB at worst. While a stack grows, its buffer
-  may be allocated up to 4 MiB, but only 2 MiB of it is written.
+  their stacks can hold 160 MiB at worst. While a stack grows, it
+  holds its old buffer too, until the copy is done.
 - Each thread also reserves 16 MiB of address space for its system
   stack. The system commits only what the thread uses.
-- A `Timer` keeps its thread until `cancel()`, as in Java. A game that
-  never cancels its timers gets `OutOfMemoryError` after about 62 of
-  them.
+- A `Timer` keeps its thread until `cancel()`, or until the game drops
+  the timer and no task is left, as in Java. A game that keeps about 62
+  timers, or makes them faster than their tasks run, gets
+  `OutOfMemoryError`. A repeating task keeps the thread of a dropped
+  timer until the task is cancelled.
 - Only a lifecycle call that does not return, such as a `startApp` that
   runs the game's loop, or a very slow one, lets 8 pause and resume
   calls pile up; the ones after are dropped, as the table says.
-- A game that calls `notifyPaused` and `resumeRequest` in a tight loop
-  queues requests for the app faster than the app handles them, and
-  nothing bounds that queue, so the memory of the app grows while the
-  loop runs.
+- A game that pauses itself and asks to be resumed in a loop from a
+  thread of its own gets a `startApp` for each request the control
+  thread takes, as MIDP has it. Each runs on a new host thread, and
+  nothing bounds how many start in a second: a debug build started
+  about 400. They end at once, so only the processor pays.
 - While a game's thread keeps the VM lock, the app waits a second at
   most. Then it drops the input it was posting and skips `pauseApp` or
   `destroyApp`, and a closed game shows as ended a few seconds later.
@@ -334,12 +352,32 @@ section says is in scope.
 
 **Sound**
 
-- Nothing limits the time the sound engine takes to render, and a seek
-  in a MIDI file replays up to 65536 events with the mixer held. One
-  game that starts 32 MIDI players, or that seeks in a long MIDI file in
-  a loop, can make the sound of every game stutter. It cannot stop their
-  sound. This is one way a runaway game reaches the others, beside the
-  processor time above.
+- A seek in a MIDI file replays up to 65536 events with the mixer held,
+  about a millisecond each time. A game that seeks in a long MIDI file
+  in a loop can make the sound of every game stutter. It cannot stop
+  their sound. This is one way a runaway game reaches the others,
+  beside the processor time above.
+- A game can pass the render budget in the table in one slice. It can
+  take up to two and a half times its part after slices in which it took
+  less. On top of that comes its oldest sound, which only the other
+  limits of sound hold, such as 512 MIDI messages and 8 s of MP3 caught
+  up in each render call, up to two more sounds whose cost it learns
+  only once they rendered, and the fade-outs of the audible sounds it
+  holds back. Measured on a desktop that other work shared, four games
+  that each started 32 MIDI players at once, and four or eight games
+  whose silent MIDI players all started their notes at once, or that
+  closed those players every 200 ms and started new ones, made at most
+  2 buffers of a run late, by 1.3 ms in all. One game that started 32
+  MIDI players beside a game playing a real game's MIDI file made 1
+  buffer late, by 5.4 ms, in one of two runs, most likely the busy
+  machine pausing the thread. When the players are heard before their
+  notes, the fades of the ones held back render too: four such games
+  made 2 of 375 buffers late in each run, by 1.2 to 1.4 ms in all. The
+  budget reads the system's clock, so time the system takes from the
+  audio thread is charged to the game whose sound was rendering: on a
+  busy computer a normal game's newer sounds can pause. A computer too
+  slow to render even the oldest sound of every game in time still
+  stutters.
 
 **Class files and suites**
 
@@ -378,11 +416,13 @@ section says is in scope.
   network interface of your computer, and can learn the address of your
   computer on the local network.
 - A name lookup or a connect runs on a helper thread. When the game
-  stops waiting for it, at its 30 s deadline, on an interrupt or because
-  the game was closed, the helper runs on until the system ends it: 30 s
-  for each address of the name, or as long as the lookup takes. Nothing
-  counts these helpers, so a game you allow network access can keep many
-  of them and their sockets alive by interrupting its own connects.
+  stops waiting for it, on an interrupt, at its deadline or because the
+  game was closed, the helper runs on: a connect until its 30 s are up,
+  unless its own name lookup lasts longer, and a lookup until the
+  system's resolver gives up. A game has at most 16 helpers alive, and
+  they are not among the 80 threads of its machine, so a closed game can
+  leave 16 threads and their sockets behind for up to 30 s, or longer
+  while a lookup lasts.
 - Every game can read your time zone, with or without network access.
 
 **Links and the apps**
