@@ -310,7 +310,10 @@ section says is in scope.
   classes with 65535 static fields each kept 3% more than the 128 MiB.
   Just after the list of static values doubled, classes with instance
   fields filled the rest and kept 9% more, and 15% more for a moment.
-- A game that has exited keeps its memory until you close its tile.
+- A game that has ended gives its memory back when its last thread
+  ends, while its tile stays open. A thread still inside a call that
+  cannot be stopped (see **Threads and time**) holds that memory until
+  the call returns.
 
 **Threads and time**
 

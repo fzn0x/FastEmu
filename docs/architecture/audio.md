@@ -508,7 +508,7 @@ the engine's view of it.
 | Instance launch                  | `let group = engine.create_group(); group.set_volume(settings.volume)`; the MIDP media module sets the group's listener on first use and reads events on its own thread, so nothing else subscribes |
 | `Instance::set_volume(v)`        | `group.set_volume(v)` (0.0 also mutes); it takes no lock, so the app's UI thread never waits for the mixer |
 | `Instance::pause` / `resume`     | `group.set_paused(true)` / `false`, besides `pauseApp` and `startApp` |
-| `Instance::stop`, crash, exit    | `group.close()` (or drop every clone) |
+| `Instance::stop`, crash, exit    | `group.close()` (or drop every clone), on the instance's control thread, which drops the instance's clones there too: the app's thread never closes a group |
 
 ### `javax.microedition.media`
 

@@ -364,14 +364,30 @@ pub struct Vm {
 
 /// A handle that does not keep its virtual machine alive, for state the
 /// machine itself owns (an extension, a native's closure) that needs to
-/// reach it: a [`Vm`] there would be a cycle and leak the machine.
+/// reach it: a [`Vm`] there would be a cycle and leak the machine. A host
+/// that should let a finished machine go, such as an app's handle on a
+/// game, keeps one too.
 #[derive(Clone)]
 pub struct WeakVm(Weak<VmShared>);
 
 impl WeakVm {
     /// The machine, if anything still holds it.
+    ///
+    /// The [`Vm`] it returns holds the machine too. If every other holder
+    /// lets go meanwhile, the caller's thread is the one that frees it when
+    /// it drops that `Vm`, so a thread that must stay quick, such as an
+    /// app's UI thread, uses [`WeakVm::is_freed`] instead.
     pub fn upgrade(&self) -> Option<Vm> {
         self.0.upgrade().map(|shared| Vm { shared })
+    }
+
+    /// Whether nothing holds the machine any more: no [`Vm`] handle and no
+    /// thread of its own. Its memory is then freed, or being freed on the
+    /// thread that let go last. Unlike [`WeakVm::upgrade`], it never holds
+    /// the machine, so the caller never ends up freeing it. It takes no
+    /// lock.
+    pub fn is_freed(&self) -> bool {
+        self.0.strong_count() == 0
     }
 }
 
@@ -691,6 +707,26 @@ impl Vm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_weak_handle_sees_the_machine_freed_without_holding_it() {
+        let config = VmConfig {
+            log: Arc::new(|_| {}),
+            ..VmConfig::default()
+        };
+        let vm = Vm::new(config, Arc::new(crate::MemorySource::new()), Vec::new());
+        let weak = vm.downgrade();
+        let clone = vm.clone();
+        assert!(!weak.is_freed());
+        drop(vm);
+        assert!(!weak.is_freed(), "a clone still holds it");
+        assert!(weak.upgrade().is_some());
+        // The upgraded handle is gone again: the clone is the last holder.
+        assert!(!weak.is_freed());
+        drop(clone);
+        assert!(weak.is_freed());
+        assert!(weak.upgrade().is_none());
+    }
 
     #[test]
     fn a_diagnostic_keeps_255_characters_of_each_name() {

@@ -162,8 +162,8 @@ apps pass one with output, the headless runner and tests pass none.
   engine at the settings' volume;
 - every class of `fastemu_midp::classes(&profile)`: the vendor APIs only
   on profiles of their maker (`docs/architecture/vendors.md`);
-- the event thread started, then the control thread and the first
-  lifecycle thread.
+- the event thread started, then the first lifecycle thread, then the
+  control thread, which takes the host's only `Vm`.
 
 ## Threads
 
@@ -206,7 +206,11 @@ apps pass one with output, the headless runner and tests pass none.
   `notifyDestroyed` or a crash waits, the game's later messages are
   dropped. However often a game calls them, at most one `resumeRequest`
   waits between two messages of the app, and one `notifyDestroyed` or
-  crash.
+  crash. It holds the host's only `Vm`: `MidpInstance` keeps a `WeakVm`,
+  so the machine is freed when the game ends, on the control thread or
+  on the last Java thread to end, and never on the app's thread. As it
+  ends, it also drops the instance's handle on the sound group, since
+  the drop of a group's last handle takes the mixer lock.
 
 ## The event loop
 
@@ -410,7 +414,10 @@ an instance the app paused. A game with a thread that spins, or with
 threads that block each other on locks, never looks idle. `ping` waits
 for the VM lock for a second at most, as `Vm::post` does, and
 `activity` for 100 ms, so they are for tools such as
-`cargo xtask compat`, not for an app's UI thread.
+`cargo xtask compat`, not for an app's UI thread. Both hold the machine
+while they run. Once the machine of a game that ended is freed, `ping`
+never answers and `activity` returns `None`, as for a locked machine:
+the compat probe asks `MidpInstance::vm_freed` to tell them apart.
 `tests/still_screens.rs` checks each case with a MIDlet of its own.
 
 `getAppProperty` reads the settings' properties, then the JAD, then the
@@ -539,8 +546,12 @@ while they wait for anything. `set_volume` takes no lock: it stores the
 volume of the instance's sound group in an atomic, which the audio
 thread reads at its next slice of 128 frames.
 Stopping or dropping an instance ends its threads and closes its group,
-which takes its players out of the mixer; once the app lets go of the
-instance, its virtual machine is freed.
+which takes its players out of the mixer, and frees its virtual machine
+without waiting for the app to let go of the instance. The instance
+keeps its `HostLink`, so a tile still shows the last frame, the status,
+the log and a link the game asked for. `MidpInstance::vm_freed` says
+when the machine is gone. Dropping an instance whose game has ended
+takes only its queue's lock, never the VM's or the mixer's.
 
 `tests/many_instances.rs` runs eight instances of one MIDlet at once and
 checks frames, input, a pause, record stores, sound and the stop of each.

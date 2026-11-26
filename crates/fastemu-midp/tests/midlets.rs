@@ -365,6 +365,66 @@ fn one_command_shows_in_the_bar_and_takes_both_soft_keys() {
     assert!(!run.has("pressed -7"), "{}", run.dump());
 }
 
+/// Waits until the machine of `run`'s game, which has ended, is freed,
+/// while the test still holds the instance, as a tile holds a game that
+/// ended.
+fn wait_freed(run: &mut Running) {
+    let start = Instant::now();
+    while !run.instance.vm_freed() {
+        assert!(
+            start.elapsed() <= support::TIMEOUT,
+            "the machine of a game that ended is still held:\n{}",
+            run.dump()
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn a_game_that_exits_frees_its_machine_and_keeps_its_screen() {
+    let Some(jar) = suite("exit-frees") else {
+        return;
+    };
+    let mut run = Running::launch(&jar, midlet::COMMANDS);
+    run.wait_frame(|f| rgb(f, 0, 0) == 0x00_FF00);
+    assert!(!run.instance.vm_freed(), "a running game holds its machine");
+    assert!(run.instance.heap_stats().is_some());
+    run.tap(Key::SoftRight);
+    run.wait_log("command Exit");
+    run.wait_status(|s| *s == InstanceStatus::Exited);
+    wait_freed(&mut run);
+    assert!(run.instance.heap_stats().is_none());
+    let frame = run.instance.frame().expect("the last frame stays");
+    assert_eq!(rgb(&frame, 0, 0), 0x00_FF00);
+    assert_eq!(run.instance.status(), InstanceStatus::Exited);
+
+    // A restart, as the app makes one: the ended instance goes, and a new
+    // one on the same folder runs.
+    drop(run);
+    let mut again = Running::launch(&jar, midlet::COMMANDS);
+    again.wait_frame(|f| rgb(f, 0, 0) == 0x00_FF00);
+    assert_eq!(again.instance.status(), InstanceStatus::Running);
+}
+
+#[test]
+fn a_link_asked_for_just_before_the_end_outlives_the_machine() {
+    let Some(jar) = suite("link-after-end") else {
+        return;
+    };
+    let mut run = Running::launch(&jar, midlet::LINKS);
+    run.wait_log("links ready");
+    run.tap(Key::Num1);
+    run.wait_log("first false");
+    run.instance.stop();
+    run.wait_status(|s| *s == InstanceStatus::Exited);
+    wait_freed(&mut run);
+    assert_eq!(
+        run.instance.take_link_request().as_deref(),
+        Some("http://Example.com/first")
+    );
+    assert_eq!(run.instance.take_link_request(), None, "taken once");
+}
+
 #[test]
 fn more_commands_open_a_menu() {
     let Some(jar) = suite("menu") else { return };

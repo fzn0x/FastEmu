@@ -95,7 +95,9 @@ The title bar of each tile has, from left to right:
 A game that ends shows **The game ended**. A game that crashes shows **The
 game crashed** with the error, and one that could not start at all, such as
 a file that is not a MIDlet suite, shows **The game could not start** with
-the reason. Each offers **Restart** and **Close**.
+the reason. Each offers **Restart** and **Close**. A game that has ended
+or crashed gives its memory back once its threads have stopped. Its tile
+keeps the last screen and the log until you close it.
 
 ## The log
 

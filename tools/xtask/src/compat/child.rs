@@ -84,7 +84,17 @@ impl Probe {
 fn probe(instance: &MidpInstance) -> Probe {
     let deadline = Instant::now() + PROBE_WAIT;
     let ping = instance.ping();
-    watch(deadline, || ping.answered(), || instance.activity())
+    watch(deadline, || ping.answered(), || look(instance))
+}
+
+/// What the game's threads are doing now, `None` only when a thread holds
+/// the VM lock. A game that ended during the probe has no threads, and its
+/// machine may be freed already, which `MidpInstance::activity` also
+/// answers with `None`: that machine has no threads, it is not locked.
+fn look(instance: &MidpInstance) -> Option<Activity> {
+    instance
+        .activity()
+        .or_else(|| instance.vm_freed().then(Activity::default))
 }
 
 /// The verdict of a probe from whether the event thread `answered` and
@@ -512,5 +522,84 @@ mod tests {
         };
         assert_eq!(watch(deadline, answered, look), Probe::Waits);
         assert_eq!((asked.get(), looked.get()), (5, 3));
+    }
+
+    /// The CRC-32 a ZIP entry carries.
+    fn crc32(data: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for &byte in data {
+            crc ^= u32::from(byte);
+            for _ in 0..8 {
+                crc = if crc & 1 == 1 {
+                    (crc >> 1) ^ 0xEDB8_8320
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        !crc
+    }
+
+    /// A JAR that holds only `manifest`, stored.
+    fn jar(manifest: &str) -> Vec<u8> {
+        let name = b"META-INF/MANIFEST.MF";
+        let data = manifest.as_bytes();
+        let mut header = Vec::new();
+        // Version, flags, method (stored), time and date.
+        header.extend_from_slice(&[20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        header.extend_from_slice(&crc32(data).to_le_bytes());
+        header.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        header.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        header.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        header.extend_from_slice(&0u16.to_le_bytes());
+        let mut out = 0x0403_4b50u32.to_le_bytes().to_vec();
+        out.extend_from_slice(&header);
+        out.extend_from_slice(name);
+        out.extend_from_slice(data);
+        let start = out.len() as u32;
+        out.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        out.extend_from_slice(&20u16.to_le_bytes());
+        out.extend_from_slice(&header);
+        // Comment length, disk, attributes and the entry's offset.
+        out.extend_from_slice(&[0; 14]);
+        out.extend_from_slice(name);
+        let size = out.len() as u32 - start;
+        out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+        out.extend_from_slice(&[0, 0, 0, 0, 1, 0, 1, 0]);
+        out.extend_from_slice(&size.to_le_bytes());
+        out.extend_from_slice(&start.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out
+    }
+
+    #[test]
+    fn a_game_whose_machine_is_freed_has_no_threads_and_is_not_locked() {
+        let root = std::env::temp_dir().join(format!("xtask-compat-look-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("a folder for the suite");
+        let suite = root.join("gone.jar");
+        let manifest = "Manifest-Version: 1.0\r\nMIDlet-Name: Gone\r\n\
+                        MIDlet-Vendor: FastEmu\r\nMIDlet-Version: 1.0\r\n\
+                        MIDlet-1: Gone, , no.such.Game\r\n";
+        std::fs::write(&suite, jar(manifest)).expect("writing the suite");
+        // The MIDlet class is missing, so the game crashes at once and its
+        // machine is freed while the probe still holds the instance.
+        let instance = MidpLauncher::new(None)
+            .launch_midp(LaunchRequest::new(&suite, root.join("data")))
+            .expect("launching the suite");
+        let start = Instant::now();
+        while !instance.vm_freed() {
+            assert!(
+                start.elapsed() < Duration::from_secs(30),
+                "the machine of a game that crashed is freed"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(instance.status().is_finished());
+        // The instance answers a freed machine as it does a locked one;
+        // the probe must not.
+        assert_eq!(instance.activity(), None);
+        assert_eq!(look(&instance), Some(Activity::default()));
+        drop(instance);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -144,7 +144,7 @@ vm.spawn("main", |ctx| {
 | `clock()` | The machine's run time, a `VmClock` (see [Run time](#run-time)). |
 | `activity()` | What the threads are doing now: an `Activity` with the live threads, those waiting for something to happen (a sleep, `Object.wait`, `Thread.join`, posted work, a pause, or a wait marked with `Ctx::wait_without_lock`), those waiting for a lock (a monitor, or a class another thread initializes), and the posted tasks. `is_idle()` holds when there are threads, every one waits, and no task is posted. For tools that tell a game waiting on a still screen from a stuck one. |
 | `thread_count`, `exit_code`, `heap_stats`, `flush_output` | Status. |
-| `downgrade()` | A `WeakVm`, which does not keep the machine alive. |
+| `downgrade()` | A `WeakVm`, which does not keep the machine alive. `WeakVm::upgrade` gives a `Vm` while anything holds the machine; `WeakVm::is_freed` says whether nothing does, without holding it. |
 
 `Vm` methods take the VM lock, so they are for host threads only. Native
 code already holds the lock; a native that called `Vm::post` or
@@ -161,12 +161,21 @@ already);
 `wait_finished` counts the wait for the lock into its timeout and
 returns `false` when it runs out. `attach`, `thread_count`,
 `exit_code` and `heap_stats` wait for as long as it takes.
-`Vm::clock`, `Vm::is_stopping`, `Vm::is_paused`, `Vm::downgrade` and
-`Ctx::clock` take no lock. A host thread that must not wait, such as an
-app's UI thread, should not call the ones that take it: a Java thread
-keeps the lock until its next safepoint or wait, and longer when its OS
-thread is not scheduled. MIDP's instances post the app's input from a
-control thread of their own (`docs/architecture/midp.md`).
+`Vm::clock`, `Vm::is_stopping`, `Vm::is_paused`, `Vm::downgrade`,
+`WeakVm::is_freed` and `Ctx::clock` take no lock. A host thread that must
+not wait, such as an app's UI thread, should not call the ones that take
+it: a Java thread keeps the lock until its next safepoint or wait, and
+longer when its OS thread is not scheduled. MIDP's instances post the
+app's input from a control thread of their own
+(`docs/architecture/midp.md`).
+
+The machine is freed when the last `Vm` handle and the last of its
+threads let go of it, on the thread that lets go last. A host that holds
+a `Vm` decides where that happens. `fastemu-midp`'s instance keeps only a
+`WeakVm`, so a game that has ended gives its memory back once its
+threads have ended, while its tile stays open. A thread that upgrades a
+`WeakVm` holds the machine until it drops the `Vm` it got, and frees it
+if every other holder let go meanwhile.
 
 ## Values and references
 
@@ -382,8 +391,10 @@ field, so a game made of very many tiny objects holds several times its
 heap in real memory, about ten times in a test with many small timer
 tasks. A monitor entry for each locked object and a second copy of each
 interned string also live outside the count. The heap lives as long as the
-machine: a game that has ended keeps its memory until the host lets go of
-its `Vm`, which the apps do when its tile is closed.
+machine, which is freed when the last `Vm` handle and the last of its
+threads let go of it: a game that has ended gives its memory back once its
+threads have ended, while its tile stays open (see [Using a virtual machine
+from the host](#using-a-virtual-machine-from-the-host)).
 
 ### Limits
 
