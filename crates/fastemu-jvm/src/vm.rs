@@ -160,6 +160,39 @@ impl fmt::Debug for VmConfig {
     }
 }
 
+/// What a virtual machine's threads were doing at one moment; see
+/// [`Vm::activity`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Activity {
+    /// Java threads alive.
+    pub threads: usize,
+    /// Threads waiting for something to happen: a sleep, `Object.wait`,
+    /// `Thread.join`, posted work, a pause, or a wait the runtime marks
+    /// with [`Ctx::wait_without_lock`], such as the media thread's.
+    pub waiting: usize,
+    /// Threads waiting for a lock another thread holds: a monitor, or a
+    /// class another thread initializes.
+    pub blocked: usize,
+    /// Tasks posted and not run yet.
+    pub posted: usize,
+}
+
+impl Activity {
+    /// Threads running or ready to run: neither waiting nor blocked.
+    pub fn running(&self) -> usize {
+        self.threads
+            .saturating_sub(self.waiting)
+            .saturating_sub(self.blocked)
+    }
+
+    /// Whether the machine waits for something to happen: it has threads,
+    /// each of them waits, none for a lock, and no task is posted. A
+    /// machine whose threads have all ended is not idle.
+    pub fn is_idle(&self) -> bool {
+        self.threads > 0 && self.waiting == self.threads && self.posted == 0
+    }
+}
+
 /// Work a host thread hands to the virtual machine; see [`Vm::post`].
 pub type Task = Box<dyn FnOnce(&mut Ctx<'_>) -> JResult<()> + Send>;
 
@@ -254,6 +287,11 @@ const WAKE_LOCK_WAIT: Duration = Duration::from_millis(100);
 /// How long [`Vm::flush_output`] waits for the VM lock before it skips the
 /// flush.
 const FLUSH_LOCK_WAIT: Duration = Duration::from_millis(250);
+
+/// How long [`Vm::activity`] waits for the VM lock before it gives up. A
+/// thread holds it for microseconds between safepoints; one that holds it
+/// this long is running.
+const ACTIVITY_LOCK_WAIT: Duration = Duration::from_millis(100);
 
 /// How long [`Vm::spawn`] and [`Vm::post`] wait for the VM lock before
 /// they give up. A thread holds it for microseconds at a time; one that
@@ -601,6 +639,32 @@ impl Vm {
                     .is_some_and(|state| state.live_threads == 0);
             }
         }
+    }
+
+    /// What every thread is doing now, for tools that tell a game waiting
+    /// on a still screen from a stuck one. `None` when a thread holds the
+    /// VM lock for 100 ms without a safepoint, as one wedged in a native
+    /// does: that thread is running.
+    ///
+    /// A thread counts as waiting from the moment it waits until it has
+    /// the lock back, so one look can find a thread asleep that wakes and
+    /// works a moment later. A thread that never waits, such as one that
+    /// spins, is never counted as waiting.
+    pub fn activity(&self) -> Option<Activity> {
+        let state = self.shared.state.try_lock_for(ACTIVITY_LOCK_WAIT)?;
+        let mut activity = Activity {
+            threads: state.threads.len(),
+            posted: state.posted.len(),
+            ..Activity::default()
+        };
+        for entry in state.threads.values() {
+            match entry.doing {
+                thread::Doing::Running => {}
+                thread::Doing::Waiting => activity.waiting += 1,
+                thread::Doing::Blocked => activity.blocked += 1,
+            }
+        }
+        Some(activity)
     }
 
     /// The status `System.exit` was called with, if it was.

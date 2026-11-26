@@ -142,6 +142,7 @@ vm.spawn("main", |ctx| {
 | `stop()` | Every thread unwinds at its next safepoint or wait. `finally` blocks do not run. |
 | `wait_finished(timeout)` | Waits until every Java thread has ended. |
 | `clock()` | The machine's run time, a `VmClock` (see [Run time](#run-time)). |
+| `activity()` | What the threads are doing now: an `Activity` with the live threads, those waiting for something to happen (a sleep, `Object.wait`, `Thread.join`, posted work, a pause, or a wait marked with `Ctx::wait_without_lock`), those waiting for a lock (a monitor, or a class another thread initializes), and the posted tasks. `is_idle()` holds when there are threads, every one waits, and no task is posted. For tools that tell a game waiting on a still screen from a stuck one. |
 | `thread_count`, `exit_code`, `heap_stats`, `flush_output` | Status. |
 | `downgrade()` | A `WeakVm`, which does not keep the machine alive. |
 
@@ -156,6 +157,7 @@ flush; `spawn` and `post` one second, then `spawn` fails with
 `ErrorKind::TimedOut` and `post` drops its task and logs a warning (it
 drops it too, with a warning the first time, when `max_posted` tasks wait
 already);
+`activity` 100 ms, then it returns `None`;
 `wait_finished` counts the wait for the lock into its timeout and
 returns `false` when it runs out. `attach`, `thread_count`,
 `exit_code` and `heap_stats` wait for as long as it takes.
@@ -212,6 +214,15 @@ VM lock) and one wait queue, which works as a condition variable
   waiter at once.
 - `Ctx::without_lock(f)` runs `f` with the lock released, for slow work
   that does not touch the VM: file and network I/O, image decoding.
+- `Ctx::wait_without_lock(f)` does the same for a wait on something
+  outside the VM, such as the media thread's channel. `Vm::activity`
+  counts a thread in it as waiting, and one in `without_lock` as running.
+- Each thread's table entry says what it does: running, waiting for
+  something to happen (every wait above, and a pause), or waiting for a
+  lock (a contended `monitorenter`, taking a monitor back after
+  `Object.wait`, or a class another thread initializes). Only a thread
+  that waits changes it, with the lock held, so a thread that never
+  waits always counts as running. `Vm::activity` reads it.
 - Wakeups are not precise: every change (a monitor released, a notify, a
   thread ended, a task posted) wakes every waiting thread, and each checks
   its own condition again.
@@ -467,7 +478,8 @@ enforces some of them; the rest are on the native's author.
 3. **A native that calls Java or waits must not hold unrooted references
    across the call.** A collection can run inside `call_virtual`,
    `call_static`, `call_special`, `construct`, `initialize`,
-   `wait_until`, `sleep`, `wait_posted`, `without_lock`, `monitor_enter`,
+   `wait_until`, `sleep`, `wait_posted`, `without_lock`,
+   `wait_without_lock`, `monitor_enter`,
    `monitor_wait`, `yield_now`, `run_posted` and `gc`, on this thread or,
    while the lock is released, on another one. Rooted references survive
    (objects never move); unrooted ones may name freed or reused slots.
@@ -485,7 +497,8 @@ enforces some of them; the rest are on the native's author.
    `ctx.local_frame(|ctx| ...)`, which drops the locals made inside it.
    `run_posted` does this for each task.
 7. **Do not block while holding the lock.** Wait with `ctx.wait_until`,
-   `ctx.sleep` or `ctx.wait_posted`; do slow work in `ctx.without_lock`.
+   `ctx.sleep` or `ctx.wait_posted`; do slow work in `ctx.without_lock`,
+   and wait for something outside the VM in `ctx.wait_without_lock`.
    A native that blocks the OS thread freezes every Java thread of its VM.
 8. **Pass `Throw::Stop` on.** Use `?` on every `Ctx` call that returns a
    `JResult`; a long native loop checks `ctx.is_stopping()` and returns
@@ -692,6 +705,12 @@ makes must be able to lose some when a game floods it.
 `monitor_notify` give natives Java's monitors. Deadlines are host time
 (`Instant`): a sleep or wait that ends during a pause parks until the
 resume and then returns.
+
+A thread that waits for something outside the VM, such as a channel the
+audio thread feeds, waits in `ctx.wait_without_lock(f)`. It releases
+the lock as `ctx.without_lock` does, and `Vm::activity` counts the
+thread as waiting, not running, so a game whose threads all wait looks
+idle. Wait in slices and check `ctx.is_stopping()` after each.
 
 ### Run time
 
@@ -1120,6 +1139,13 @@ What natives and games can rely on:
 - `tests/timing.rs` measures how late sleeps and timed waits wake (run
   it with `--nocapture`) and how quickly an interrupt or a stop ends
   them.
+- `tests/thread_activity.rs` runs the programs in `tests/activity_java/`
+  and checks what `Vm::activity` counts: threads that sleep, wait or
+  join leave the machine idle, a spinning thread never does, threads
+  that block each other on monitors, on taking a monitor back after
+  `wait` or on a class initializer wait for a lock, a wait outside the
+  lock counts only when marked, and a posted task keeps the machine
+  busy.
 - `tests/heap_limits.rs` runs the programs in `tests/heap_java/` on a
   256 KiB heap. Each fills memory through natives (`String.concat`,
   `StringBuffer.append`, kept exceptions, including ones a native or

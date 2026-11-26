@@ -33,7 +33,7 @@ pub mod wma;
 use fastemu_core::DeviceProfile;
 use fastemu_jvm::NativeClass;
 
-pub use instance::MidpInstance;
+pub use instance::{MidpInstance, Ping};
 pub use launcher::MidpLauncher;
 
 /// Every Java class this crate adds to the virtual machine of a game

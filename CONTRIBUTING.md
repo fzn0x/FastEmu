@@ -132,7 +132,10 @@ games expect:
   and then the arrows and fire (`--keys`), and writes `compat.md` and
   `compat.json` with each game's status, frames, errors, the classes it
   asked for that FastEmu lacks, a screenshot and its log, into
-  `compat` in the target folder (`--out DIR`). `--profile ID` and
+  `compat` in the target folder (`--out DIR`). A game whose screen stays
+  still for the last 10 s counts as running only when its event thread
+  answers, all its threads wait and it threw no exception; otherwise it
+  is hung, and the report says why. `--profile ID` and
   `--jobs N` pick the phone and how many games run at once.
   [docs/compatibility.md](docs/compatibility.md) lists the free games it
   was run with.

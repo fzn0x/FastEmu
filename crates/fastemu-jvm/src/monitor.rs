@@ -7,7 +7,7 @@
 use std::time::Instant;
 
 use crate::ctx::{Ctx, JResult};
-use crate::thread::ThreadId;
+use crate::thread::{Doing, ThreadId};
 use crate::value::ObjRef;
 
 #[derive(Debug, Default)]
@@ -45,7 +45,7 @@ impl Ctx<'_> {
                 }
                 Some(_) => {
                     m.entering += 1;
-                    let woke = self.wait_raw(None);
+                    let woke = self.wait_as(None, Doing::Blocked);
                     if let Some(m) = self.state.monitors.get_mut(&obj) {
                         m.entering -= 1;
                     }
@@ -158,7 +158,7 @@ impl Ctx<'_> {
                 break;
             }
             m.entering += 1;
-            let woke = self.wait_raw(None);
+            let woke = self.wait_as(None, Doing::Blocked);
             if let Some(m) = self.state.monitors.get_mut(&obj) {
                 m.entering -= 1;
             }

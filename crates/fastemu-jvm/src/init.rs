@@ -28,7 +28,9 @@ impl Ctx<'_> {
                 InitState::Done => return Ok(()),
                 InitState::Running(t) if t == self.tid => return Ok(()),
                 InitState::Running(_) => {
-                    self.wait_raw(None)?;
+                    // Another thread's initializer is a lock: two threads
+                    // that initialize classes that need each other block.
+                    self.wait_as(None, crate::thread::Doing::Blocked)?;
                 }
                 InitState::Failed => {
                     let message = format!(

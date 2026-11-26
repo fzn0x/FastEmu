@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use parking_lot::MutexGuard;
 
-use crate::thread::{ThreadId, ThreadStack};
+use crate::thread::{Doing, ThreadId, ThreadStack};
 use crate::value::ObjRef;
 use crate::vm::{VmShared, VmState};
 
@@ -105,12 +105,21 @@ impl<'vm> Ctx<'vm> {
 
     /// Releases the VM lock until the wait queue wakes this thread or
     /// `deadline` passes. Returns whether the deadline passed.
+    /// [`crate::Vm::activity`] counts the thread as waiting meanwhile.
     pub(crate) fn wait_raw(&mut self, deadline: Option<Instant>) -> JResult<bool> {
+        self.wait_as(deadline, Doing::Waiting)
+    }
+
+    /// [`Ctx::wait_raw`], with the thread counted as `doing` meanwhile:
+    /// [`Doing::Blocked`] for a wait on a lock another thread holds.
+    pub(crate) fn wait_as(&mut self, deadline: Option<Instant>, doing: Doing) -> JResult<bool> {
         if self.shared.is_stopping() {
             return Err(Throw::Stop);
         }
         self.park_stack();
+        self.mark(doing);
         let timed_out = self.shared.cond.wait(&mut self.state, deadline);
+        self.mark(Doing::Running);
         self.unpark_stack();
         if self.shared.is_stopping() {
             return Err(Throw::Stop);
@@ -206,6 +215,26 @@ impl<'vm> Ctx<'vm> {
         let r = MutexGuard::unlocked(&mut self.state, f);
         self.unpark_stack();
         r
+    }
+
+    /// Runs `f` with the VM lock released, as [`Ctx::without_lock`] does,
+    /// for a wait on something outside the virtual machine, such as a
+    /// channel. [`crate::Vm::activity`] counts the thread as waiting
+    /// meanwhile, where it counts one in `without_lock` as running. Like
+    /// any wait, `f` should return in slices so the caller can check
+    /// [`Ctx::is_stopping`].
+    pub fn wait_without_lock<R>(&mut self, f: impl FnOnce() -> R) -> R {
+        self.mark(Doing::Waiting);
+        let r = self.without_lock(f);
+        self.mark(Doing::Running);
+        r
+    }
+
+    /// Records what this thread is doing, for [`crate::Vm::activity`].
+    fn mark(&mut self, doing: Doing) {
+        if let Some(entry) = self.state.threads.get_mut(&self.tid) {
+            entry.doing = doing;
+        }
     }
 
     /// The thread running this context.

@@ -107,6 +107,21 @@ impl ThreadStack {
     }
 }
 
+/// What a thread is doing, as [`crate::Vm::activity`] counts it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Doing {
+    /// Running Java or the runtime, or ready to once it has the VM lock.
+    #[default]
+    Running,
+    /// Waiting for something to happen: a sleep, `Object.wait`,
+    /// `Thread.join`, posted work, a pause, or a wait outside the lock
+    /// that [`Ctx::wait_without_lock`] marks.
+    Waiting,
+    /// Waiting for a lock another thread holds: a monitor to enter, or to
+    /// enter again after `wait`, or a class another thread initializes.
+    Blocked,
+}
+
 /// A thread's entry in the thread table.
 pub(crate) struct ThreadEntry {
     pub(crate) java_thread: ObjRef,
@@ -117,6 +132,8 @@ pub(crate) struct ThreadEntry {
     pub(crate) interrupted: bool,
     /// Set by `notify` for a thread in `Object.wait`.
     pub(crate) notified: bool,
+    /// What the thread is doing; changed only with the VM lock held.
+    pub(crate) doing: Doing,
 }
 
 /// What a Rust-bodied Java thread runs.
@@ -225,6 +242,7 @@ fn register(shared: &VmShared, state: &mut VmState, java_thread: ObjRef, name: S
             )),
             interrupted: false,
             notified: false,
+            doing: Doing::Running,
         },
     );
     state.live_threads += 1;
