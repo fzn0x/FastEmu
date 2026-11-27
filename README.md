@@ -75,6 +75,19 @@ irm https://github.com/fzn0x/FastEmu/releases/latest/download/install.ps1 | iex
 `sh install.sh --uninstall` removes FastEmu again, and so does
 `install.ps1 -Uninstall`.
 
+With a package manager, on macOS with [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask fzn0x/tap/fastemu
+```
+
+And on Windows with [Scoop](https://scoop.sh):
+
+```powershell
+scoop bucket add fzn0x https://github.com/fzn0x/scoop-bucket
+scoop install fastemu
+```
+
 FastEmu does not include games. Use files you own or that their authors
 made free to share.
 

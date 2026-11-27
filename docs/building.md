@@ -140,6 +140,19 @@ files from a folder instead: the release's `installers` job runs
 `packaging/check-installers.sh` and `.ps1`, which install the files it
 just built that way, try them and uninstall them.
 
+## Homebrew and Scoop
+
+`packaging/render-packages.sh` writes a release's Homebrew cask from
+`packaging/homebrew/fastemu.rb.in` and its Scoop manifest from
+`packaging/scoop/fastemu.json.in`, with the SHA-256 of the disk image
+and of the portable zip. The release's `packages` job puts them in
+[fzn0x/homebrew-tap](https://github.com/fzn0x/homebrew-tap) and
+[fzn0x/scoop-bucket](https://github.com/fzn0x/scoop-bucket). It needs
+the secret `PACKAGES_TOKEN`, a fine-grained token with read and write
+access to the contents of those two repositories only. Without it, the
+job only says so. A dry run keeps the two files as its `packages`
+artifact.
+
 ## Tests
 
 ```

@@ -525,6 +525,15 @@ jobs:
           sha256sum -- "${expected[@]}" > SHA256SUMS
           cat SHA256SUMS
           ls -l
+      # The Homebrew cask and the Scoop manifest of this release, which the
+      # packages job puts in the tap and the bucket. A dry run keeps them.
+      - name: The Homebrew cask and the Scoop manifest
+        run: bash packaging/render-packages.sh "$VERSION" release "$RUNNER_TEMP/packages"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages
+          path: ${{ runner.temp }}/packages
+          if-no-files-found: error
       - name: Rust toolchain
         run: bash packaging/retry.sh rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -583,3 +592,67 @@ jobs:
           make_latest: "true"
           fail_on_unmatched_files: true
           files: release/*
+
+  # Puts the release's Homebrew cask in the tap fzn0x/homebrew-tap and its
+  # Scoop manifest in the bucket fzn0x/scoop-bucket, as Getman's release
+  # does. The secret PACKAGES_TOKEN is a fine-grained personal access token
+  # with read and write access to the contents of those two repositories
+  # only. Without it the job says so and changes nothing; run it again
+  # once the secret is there. A dry run never runs it.
+  packages:
+    name: Homebrew and Scoop
+    needs: [check, publish]
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.check.outputs.tag }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages
+          path: packages
+      - name: The token
+        id: token
+        env:
+          TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::notice::There is no PACKAGES_TOKEN secret, so the tap and the bucket keep their FastEmu. Add the secret, then run this job again."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      # gh clones with the token; this lets git push with it too.
+      - name: Let git use the token
+        if: steps.token.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: gh auth setup-git
+      - name: Update the Homebrew tap
+        if: steps.token.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: |
+          gh repo clone fzn0x/homebrew-tap tap
+          mkdir -p tap/Casks && cp packages/fastemu.rb tap/Casks/fastemu.rb
+          git -C tap add Casks/fastemu.rb
+          if git -C tap diff --cached --quiet; then
+            echo "The tap has this cask already."
+          else
+            git -C tap -c user.name=fzn0x -c user.email=fncolon@pm.me commit -m "fastemu $TAG"
+            git -C tap push
+          fi
+      - name: Update the Scoop bucket
+        if: steps.token.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: |
+          gh repo clone fzn0x/scoop-bucket bucket
+          mkdir -p bucket/bucket && cp packages/fastemu.json bucket/bucket/fastemu.json
+          git -C bucket add bucket/fastemu.json
+          if git -C bucket diff --cached --quiet; then
+            echo "The bucket has this manifest already."
+          else
+            git -C bucket -c user.name=fzn0x -c user.email=fncolon@pm.me commit -m "fastemu $TAG"
+            git -C bucket push
+          fi
