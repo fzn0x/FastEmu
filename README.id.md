@@ -18,10 +18,10 @@
 
 ---
 
-![FastEmu di laptop dan ponsel Android: enam game J2ME di jendela desktop, dan Star Defender di ponsel dengan Tower Guard, BombMan, dan Block Fall di bawahnya](docs/images/hero.jpg)
+![FastEmu di laptop dan ponsel Android: enam game J2ME di jendela pada desktop macOS, dan Star Defender di ponsel dengan Tower Guard, BombMan, dan Block Fall di bawahnya](docs/images/hero.jpg)
 
-<sub>Tangkapan layar FastEmu 0.1.0, dipasang di layar laptop dan ponsel
-hasil render.</sub>
+<sub>Jendela FastEmu 0.1.0 dan aplikasi Android-nya di laptop dan ponsel
+hasil render. Desktop macOS di sekitar jendela adalah mock-up.</sub>
 
 ![Jendela FastEmu memainkan enam game sekaligus: pertarungan manusia lidi, labirin pengebom, asteroid, barisan penyerbu luar angkasa, peta tower defense, dan balok yang berjatuhan](docs/images/demo.webp)
 
@@ -193,8 +193,8 @@ oleh Dash Animation V2,
 [BombMan](https://github.com/yaricom/bombman-RL-AI-J2ME) oleh Iaroslav
 Omelianenko, serta Rock Blaster, Star Defender, Tower Guard, dan Block
 Fall dari [J2ME 100 Games](https://github.com/agneay/j2me-100-games) oleh
-Agneay B Nair dan kontributor J2ME Game Archive. Laptop dan ponsel di
-sekitar tangkapan layar dirender dengan GPT Image 2.6 di Higgsfield.
+Agneay B Nair dan kontributor J2ME Game Archive. Laptop, ponsel, dan
+wallpaper desktop dirender dengan GPT Image 2.6 di Higgsfield.
 
 Crate Rust, font, dan frame game yang dipakai FastEmu, beserta
 lisensinya, tercantum di [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

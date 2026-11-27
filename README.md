@@ -18,10 +18,10 @@
 
 ---
 
-![FastEmu on a laptop and an Android phone: six J2ME games in the desktop window, and Star Defender on the phone with Tower Guard, BombMan and Block Fall below it](docs/images/hero.jpg)
+![FastEmu on a laptop and an Android phone: six J2ME games in the window on a macOS desktop, and Star Defender on the phone with Tower Guard, BombMan and Block Fall below it](docs/images/hero.jpg)
 
-<sub>Screenshots of FastEmu 0.1.0, placed on the screens of a rendered
-laptop and phone.</sub>
+<sub>The FastEmu 0.1.0 window and Android app on a rendered laptop and
+phone. The macOS desktop around the window is a mock-up.</sub>
 
 ![The FastEmu window playing six games at once: a stick figure fight, a bomber maze, asteroids, rows of space invaders, a tower defence map and falling blocks](docs/images/demo.webp)
 
@@ -188,8 +188,8 @@ Dash Animation V2,
 [BombMan](https://github.com/yaricom/bombman-RL-AI-J2ME) by Iaroslav
 Omelianenko, and Rock Blaster, Star Defender, Tower Guard and Block Fall
 from [J2ME 100 Games](https://github.com/agneay/j2me-100-games) by Agneay
-B Nair and the J2ME Game Archive contributors. The laptop and phone
-around the screenshots were rendered with GPT Image 2.6 on Higgsfield.
+B Nair and the J2ME Game Archive contributors. The laptop, the phone and
+the desktop wallpaper were rendered with GPT Image 2.6 on Higgsfield.
 
 The Rust crates, fonts and game frames FastEmu uses, with their licenses,
 are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The people
