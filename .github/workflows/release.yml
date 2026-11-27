@@ -354,9 +354,63 @@ jobs:
           path: ${{ runner.temp }}/release/fastemu-*.apk
           if-no-files-found: error
 
+  # The Flatpaks of the Linux jobs' x64 and Arm64 tar.gz, built in Flathub's
+  # flatpak-builder container with the freedesktop runtime, on a runner of
+  # each one's architecture, then installed and run there.
+  flatpak:
+    name: Flatpak ${{ matrix.arch }}
+    needs: [check, linux]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, flatpak: x86_64, os: ubuntu-latest }
+          - { arch: arm64, flatpak: aarch64, os: ubuntu-24.04-arm }
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
+      options: --privileged
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      # flatpak-builder's update of the runtimes renames their old
+      # checkouts away, which the image's overlayfs layer refuses on some
+      # runners, as MixMusic found.
+      - name: The runtimes on the runner's disk
+        run: |
+          cp -a /var/lib/flatpak "$RUNNER_TEMP/flatpak"
+          echo "FLATPAK_SYSTEM_DIR=$RUNNER_TEMP/flatpak" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REF }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: linux
+      - name: The program and its metadata
+        run: |
+          mkdir -p packaging/flatpak/dist
+          cp "linux/fastemu-$VERSION-linux-${{ matrix.arch }}.tar.gz" "packaging/flatpak/dist/fastemu-linux-${{ matrix.arch }}.tar.gz"
+          python3 packaging/flatpak/metainfo.py packaging/flatpak/dist/io.github.fzn0x.fastemu.metainfo.xml
+          appstreamcli validate --no-net --explain packaging/flatpak/dist/io.github.fzn0x.fastemu.metainfo.xml
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6.8
+        with:
+          manifest-path: packaging/flatpak/io.github.fzn0x.fastemu.yml
+          bundle: fastemu-${{ env.VERSION }}-linux-${{ matrix.arch }}.flatpak
+          arch: ${{ matrix.flatpak }}
+          branch: stable
+          upload-artifact: false
+      - name: The Flatpak installs and runs
+        run: bash packaging/flatpak/check.sh "fastemu-$VERSION-linux-${{ matrix.arch }}.flatpak" "$VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-flatpak-${{ matrix.arch }}
+          path: fastemu-${{ env.VERSION }}-linux-${{ matrix.arch }}.flatpak
+          if-no-files-found: error
+
   publish:
     name: Publish
-    needs: [check, windows, linux, macos, android]
+    needs: [check, windows, linux, macos, android, flatpak]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -384,6 +438,8 @@ jobs:
             "fastemu-$VERSION-linux-arm64.tar.gz"
             "fastemu-$VERSION-macos-universal.zip"
             "fastemu-$VERSION-android.apk"
+            "fastemu-$VERSION-linux-x64.flatpak"
+            "fastemu-$VERSION-linux-arm64.flatpak"
           )
           for file in "${expected[@]}"; do
             test -s "$file" || { echo "::error::$file is missing."; exit 1; }
