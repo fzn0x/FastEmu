@@ -90,6 +90,12 @@ in [License texts](#apache-license-20). What FastEmu changed is in
 `crates/gpui_android/README.md` and at the top of each changed file; its
 `NOTICE` is in the same folder.
 
+**MyGo's .DS_Store writer.** `packaging/macos/dmg-layout.py` is a port
+to Python of `cmd/mygo/dsstore.go` from
+[MyGo](https://github.com/egoist/mygo), version 0.8.1. It writes the
+Finder window layout of the macOS disk image. Copyright (c) 2026 MyGo
+contributors. MIT License, in full in [License texts](#mit-license-mygo).
+
 **MicroEmulator's class names, for the benchmark.**
 `tools/xtask/bench/microemu-api/` holds 26 signature-only Java files.
 23 name public classes and members of MicroEmulator 2.0.4
@@ -373,6 +379,32 @@ airplay, alert-circle, alert-octagon, alert-triangle, aperture, arrow-down-circl
 The MIT License (MIT) (for the icons listed above)
 
 Copyright (c) 2013-present Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### MIT License (MyGo)
+
+```text
+MIT License
+
+Copyright (c) 2026 MyGo contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
