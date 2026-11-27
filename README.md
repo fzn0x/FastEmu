@@ -57,6 +57,24 @@ release has a `SHA256SUMS` file to check the downloads against.
 | Android | Open `fastemu-<version>-android.apk` from your files. Android asks you to allow installs from that source the first time. |
 | Any Linux, sandboxed | Open `fastemu-<version>-linux-x64.flatpak` or `-linux-arm64.flatpak` with your software center, or run `flatpak install ./fastemu-<version>-linux-x64.flatpak`. The first time, Flatpak fetches the freedesktop runtime from Flathub. In its sandbox FastEmu sees the display, sound and the network, and only the files you pick. |
 
+From a terminal, one line installs the latest release, checked against
+its `SHA256SUMS`. On Linux, it installs for your account, with a menu
+entry and the `fastemu` command in `~/.local/bin`. On macOS, it installs
+FastEmu.app into Applications:
+
+```sh
+curl -fsSL https://github.com/fzn0x/FastEmu/releases/latest/download/install.sh | sh
+```
+
+On Windows, in PowerShell, it runs the setup:
+
+```powershell
+irm https://github.com/fzn0x/FastEmu/releases/latest/download/install.ps1 | iex
+```
+
+`sh install.sh --uninstall` removes FastEmu again, and so does
+`install.ps1 -Uninstall`.
+
 FastEmu does not include games. Use files you own or that their authors
 made free to share.
 

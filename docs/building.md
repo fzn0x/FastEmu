@@ -131,6 +131,15 @@ permissions and runs `fastemu --version` in it. The manifest is not
 Flathub's: Flathub builds from source, and FastEmu is not published
 there.
 
+## The installers
+
+`packaging/install.sh` and `packaging/install.ps1` install a release from
+a terminal. The release attaches them with its version written in, so
+each installs its own release by default. `--from` and `-From` take the
+files from a folder instead: the release's `installers` job runs
+`packaging/check-installers.sh` and `.ps1`, which install the files it
+just built that way, try them and uninstall them.
+
 ## Tests
 
 ```

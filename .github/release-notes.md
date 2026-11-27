@@ -18,4 +18,6 @@
 
 **Games.** FastEmu does not include any. Add `.jar` files, with their `.jad` files when you have them, with Add game in the library. The [README](https://github.com/{repo}/blob/{tag}/README.md#usage) tells how.
 
+**From a terminal.** On Linux and macOS, `curl -fsSL https://github.com/{repo}/releases/download/{tag}/install.sh | sh` installs this release, checked against `SHA256SUMS`. On Windows, `irm https://github.com/{repo}/releases/download/{tag}/install.ps1 | iex` in PowerShell runs its setup.
+
 Verify downloads with `SHA256SUMS`: `sha256sum -c SHA256SUMS --ignore-missing` on Linux and macOS, or `Get-FileHash` on Windows, compared with the line of the file.

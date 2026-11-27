@@ -163,6 +163,55 @@ jobs:
             ${{ runner.temp }}/release/fastemu-*-setup.exe
           if-no-files-found: error
 
+  # install.sh and install.ps1 install the files the jobs above built, on
+  # each system, from a folder holding them and their SHA256SUMS, then
+  # uninstall them. install.sh also installs 0.1.0 from GitHub, for its
+  # download path.
+  installers:
+    name: Installers (${{ matrix.os }})
+    needs: [check, windows, linux, macos]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, files: release-linux-x64 }
+          - { os: ubuntu-24.04-arm, files: release-linux-arm64 }
+          - { os: macos-latest, files: release-macos-universal }
+          - { os: windows-latest, files: release-windows-x64 }
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REF }}
+      # The libraries the program loads, which a desktop has.
+      - uses: ./.github/actions/linux-deps
+        if: runner.os == 'Linux'
+        with:
+          gui: "true"
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.files }}
+          path: release
+      - name: SHA256SUMS, as the release has it
+        shell: bash
+        working-directory: release
+        run: |
+          if command -v sha256sum > /dev/null; then
+            sha256sum -- fastemu-* > SHA256SUMS
+          else
+            shasum -a 256 -- fastemu-* > SHA256SUMS
+          fi
+          cat SHA256SUMS
+      - name: install.sh installs and uninstalls
+        if: runner.os != 'Windows'
+        run: bash packaging/check-installers.sh "$VERSION" "$PWD/release"
+      - name: install.ps1 installs and uninstalls
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/check-installers.ps1 -Version $env:VERSION -From "$PWD/release"
+
   linux:
     name: Linux ${{ matrix.arch }}
     needs: check
@@ -420,7 +469,7 @@ jobs:
 
   publish:
     name: Publish
-    needs: [check, windows, linux, macos, android, flatpak]
+    needs: [check, windows, linux, macos, android, flatpak, installers]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -441,6 +490,12 @@ jobs:
         working-directory: release
         run: |
           set -euo pipefail
+          # The installers, which install this release unless told otherwise.
+          sed "s/@VERSION@/$VERSION/" ../packaging/install.sh > install.sh
+          sed "s/@VERSION@/$VERSION/" ../packaging/install.ps1 > install.ps1
+          grep -qxF "release_version=\"$VERSION\"" install.sh
+          # .gitattributes checks .ps1 files out with CRLF line ends.
+          grep -qF "\$releaseVersion = '$VERSION'" install.ps1
           expected=(
             "fastemu-$VERSION-windows-x64-setup.exe"
             "fastemu-$VERSION-windows-x64-portable.zip"
@@ -458,6 +513,7 @@ jobs:
             "fastemu-$VERSION-linux-x64.flatpak"
             "fastemu-$VERSION-linux-arm64.flatpak"
           )
+          expected+=(install.sh install.ps1)
           for file in "${expected[@]}"; do
             test -s "$file" || { echo "::error::$file is missing."; exit 1; }
           done
