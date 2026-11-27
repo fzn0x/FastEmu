@@ -172,9 +172,8 @@ jobs:
       matrix:
         include:
           # 22.04's older glibc, so the program runs on older systems too.
-          # The .deb is built here.
-          - { arch: x64, os: ubuntu-22.04, deb: "--deb" }
-          - { arch: arm64, os: ubuntu-24.04-arm, deb: "" }
+          - { arch: x64, os: ubuntu-22.04 }
+          - { arch: arm64, os: ubuntu-24.04-arm }
     env:
       VERSION: ${{ needs.check.outputs.version }}
     steps:
@@ -197,14 +196,12 @@ jobs:
           echo "$out"
           test "$out" = "fastemu $VERSION"
       - name: Package
-        run: bash packaging/linux/package.sh "$VERSION" ${{ matrix.arch }} target/release/fastemu "$RUNNER_TEMP/release" ${{ matrix.deb }}
-      # apt resolves every dependency the package names, or fails.
-      - name: The .deb installs
-        if: matrix.deb != ''
-        run: |
-          bash packaging/retry.sh sudo apt-get install -y --no-install-recommends "$RUNNER_TEMP/release/fastemu-$VERSION-linux-x64.deb"
-          test "$(/usr/bin/fastemu --version)" = "fastemu $VERSION"
-          test -f /usr/share/applications/io.github.fzn0x.fastemu.desktop
+        run: bash packaging/linux/package.sh "$VERSION" ${{ matrix.arch }} target/release/fastemu "$RUNNER_TEMP/release"
+      # apt installs the .deb here and dnf the .rpm in a Fedora container,
+      # each resolving every dependency the package names, and the AppImage
+      # runs.
+      - name: The packages install
+        run: bash packaging/linux/check-packages.sh "$VERSION" ${{ matrix.arch }} "$RUNNER_TEMP/release"
       - uses: actions/upload-artifact@v7
         with:
           name: release-linux-${{ matrix.arch }}
@@ -449,7 +446,12 @@ jobs:
             "fastemu-$VERSION-windows-x64-portable.zip"
             "fastemu-$VERSION-linux-x64.tar.gz"
             "fastemu-$VERSION-linux-x64.deb"
+            "fastemu-$VERSION-linux-x64.rpm"
+            "fastemu-$VERSION-linux-x64.AppImage"
             "fastemu-$VERSION-linux-arm64.tar.gz"
+            "fastemu-$VERSION-linux-arm64.deb"
+            "fastemu-$VERSION-linux-arm64.rpm"
+            "fastemu-$VERSION-linux-arm64.AppImage"
             "fastemu-$VERSION-macos-universal.zip"
             "fastemu-$VERSION-macos-universal.dmg"
             "fastemu-$VERSION-android.apk"
