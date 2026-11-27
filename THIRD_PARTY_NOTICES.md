@@ -121,6 +121,12 @@ Dylan Murzello's port of Zed to Android for GPUI on Android.
 The Android app's Gradle project lists its own libraries in
 `android/app/build.gradle.kts`.
 
+The Windows setup, `fastemu-<version>-windows-x64-setup.exe`, is built
+with [NSIS](https://nsis.sourceforge.io/) 3.13 and carries its installer
+code. NSIS is under the zlib/libpng license. Its LZMA compression module
+is under the Common Public License 1.0, with an exception for code linked
+with it: <https://nsis.sourceforge.io/License>.
+
 Two libraries carry notices that must travel with FastEmu:
 
 - **amr-nb** (Apache License 2.0) decodes AMR sound. Its notice:

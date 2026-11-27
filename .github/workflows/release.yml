@@ -150,10 +150,17 @@ jobs:
       - name: Package
         shell: pwsh
         run: ./packaging/windows/package.ps1 -Version $env:VERSION -Exe target/release/fastemu.exe -OutDir "$env:RUNNER_TEMP/release"
+      # Installs the setup for the runner's user, tries what it installed
+      # and uninstalls it.
+      - name: The setup installs and uninstalls
+        shell: pwsh
+        run: ./packaging/windows/check-setup.ps1 -Setup "$env:RUNNER_TEMP/release/fastemu-$env:VERSION-windows-x64-setup.exe" -Version $env:VERSION
       - uses: actions/upload-artifact@v7
         with:
           name: release-windows-x64
-          path: ${{ runner.temp }}/release/fastemu-*.zip
+          path: |
+            ${{ runner.temp }}/release/fastemu-*-portable.zip
+            ${{ runner.temp }}/release/fastemu-*-setup.exe
           if-no-files-found: error
 
   linux:
@@ -378,7 +385,8 @@ jobs:
         run: |
           set -euo pipefail
           expected=(
-            "fastemu-$VERSION-windows-x64.zip"
+            "fastemu-$VERSION-windows-x64-setup.exe"
+            "fastemu-$VERSION-windows-x64-portable.zip"
             "fastemu-$VERSION-linux-x64.tar.gz"
             "fastemu-$VERSION-linux-x64.deb"
             "fastemu-$VERSION-linux-arm64.tar.gz"
