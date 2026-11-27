@@ -149,6 +149,15 @@ jobs:
         run: cargo clippy -p fastemu -p fastemu-ui --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test -p fastemu -p fastemu-ui -p fastemu-android --locked
+      # The portable zip and the setup, made as the release makes them; the
+      # setup is installed for the runner's user, tried and uninstalled.
+      - name: Windows setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = ((cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json).packages | Where-Object name -eq 'fastemu').version
+          ./packaging/windows/package.ps1 -Version $version -Exe target/debug/fastemu.exe -OutDir "$env:RUNNER_TEMP/package"
+          ./packaging/windows/check-setup.ps1 -Setup "$env:RUNNER_TEMP/package/fastemu-$version-windows-x64-setup.exe" -Version $version
 
   # The Android app: Rust libraries built by cargo-ndk for two ABIs, and the
   # APK built around them by Gradle. The steps are in
