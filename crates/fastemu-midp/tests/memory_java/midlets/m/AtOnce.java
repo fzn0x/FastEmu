@@ -23,6 +23,12 @@ public abstract class AtOnce extends MIDlet {
     /** What each thread counted: the images it made, or the bytes its stream gave. */
     static final long[] COUNT = new long[THREADS];
     static final String[] NAMES = {"none", "made", "IOException", "OutOfMemoryError", "other"};
+    /**
+     * Each thread's stream, made before any thread starts: once the others
+     * fill the heap, a thread could not make its own, and its new would be
+     * the OutOfMemoryError instead of its stream's reads (#97).
+     */
+    static final Endless[] STREAMS = new Endless[THREADS];
 
     /** Makes the image /big.png three times by name and drops it. */
     static void decode(int id) {
@@ -63,7 +69,7 @@ public abstract class AtOnce extends MIDlet {
 
     /** Passes Image.createImage a stream that never ends. */
     static void image(int id) {
-        Endless endless = new Endless();
+        Endless endless = STREAMS[id];
         try {
             Image.createImage(endless);
             OUTCOME[id] = 1;
@@ -77,7 +83,7 @@ public abstract class AtOnce extends MIDlet {
 
     /** Passes Manager.createPlayer a stream that never ends. */
     static void sound(int id) {
-        Endless endless = new Endless();
+        Endless endless = STREAMS[id];
         try {
             Manager.createPlayer(endless, "audio/x-wav");
             OUTCOME[id] = 1;
@@ -99,6 +105,9 @@ public abstract class AtOnce extends MIDlet {
 
     protected void startApp() {
         final AtOnce midlet = this;
+        for (int i = 0; i < THREADS; i++) {
+            STREAMS[i] = new Endless();
+        }
         for (int i = 0; i < THREADS; i++) {
             final int id = i;
             new Thread() {
