@@ -18,16 +18,15 @@
 
 ---
 
-![FastEmu on a laptop and an Android phone: six J2ME games in the window on a macOS desktop, and Star Defender on the phone with Tower Guard, BombMan and Block Fall below it](docs/images/hero.jpg)
-
-<sub>The FastEmu 0.1.0 window and Android app on a rendered laptop and
-phone. The macOS desktop around the window is a mock-up.</sub>
-
-![The FastEmu window playing six games at once: a stick figure fight, a bomber maze, asteroids, rows of space invaders, a tower defence map and falling blocks](docs/images/demo.webp)
+<p align="center">
+  <img src="docs/images/macos.webp" width="74%" alt="The FastEmu window on a macOS desktop, playing six games at once: a stick figure fight, a bomber maze, asteroids, rows of space invaders, a tower defence map and falling blocks">
+  <img src="docs/images/android.png" width="22%" alt="FastEmu on Android: Star Defender large with its keypad, and Tower Guard, BombMan and Block Fall running below it">
+</p>
 
 <sub>Stick Fight, BombMan, Rock Blaster, Star Defender, Tower Guard and
-Block Fall, free games playing in the FastEmu 0.1.0 window on Windows.
-See [Credits](#credits).</sub>
+Block Fall playing in the FastEmu 0.1.0 window, on a macOS desktop
+mock-up, and the Android app on the Pixel 8 emulator. See
+[Credits](#credits).</sub>
 
 FastEmu runs Java ME games, the `.jar` and `.jad` files made for phones
 of the 2000s, on Windows, Linux, macOS and Android. It implements CLDC 1.1
@@ -188,8 +187,8 @@ Dash Animation V2,
 [BombMan](https://github.com/yaricom/bombman-RL-AI-J2ME) by Iaroslav
 Omelianenko, and Rock Blaster, Star Defender, Tower Guard and Block Fall
 from [J2ME 100 Games](https://github.com/agneay/j2me-100-games) by Agneay
-B Nair and the J2ME Game Archive contributors. The laptop, the phone and
-the desktop wallpaper were rendered with GPT Image 2.6 on Higgsfield.
+B Nair and the J2ME Game Archive contributors. The desktop wallpaper was
+rendered with GPT Image 2.6 on Higgsfield.
 
 The Rust crates, fonts and game frames FastEmu uses, with their licenses,
 are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The people

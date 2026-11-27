@@ -57,7 +57,7 @@ games themselves.
 
 `site/src/games/*.webp` hold the frames of the website's first two
 cards. The pictures at the top of the README and the website,
-`docs/images/hero.jpg`, `docs/images/demo.webp` and `site/src/demo/`,
+`docs/images/macos.webp`, `docs/images/android.png` and `site/src/demo/`,
 show Stick Fight, BombMan, Rock Blaster, Star Defender, Tower Guard and
 Block Fall in the FastEmu window and app. The MIT License texts, with
 each game's copyright line, are in
