@@ -66,6 +66,24 @@ irm https://github.com/fzn0x/FastEmu/releases/latest/download/install.ps1 | iex
 It checks the setup against `SHA256SUMS` and runs it silently. Saved as
 a file, it takes `-Version 0.2.0` and `-Uninstall`.
 
+### With a package manager
+
+On macOS, [Homebrew](https://brew.sh) installs the disk image's app and
+the `fastemu` command, and `brew upgrade` updates them:
+
+```sh
+brew install --cask fzn0x/tap/fastemu
+```
+
+On Windows, [Scoop](https://scoop.sh) installs the portable zip, with a
+Start menu shortcut and the `fastemu` command, and `scoop update` updates
+it:
+
+```powershell
+scoop bucket add fzn0x https://github.com/fzn0x/scoop-bucket
+scoop install fastemu
+```
+
 ## Get a game
 
 FastEmu does not ship games. Use `.jar` files you already own or that
