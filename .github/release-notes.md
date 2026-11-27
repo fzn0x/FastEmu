@@ -9,6 +9,8 @@
 | **Linux**, Arm64 | [`fastemu-{version}-linux-arm64.tar.gz`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-linux-arm64.tar.gz) |
 | **macOS** 11 or later, Apple silicon and Intel | [`fastemu-{version}-macos-universal.zip`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-macos-universal.zip): unpack it and move FastEmu to Applications |
 | **Android** 12 or later | [`fastemu-{version}-android.apk`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-android.apk): allow installing from this source when Android asks |
+| **Any Linux**, sandboxed, x64 | [`fastemu-{version}-linux-x64.flatpak`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-linux-x64.flatpak): `flatpak install ./fastemu-{version}-linux-x64.flatpak`, which fetches the freedesktop runtime from Flathub the first time |
+| **Any Linux**, sandboxed, Arm64 | [`fastemu-{version}-linux-arm64.flatpak`](https://github.com/{repo}/releases/download/{tag}/fastemu-{version}-linux-arm64.flatpak): `flatpak install ./fastemu-{version}-linux-arm64.flatpak`, which fetches the freedesktop runtime from Flathub the first time |
 
 **First launch on macOS.** The app is not notarized: open it once from System Settings > Privacy & Security > Open Anyway, or run `xattr -dr com.apple.quarantine /Applications/FastEmu.app`.
 

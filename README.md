@@ -55,6 +55,7 @@ release has a `SHA256SUMS` file to check the downloads against.
 | Linux | Unpack `fastemu-<version>-linux-x64.tar.gz` (or `-linux-arm64`) anywhere and run `fastemu`, or install `fastemu-<version>-linux-x64.deb` on Debian and Ubuntu. It needs a Vulkan driver and a Wayland or X11 session. |
 | macOS | Unpack `fastemu-<version>-macos-universal.zip` and move the app to Applications. The app is not notarized: open it once from System Settings, Privacy & Security, Open Anyway. |
 | Android | Open `fastemu-<version>-android.apk` from your files. Android asks you to allow installs from that source the first time. |
+| Any Linux, sandboxed | Open `fastemu-<version>-linux-x64.flatpak` or `-linux-arm64.flatpak` with your software center, or run `flatpak install ./fastemu-<version>-linux-x64.flatpak`. The first time, Flatpak fetches the freedesktop runtime from Flathub. In its sandbox FastEmu sees the display, sound and the network, and only the files you pick. |
 
 FastEmu does not include games. Use files you own or that their authors
 made free to share.

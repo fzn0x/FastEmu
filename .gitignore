@@ -14,6 +14,9 @@
 *.jks
 *.p12
 
+# What the Flatpak's manifest packs, copied in before flatpak-builder
+/packaging/flatpak/dist/
+
 # Documentation site build output and what wrangler keeps beside its config
 /site/public/
 .wrangler/

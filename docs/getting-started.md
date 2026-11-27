@@ -16,6 +16,7 @@ Download the build for your system from the
 | Linux   | `fastemu-<version>-linux-x64.tar.gz` or `-linux-arm64.tar.gz`, unpack it anywhere |
 | macOS   | `fastemu-<version>-macos-universal.zip`, move the app to Applications             |
 | Android | `fastemu-<version>-android.apk`, install it from your files                       |
+| Flatpak | `fastemu-<version>-linux-x64.flatpak`, `flatpak install` it                       |
 
 FastEmu does not need Java installed. It carries its own virtual
 machine.
