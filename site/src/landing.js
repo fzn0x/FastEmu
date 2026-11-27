@@ -39,6 +39,31 @@
     };
   })();
 
+  // The clip of the desktop window plays while it is on screen, unless the
+  // reader paused it or asks for less motion; its poster is a still of the
+  // same window.
+  const clip = document.querySelector('.shot-demo video');
+  if (clip) {
+    const button = document.querySelector('.clip-toggle');
+    let wanted = !reduce;
+    let visible = !('IntersectionObserver' in window);
+    const sync = () => {
+      if (wanted && visible) clip.play().catch(() => {}); else clip.pause();
+      if (button) {
+        button.textContent = wanted ? 'Pause' : 'Play';
+        button.setAttribute('aria-pressed', String(!wanted));
+      }
+    };
+    if (button) {
+      button.hidden = false;
+      button.addEventListener('click', () => { wanted = !wanted; sync(); });
+    }
+    if (!visible) {
+      new IntersectionObserver(([e]) => { visible = e.isIntersecting; sync(); }, { threshold: 0.25 }).observe(clip);
+    }
+    sync();
+  }
+
   if (reduce || !('IntersectionObserver' in window)) {
     cards.forEach((c) => c.classList.add('on'));
     return;

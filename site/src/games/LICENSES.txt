@@ -1,7 +1,8 @@
 Licenses of the games whose frames the FastEmu site shows
 
 The frames on https://fastemu.functionx.dev were recorded with FastEmu's
-headless runner (fastemu run --record) from these free games. Each is
+headless runner (fastemu run --record), and the screenshots and clip above
+the cards in the FastEmu window and app, from these free games. Each is
 under the MIT License; its notice follows.
 
 ========================================================================
@@ -86,7 +87,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ========================================================================
-J2ME 100 Games: Traffic Dash, Tower Guard, Star Defender and Block Fall
+J2ME 100 Games: Traffic Dash, Tower Guard, Star Defender, Block Fall and Rock Blaster
 Source: https://github.com/agneay/j2me-100-games
 ========================================================================
 
