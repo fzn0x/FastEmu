@@ -14,7 +14,7 @@ Download the build for your system from the
 | ------- | --------------------------------------------------------------------------------- |
 | Windows | `fastemu-<version>-windows-x64-setup.exe`, run it to install FastEmu              |
 | Linux   | `fastemu-<version>-linux-x64.tar.gz` or `-linux-arm64.tar.gz`, unpack it anywhere |
-| macOS   | `fastemu-<version>-macos-universal.zip`, move the app to Applications             |
+| macOS   | `fastemu-<version>-macos-universal.dmg`, drag the app onto Applications           |
 | Android | `fastemu-<version>-android.apk`, install it from your files                       |
 | Flatpak | `fastemu-<version>-linux-x64.flatpak`, `flatpak install` it                       |
 

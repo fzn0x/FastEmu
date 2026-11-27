@@ -55,7 +55,7 @@ rilis punya file `SHA256SUMS` untuk memeriksa unduhan.
 | --- | --- |
 | Windows | Jalankan `fastemu-<versi>-windows-x64-setup.exe`. Penginstalnya memasang FastEmu untuk akun Anda tanpa hak administrator. FastEmu masuk ke menu Start dan ke Open with untuk file `.jar` dan `.jad`, dan Settings, Apps bisa mencopotnya. Kalau tidak mau memasang, ekstrak `fastemu-<versi>-windows-x64-portable.zip` di mana saja dan jalankan `fastemu.exe`. Jika SmartScreen memperingatkan, pilih More info, lalu Run anyway: programnya belum ditandatangani. |
 | Linux | Ekstrak `fastemu-<versi>-linux-x64.tar.gz` (atau `-linux-arm64`) di mana saja dan jalankan `fastemu`, atau pasang `fastemu-<versi>-linux-x64.deb` di Debian dan Ubuntu. Butuh driver Vulkan dan sesi Wayland atau X11. |
-| macOS | Ekstrak `fastemu-<versi>-macos-universal.zip` dan pindahkan aplikasinya ke Applications. Aplikasinya belum dinotarisasi: buka sekali lewat System Settings, Privacy & Security, Open Anyway. |
+| macOS | Buka `fastemu-<versi>-macos-universal.dmg` dan seret FastEmu ke Applications. `fastemu-<versi>-macos-universal.zip` berisi aplikasi yang sama, untuk diekstrak dan dipindahkan sendiri. Aplikasinya belum dinotarisasi: buka sekali lewat System Settings, Privacy & Security, Open Anyway. |
 | Android | Buka `fastemu-<versi>-android.apk` dari berkas Anda. Android akan meminta izin memasang dari sumber itu pada pertama kali. |
 | Linux apa saja, dalam sandbox | Buka `fastemu-<versi>-linux-x64.flatpak` atau `-linux-arm64.flatpak` dengan pusat perangkat lunak Anda, atau jalankan `flatpak install ./fastemu-<versi>-linux-x64.flatpak`. Pertama kali, Flatpak mengambil runtime freedesktop dari Flathub. Di dalam sandbox-nya FastEmu melihat layar, suara dan jaringan, dan hanya file yang Anda pilih. |
 

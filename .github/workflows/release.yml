@@ -250,10 +250,16 @@ jobs:
             target/aarch64-apple-darwin/release/fastemu \
             target/x86_64-apple-darwin/release/fastemu \
             "$RUNNER_TEMP/release"
+      # Mounts the disk image, checks what it holds and the app's
+      # signature, and runs the program.
+      - name: The disk image opens
+        run: bash packaging/macos/check-dmg.sh "$RUNNER_TEMP/release/fastemu-$VERSION-macos-universal.dmg" "$VERSION"
       - uses: actions/upload-artifact@v7
         with:
           name: release-macos-universal
-          path: ${{ runner.temp }}/release/fastemu-*.zip
+          path: |
+            ${{ runner.temp }}/release/fastemu-*.dmg
+            ${{ runner.temp }}/release/fastemu-*.zip
           if-no-files-found: error
 
   # The Rust library for both ABIs with cargo-ndk, then the APK around it
@@ -445,6 +451,7 @@ jobs:
             "fastemu-$VERSION-linux-x64.deb"
             "fastemu-$VERSION-linux-arm64.tar.gz"
             "fastemu-$VERSION-macos-universal.zip"
+            "fastemu-$VERSION-macos-universal.dmg"
             "fastemu-$VERSION-android.apk"
             "fastemu-$VERSION-linux-x64.flatpak"
             "fastemu-$VERSION-linux-arm64.flatpak"
