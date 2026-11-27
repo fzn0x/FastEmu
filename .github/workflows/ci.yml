@@ -145,6 +145,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build -p fastemu --locked
+      # The zip and the disk image, made as the release makes them but from
+      # this Mac's build alone; the image is mounted and tried.
+      - name: macOS disk image
+        if: runner.os == 'macOS'
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.name == "fastemu") | .version')"
+          bash packaging/macos/package.sh "$version" target/debug/fastemu - "$RUNNER_TEMP/package"
+          bash packaging/macos/check-dmg.sh "$RUNNER_TEMP/package/fastemu-$version-macos-universal.dmg" "$version" arm64
       - name: Clippy
         run: cargo clippy -p fastemu -p fastemu-ui --all-targets --locked -- -D warnings
       - name: Test
