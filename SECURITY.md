@@ -342,6 +342,11 @@ section says is in scope.
 - FastEmu does not limit the CPU a game uses on its own threads. A game
   can keep the processor busy with drawing, decoding or computing for as
   long as it runs. Close its tile to stop it.
+- With a single processor for FastEmu, a game that seeks a big MIDI file
+  in a loop keeps the audio thread and the other games' sound calls out
+  for up to a second at a time. In a test pinned to one CPU, the audio
+  thread rendered 2 to 4 buffers in 1.5 seconds. With two processors or
+  more it renders about 300, each within a few milliseconds.
 - A call into the runtime that does not call back into the game, such
   as a very large fill or the decoding of a sound, cannot be stopped. It
   runs on after you close the tile, and one that takes longer than the

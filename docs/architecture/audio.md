@@ -73,7 +73,9 @@ What one game can make the lock cost is bounded:
 
 A seek in a MIDI file replays the controllers before the new position. It
 is up to 65536 events under the lock, about a millisecond. That stays a
-known limit, and the fair lock keeps it from starving anyone.
+known limit. With two processors or more, the fair lock keeps it from
+starving anyone. With one, a game that seeks in a loop can keep the
+others out for up to a second, as the known limits say.
 
 A group's volume is the one value outside the lock. `Group::set_volume`
 stores it in an atomic that the group's handles share with the mixer,
