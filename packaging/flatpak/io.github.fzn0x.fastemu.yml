@@ -1,0 +1,57 @@
+# FastEmu as a Flatpak, for the release's fastemu-<version>-linux-x64.flatpak
+# and fastemu-<version>-linux-arm64.flatpak. It packs the program of the
+# release's Linux tar.gz for the Flatpak's architecture on the freedesktop
+# runtime, which has every library FastEmu and GPUI load. Before
+# flatpak-builder, dist/ needs the archive and the metadata:
+#
+#   dist/fastemu-linux-x64.tar.gz                 fastemu-<version>-linux-x64.tar.gz, for x86_64
+#   dist/fastemu-linux-arm64.tar.gz               fastemu-<version>-linux-arm64.tar.gz, for aarch64
+#   dist/io.github.fzn0x.fastemu.metainfo.xml     python3 packaging/flatpak/metainfo.py <it>
+#
+# Flathub can't take this manifest as it is: Flathub builds from source.
+id: io.github.fzn0x.fastemu
+runtime: org.freedesktop.Platform
+# A freedesktop runtime gets two years of support: move this version and
+# the freedesktop-<version> image of release.yml together.
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+command: fastemu
+finish-args:
+  # The window: Wayland, or X11 where there is no Wayland, with the shared
+  # memory X11 draws through.
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # The GPU, which GPUI draws on with Vulkan.
+  - --device=dri
+  # Sound, through the sound server: PulseAudio, or PipeWire's.
+  - --socket=pulseaudio
+  # Games that connect, over HTTP or sockets.
+  - --share=network
+  # No files: Add game opens the desktop's file chooser through its portal,
+  # which hands FastEmu the files picked, and Open with passes a file the
+  # same way. The library keeps its own copy of each game.
+modules:
+  - name: fastemu
+    buildsystem: simple
+    sources:
+      # The archive of the architecture built for, which flatpak-builder's
+      # --arch names: the other is neither read nor needed.
+      - type: archive
+        path: dist/fastemu-linux-x64.tar.gz
+        only-arches:
+          - x86_64
+      - type: archive
+        path: dist/fastemu-linux-arm64.tar.gz
+        only-arches:
+          - aarch64
+      - type: file
+        path: dist/io.github.fzn0x.fastemu.metainfo.xml
+    build-commands:
+      - install -Dm755 fastemu /app/bin/fastemu
+      # The entry and the icons are named after the app's ID already.
+      - install -Dm644 io.github.fzn0x.fastemu.desktop -t /app/share/applications
+      - mkdir -p /app/share/icons
+      - cp -r icons/hicolor /app/share/icons/
+      - install -Dm644 io.github.fzn0x.fastemu.metainfo.xml -t /app/share/metainfo
+      - install -Dm644 LICENSE THIRD_PARTY_NOTICES.md -t /app/share/licenses/io.github.fzn0x.fastemu
