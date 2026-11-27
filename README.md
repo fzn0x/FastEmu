@@ -18,11 +18,16 @@
 
 ---
 
-![Six J2ME games running in FastEmu: a stick figure fight, a jet shooter over grass, a bomber maze, cars on a highway, a tower defence map and rows of space invaders](docs/images/games.png)
+![FastEmu on a laptop and an Android phone: six J2ME games in the desktop window, and Star Defender on the phone with Tower Guard, BombMan and Block Fall below it](docs/images/hero.jpg)
 
-<sub>Stick Fight, Shooter, BombMan, Traffic Dash, Tower Guard and Star
-Defender, free games recorded in FastEmu with `fastemu run --record`. See
-[Credits](#credits).</sub>
+<sub>Screenshots of FastEmu 0.1.0, placed on the screens of a rendered
+laptop and phone.</sub>
+
+![The FastEmu window playing six games at once: a stick figure fight, a bomber maze, asteroids, rows of space invaders, a tower defence map and falling blocks](docs/images/demo.webp)
+
+<sub>Stick Fight, BombMan, Rock Blaster, Star Defender, Tower Guard and
+Block Fall, free games playing in the FastEmu 0.1.0 window on Windows.
+See [Credits](#credits).</sub>
 
 FastEmu runs Java ME games, the `.jar` and `.jad` files made for phones
 of the 2000s, on Windows, Linux, macOS and Android. It implements CLDC 1.1
@@ -177,14 +182,14 @@ The interface is built with [GPUI](https://github.com/zed-industries/zed),
 the UI framework of the Zed editor. GPUI on Android runs on the Zed Android
 port by Dylan Murzello.
 
-The picture at the top shows free games, all under the MIT License:
+The pictures at the top show free games, all under the MIT License:
 [Stick Fight](https://github.com/Dahmalahi/STICK-FIGHT-OFFICIEL-REPO) by
-Dash Animation V2, [Shooter](https://github.com/RehanSaeed/Shooter) by
-Muhammad Rehan Saeed,
+Dash Animation V2,
 [BombMan](https://github.com/yaricom/bombman-RL-AI-J2ME) by Iaroslav
-Omelianenko, and Traffic Dash, Tower Guard and Star Defender from
-[J2ME 100 Games](https://github.com/agneay/j2me-100-games) by Agneay B
-Nair and the J2ME Game Archive contributors.
+Omelianenko, and Rock Blaster, Star Defender, Tower Guard and Block Fall
+from [J2ME 100 Games](https://github.com/agneay/j2me-100-games) by Agneay
+B Nair and the J2ME Game Archive contributors. The laptop and phone
+around the screenshots were rendered with GPT Image 2.6 on Higgsfield.
 
 The Rust crates, fonts and game frames FastEmu uses, with their licenses,
 are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The people
