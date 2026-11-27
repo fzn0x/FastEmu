@@ -97,11 +97,13 @@ function Install-FastEmu([string]$Version, [string]$From, [switch]$Uninstall) {
             $dest
         }
 
+        # A name follows its sum after two spaces, or after " *" where
+        # sha256sum read the file in binary mode.
         $sums = Get-Content -LiteralPath (Get-ReleaseFile 'SHA256SUMS')
         if ($Version) {
-            $pattern = '^([0-9a-f]{64})  (fastemu-' + [regex]::Escape($Version) + '-windows-x64-setup\.exe)$'
+            $pattern = '^([0-9a-f]{64}) [ *](fastemu-' + [regex]::Escape($Version) + '-windows-x64-setup\.exe)$'
         } else {
-            $pattern = '^([0-9a-f]{64})  (fastemu-\d+\.\d+\.\d+-windows-x64-setup\.exe)$'
+            $pattern = '^([0-9a-f]{64}) [ *](fastemu-\d+\.\d+\.\d+-windows-x64-setup\.exe)$'
         }
         $line = $sums | Where-Object { $_ -match $pattern } | Select-Object -First 1
         if (-not $line) {

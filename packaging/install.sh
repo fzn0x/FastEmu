@@ -108,10 +108,13 @@ sha256() {
 # and prints its name. WHAT says which file it is, for a message.
 download() {
   fetch SHA256SUMS "$work/SHA256SUMS"
-  line="$(grep -E "^[0-9a-f]{64}  $1\$" "$work/SHA256SUMS" | head -n 1 || true)"
+  # A name follows its sum after two spaces, or after " *" where
+  # sha256sum read the file in binary mode.
+  line="$(grep -E "^[0-9a-f]{64} [ *]$1\$" "$work/SHA256SUMS" | head -n 1 || true)"
   [ -n "$line" ] || die "the release${version:+ $version} has no $2"
   want="${line%% *}"
   name="${line##* }"
+  name="${name#\*}"
   fetch "$name" "$work/$name"
   [ "$(sha256 "$work/$name")" = "$want" ] ||
     die "$name does not match the release's SHA256SUMS: it was damaged or changed on the way"
