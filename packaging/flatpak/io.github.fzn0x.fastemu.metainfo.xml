@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- FastEmu's AppStream metadata, which the Flatpak carries for software
+     centers. packaging/flatpak/metainfo.py fills in the releases from
+     CHANGELOG.md. -->
+<component type="desktop-application">
+  <id>io.github.fzn0x.fastemu</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>FastEmu</name>
+  <summary>Play Java ME games, many at once</summary>
+  <developer id="io.github.fzn0x">
+    <name>The FastEmu contributors</name>
+  </developer>
+  <description>
+    <p>
+      FastEmu runs Java ME games, the .jar and .jad files made for phones of
+      the 2000s. It implements CLDC 1.1 and MIDP 2.0 with a virtual machine of
+      its own, so it needs no Java installed.
+    </p>
+    <p>
+      Each game runs in its own virtual machine, and one window shows as many
+      games as you start.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.fzn0x.fastemu.desktop</launchable>
+  <url type="homepage">https://fastemu.functionx.dev</url>
+  <url type="bugtracker">https://github.com/fzn0x/FastEmu/issues</url>
+  <url type="vcs-browser">https://github.com/fzn0x/FastEmu</url>
+  <categories>
+    <category>Game</category>
+    <category>Emulator</category>
+  </categories>
+  <provides>
+    <binary>fastemu</binary>
+  </provides>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <releases/>
+</component>
