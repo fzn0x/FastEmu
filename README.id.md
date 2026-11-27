@@ -59,6 +59,24 @@ rilis punya file `SHA256SUMS` untuk memeriksa unduhan.
 | Android | Buka `fastemu-<versi>-android.apk` dari berkas Anda. Android akan meminta izin memasang dari sumber itu pada pertama kali. |
 | Linux apa saja, dalam sandbox | Buka `fastemu-<versi>-linux-x64.flatpak` atau `-linux-arm64.flatpak` dengan pusat perangkat lunak Anda, atau jalankan `flatpak install ./fastemu-<versi>-linux-x64.flatpak`. Pertama kali, Flatpak mengambil runtime freedesktop dari Flathub. Di dalam sandbox-nya FastEmu melihat layar, suara dan jaringan, dan hanya file yang Anda pilih. |
 
+Dari terminal, satu baris memasang rilis terbaru, setelah diperiksa
+dengan `SHA256SUMS`-nya. Di Linux, FastEmu dipasang untuk akun Anda,
+dengan entri menu dan perintah `fastemu` di `~/.local/bin`. Di macOS,
+FastEmu.app dipasang ke Applications:
+
+```sh
+curl -fsSL https://github.com/fzn0x/FastEmu/releases/latest/download/install.sh | sh
+```
+
+Di Windows, di PowerShell, perintah ini menjalankan penginstalnya:
+
+```powershell
+irm https://github.com/fzn0x/FastEmu/releases/latest/download/install.ps1 | iex
+```
+
+`sh install.sh --uninstall` mencopot FastEmu lagi, begitu juga
+`install.ps1 -Uninstall`.
+
 FastEmu tidak menyertakan game. Pakai file yang Anda miliki atau yang
 dibagikan gratis oleh pembuatnya.
 

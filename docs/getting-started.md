@@ -34,6 +34,33 @@ FastEmu without installing it, unpack
 On Debian and Ubuntu, `fastemu-<version>-linux-x64.deb` installs it with
 a menu entry.
 
+### From a terminal
+
+One line installs the latest release, checked against its `SHA256SUMS`:
+
+```sh
+curl -fsSL https://github.com/fzn0x/FastEmu/releases/latest/download/install.sh | sh
+```
+
+On Linux it installs the tar.gz for your machine, x64 or Arm64, for your
+account: the program in `~/.local/lib/fastemu`, the `fastemu` command in
+`~/.local/bin`, and the menu entry and icons in `~/.local/share`. On
+macOS it installs FastEmu.app into `/Applications`, or into
+`~/Applications` when `/Applications` cannot be written. It needs curl
+or wget, tar, and sha256sum or shasum. Save it first to pass options:
+`sh install.sh --version 0.2.0` installs a given release, and
+`sh install.sh --uninstall` removes what it installed, leaving your games
+and saves.
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://github.com/fzn0x/FastEmu/releases/latest/download/install.ps1 | iex
+```
+
+It checks the setup against `SHA256SUMS` and runs it silently. Saved as
+a file, it takes `-Version 0.2.0` and `-Uninstall`.
+
 ## Get a game
 
 FastEmu does not ship games. Use `.jar` files you already own or that
