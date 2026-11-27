@@ -11,7 +11,8 @@ import javax.microedition.midlet.MIDlet;
  * Eight threads do the same work at the same time, each what work() says.
  * They note what they got in arrays made first, as the heap may be full
  * while the others work, and the last one to finish prints every thread's
- * line, "name id outcome count", and then "done".
+ * line, "name id outcome count", with the error's class after an "other"
+ * outcome, and then "done".
  */
 public abstract class AtOnce extends MIDlet {
     static final int THREADS = 8;
@@ -23,6 +24,14 @@ public abstract class AtOnce extends MIDlet {
     /** What each thread counted: the images it made, or the bytes its stream gave. */
     static final long[] COUNT = new long[THREADS];
     static final String[] NAMES = {"none", "made", "IOException", "OutOfMemoryError", "other"};
+    /** What a thread whose outcome is "other" got, which its line names. */
+    static final Throwable[] ERRORS = new Throwable[THREADS];
+    /**
+     * Each thread's stream, made before any thread starts: once the others
+     * fill the heap, a thread could not make its own, and its new would be
+     * the OutOfMemoryError instead of its stream's reads (#97).
+     */
+    static final Endless[] STREAMS = new Endless[THREADS];
 
     /** Makes the image /big.png three times by name and drops it. */
     static void decode(int id) {
@@ -63,7 +72,7 @@ public abstract class AtOnce extends MIDlet {
 
     /** Passes Image.createImage a stream that never ends. */
     static void image(int id) {
-        Endless endless = new Endless();
+        Endless endless = STREAMS[id];
         try {
             Image.createImage(endless);
             OUTCOME[id] = 1;
@@ -77,7 +86,7 @@ public abstract class AtOnce extends MIDlet {
 
     /** Passes Manager.createPlayer a stream that never ends. */
     static void sound(int id) {
-        Endless endless = new Endless();
+        Endless endless = STREAMS[id];
         try {
             Manager.createPlayer(endless, "audio/x-wav");
             OUTCOME[id] = 1;
@@ -100,6 +109,9 @@ public abstract class AtOnce extends MIDlet {
     protected void startApp() {
         final AtOnce midlet = this;
         for (int i = 0; i < THREADS; i++) {
+            STREAMS[i] = new Endless();
+        }
+        for (int i = 0; i < THREADS; i++) {
             final int id = i;
             new Thread() {
                 public void run() {
@@ -116,13 +128,15 @@ public abstract class AtOnce extends MIDlet {
                         midlet.work(id);
                     } catch (Throwable t) {
                         OUTCOME[id] = 4;
+                        ERRORS[id] = t;
                     } finally {
                         synchronized (LOCK) {
                             finished++;
                             if (finished == THREADS) {
                                 for (int j = 0; j < THREADS; j++) {
                                     System.out.println(midlet.name() + " " + j + " "
-                                            + NAMES[OUTCOME[j]] + " " + COUNT[j]);
+                                            + NAMES[OUTCOME[j]] + " " + COUNT[j]
+                                            + (ERRORS[j] == null ? "" : " " + ERRORS[j].getClass().getName()));
                                 }
                                 System.out.println("done");
                             }
