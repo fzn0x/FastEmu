@@ -215,6 +215,8 @@ function build() {
   cpSync(join(root, 'assets', 'icon.svg'), join(out, 'favicon.svg'));
   // Frames of real games for the landing page's cards, and their licenses.
   cpSync(join(here, 'src', 'games'), join(out, 'assets', 'games'), { recursive: true });
+  // The app on a laptop and a phone, and the clip of its window, above the cards.
+  cpSync(join(here, 'src', 'demo'), join(out, 'assets', 'demo'), { recursive: true });
 
   // Guides.
   const guides = GUIDES.map(renderGuide);

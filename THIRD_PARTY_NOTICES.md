@@ -53,12 +53,14 @@ games themselves.
 | [Stick Fight](https://github.com/Dahmalahi/STICK-FIGHT-OFFICIEL-REPO) | Dash Animation V2 | MIT |
 | [Shooter](https://github.com/RehanSaeed/Shooter) | Muhammad Rehan Saeed | MIT |
 | [BombMan](https://github.com/yaricom/bombman-RL-AI-J2ME) | Iaroslav Omelianenko | MIT |
-| Traffic Dash, Tower Guard, Star Defender and Block Fall, from [J2ME 100 Games](https://github.com/agneay/j2me-100-games) | Agneay B Nair and the J2ME Game Archive contributors | MIT |
+| Traffic Dash, Tower Guard, Star Defender, Block Fall and Rock Blaster, from [J2ME 100 Games](https://github.com/agneay/j2me-100-games) | Agneay B Nair and the J2ME Game Archive contributors | MIT |
 
 `site/src/games/*.webp` hold the frames of the website's first two
-cards, and `docs/images/games.png`, the picture at the top of the README,
-shows Stick Fight, Shooter, BombMan, Traffic Dash, Tower Guard and Star
-Defender. The MIT License texts, with each game's copyright line, are in
+cards. The pictures at the top of the README and the website,
+`docs/images/macos.webp`, `docs/images/android.png` and `site/src/demo/`,
+show Stick Fight, BombMan, Rock Blaster, Star Defender, Tower Guard and
+Block Fall in the FastEmu window and app. The MIT License texts, with
+each game's copyright line, are in
 [site/src/games/LICENSES.txt](site/src/games/LICENSES.txt), which the
 website publishes beside the frames.
 

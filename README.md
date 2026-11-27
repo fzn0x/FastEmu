@@ -18,10 +18,14 @@
 
 ---
 
-![Six J2ME games running in FastEmu: a stick figure fight, a jet shooter over grass, a bomber maze, cars on a highway, a tower defence map and rows of space invaders](docs/images/games.png)
+<p align="center">
+  <img src="docs/images/macos.webp" width="74%" alt="The FastEmu window on a macOS desktop, playing six games at once: a stick figure fight, a bomber maze, asteroids, rows of space invaders, a tower defence map and falling blocks">
+  <img src="docs/images/android.png" width="22%" alt="FastEmu on Android: Star Defender large with its keypad, and Tower Guard, BombMan and Block Fall running below it">
+</p>
 
-<sub>Stick Fight, Shooter, BombMan, Traffic Dash, Tower Guard and Star
-Defender, free games recorded in FastEmu with `fastemu run --record`. See
+<sub>Stick Fight, BombMan, Rock Blaster, Star Defender, Tower Guard and
+Block Fall playing in the FastEmu 0.1.0 window, on a macOS desktop
+mock-up, and the Android app on the Pixel 8 emulator. See
 [Credits](#credits).</sub>
 
 FastEmu runs Java ME games, the `.jar` and `.jad` files made for phones
@@ -177,14 +181,14 @@ The interface is built with [GPUI](https://github.com/zed-industries/zed),
 the UI framework of the Zed editor. GPUI on Android runs on the Zed Android
 port by Dylan Murzello.
 
-The picture at the top shows free games, all under the MIT License:
+The pictures at the top show free games, all under the MIT License:
 [Stick Fight](https://github.com/Dahmalahi/STICK-FIGHT-OFFICIEL-REPO) by
-Dash Animation V2, [Shooter](https://github.com/RehanSaeed/Shooter) by
-Muhammad Rehan Saeed,
+Dash Animation V2,
 [BombMan](https://github.com/yaricom/bombman-RL-AI-J2ME) by Iaroslav
-Omelianenko, and Traffic Dash, Tower Guard and Star Defender from
-[J2ME 100 Games](https://github.com/agneay/j2me-100-games) by Agneay B
-Nair and the J2ME Game Archive contributors.
+Omelianenko, and Rock Blaster, Star Defender, Tower Guard and Block Fall
+from [J2ME 100 Games](https://github.com/agneay/j2me-100-games) by Agneay
+B Nair and the J2ME Game Archive contributors. The desktop wallpaper was
+rendered with GPT Image 2.6 on Higgsfield.
 
 The Rust crates, fonts and game frames FastEmu uses, with their licenses,
 are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The people

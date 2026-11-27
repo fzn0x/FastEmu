@@ -18,11 +18,15 @@
 
 ---
 
-![Enam game J2ME berjalan di FastEmu: pertarungan manusia lidi, pesawat jet di atas padang rumput, labirin pengebom, mobil di jalan raya, peta tower defense, dan barisan penyerbu luar angkasa](docs/images/games.png)
+<p align="center">
+  <img src="docs/images/macos.webp" width="74%" alt="Jendela FastEmu di desktop macOS, memainkan enam game sekaligus: pertarungan manusia lidi, labirin pengebom, asteroid, barisan penyerbu luar angkasa, peta tower defense, dan balok yang berjatuhan">
+  <img src="docs/images/android.png" width="22%" alt="FastEmu di Android: Star Defender besar dengan keypad-nya, serta Tower Guard, BombMan, dan Block Fall berjalan di bawahnya">
+</p>
 
-<sub>Stick Fight, Shooter, BombMan, Traffic Dash, Tower Guard, dan Star
-Defender, game gratis yang direkam di FastEmu dengan
-`fastemu run --record`. Lihat [Penghargaan](#penghargaan).</sub>
+<sub>Stick Fight, BombMan, Rock Blaster, Star Defender, Tower Guard, dan
+Block Fall berjalan di jendela FastEmu 0.1.0, di mock-up desktop macOS,
+dan aplikasi Android di emulator Pixel 8. Lihat
+[Penghargaan](#penghargaan).</sub>
 
 FastEmu menjalankan game Java ME, yaitu file `.jar` dan `.jad` buatan
 untuk ponsel tahun 2000-an, di Windows, Linux, macOS, dan Android. FastEmu
@@ -184,12 +188,12 @@ Android oleh Dylan Murzello.
 
 Gambar di bagian atas menampilkan game gratis, semuanya berlisensi MIT:
 [Stick Fight](https://github.com/Dahmalahi/STICK-FIGHT-OFFICIEL-REPO)
-oleh Dash Animation V2, [Shooter](https://github.com/RehanSaeed/Shooter)
-oleh Muhammad Rehan Saeed,
+oleh Dash Animation V2,
 [BombMan](https://github.com/yaricom/bombman-RL-AI-J2ME) oleh Iaroslav
-Omelianenko, serta Traffic Dash, Tower Guard, dan Star Defender dari
-[J2ME 100 Games](https://github.com/agneay/j2me-100-games) oleh Agneay B
-Nair dan kontributor J2ME Game Archive.
+Omelianenko, serta Rock Blaster, Star Defender, Tower Guard, dan Block
+Fall dari [J2ME 100 Games](https://github.com/agneay/j2me-100-games) oleh
+Agneay B Nair dan kontributor J2ME Game Archive. Wallpaper desktop
+dirender dengan GPT Image 2.6 di Higgsfield.
 
 Crate Rust, font, dan frame game yang dipakai FastEmu, beserta
 lisensinya, tercantum di [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
