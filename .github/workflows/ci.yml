@@ -155,6 +155,16 @@ jobs:
           bash packaging/macos/check-dmg.sh "$RUNNER_TEMP/package/fastemu-$version-macos-universal.dmg" "$version" arm64
       - name: Clippy
         run: cargo clippy -p fastemu -p fastemu-ui --all-targets --locked -- -D warnings
+      # The tar.gz, .deb, .rpm and AppImage, made as the release makes them
+      # from the debug build without its debug information; the .deb is
+      # installed here, the .rpm in Fedora, and the AppImage runs.
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.name == "fastemu") | .version')"
+          strip -o "$RUNNER_TEMP/fastemu" target/debug/fastemu
+          bash packaging/linux/package.sh "$version" x64 "$RUNNER_TEMP/fastemu" "$RUNNER_TEMP/package"
+          bash packaging/linux/check-packages.sh "$version" x64 "$RUNNER_TEMP/package"
       - name: Test
         run: cargo test -p fastemu -p fastemu-ui -p fastemu-android --locked
       # The portable zip and the setup, made as the release makes them; the
