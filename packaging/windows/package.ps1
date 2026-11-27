@@ -2,20 +2,30 @@
 #
 #   packaging/windows/package.ps1 -Version 0.2.0 -Exe target/release/fastemu.exe -OutDir out
 #
-# It writes OutDir/fastemu-VERSION-windows-x64.zip: one folder of the same
-# name holding fastemu.exe, fastemu.com, the README and the licenses.
+# It writes two files into OutDir:
+#
+# - fastemu-VERSION-windows-x64-portable.zip: a folder named
+#   fastemu-VERSION-windows-x64 holding fastemu.exe, fastemu.com, the
+#   README and the licenses.
+# - fastemu-VERSION-windows-x64-setup.exe: the setup that installs the same
+#   files for the current user (setup.nsi), built with NSIS's makensis. It
+#   is the -Makensis given, or makensis on PATH, or else nsis.ps1
+#   downloads NSIS 3.13.
+#
 # fastemu.com is fastemu-console.exe from beside fastemu.exe, renamed: the
 # console program a terminal runs for `fastemu` (crates/fastemu/src/console.rs).
 # First it checks, without running either program, that fastemu.exe
 # carries the icon and the version that crates/fastemu/build.rs embeds,
 # and that fastemu.exe is a GUI program, which opens no console window,
 # and fastemu.com a console one. Run it from the repository's root, in
-# Windows PowerShell 5.1 or PowerShell 7.
+# Windows PowerShell 5.1 or PowerShell 7. check-setup.ps1 then tries the
+# setup.
 
 param(
     [Parameter(Mandatory = $true)][string]$Version,
     [Parameter(Mandatory = $true)][string]$Exe,
-    [Parameter(Mandatory = $true)][string]$OutDir
+    [Parameter(Mandatory = $true)][string]$OutDir,
+    [string]$Makensis
 )
 
 $ErrorActionPreference = 'Stop'
@@ -96,7 +106,7 @@ foreach ($file in 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md') {
 
 # Windows' own tar writes the zip with forward slashes, which every unzip
 # reads; Compress-Archive in PowerShell 5.1 does not.
-$zip = Join-Path $out "$name.zip"
+$zip = Join-Path $out "$name-portable.zip"
 if (Test-Path $zip) {
     Remove-Item -Force $zip
 }
@@ -104,5 +114,30 @@ if (Test-Path $zip) {
 if ($LASTEXITCODE -ne 0) {
     throw "tar could not write $zip"
 }
+
+# The setup installs the files of the same folder.
+if (-not $Makensis) {
+    $onPath = Get-Command makensis -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($onPath) {
+        $Makensis = $onPath.Source
+    } else {
+        $Makensis = & (Join-Path $PSScriptRoot 'nsis.ps1')
+    }
+}
+$setup = Join-Path $out "$name-setup.exe"
+if (Test-Path $setup) {
+    Remove-Item -Force $setup
+}
+# makensis reads its options in order: the defines go before the script.
+& $Makensis /V2 /WX "/DVERSION=$Version" "/DSTAGE=$folder" "/DOUTFILE=$setup" (Join-Path $PSScriptRoot 'setup.nsi')
+if ($LASTEXITCODE -ne 0) {
+    throw "makensis could not build $setup"
+}
+$setupInfo = (Get-Item $setup).VersionInfo
+if ($setupInfo.ProductVersion -ne $Version -or $setupInfo.ProductName -ne 'FastEmu') {
+    throw "the setup says $($setupInfo.ProductName) $($setupInfo.ProductVersion), not FastEmu $Version"
+}
+
 Remove-Item -Recurse -Force $stage
 Write-Output $zip
+Write-Output $setup
