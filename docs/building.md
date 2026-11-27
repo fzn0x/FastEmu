@@ -78,11 +78,17 @@ The program is `target/release/fastemu`.
 ## Release builds
 
 `.github/workflows/release.yml` builds the files of a release from a
-tag: `fastemu-<version>-windows-x64.zip`, `-linux-x64.tar.gz`,
-`-linux-x64.deb`, `-linux-arm64.tar.gz`, `-macos-universal.zip` and
-`-android.apk`. The scripts in `packaging/` pack each one and run on
-your own machine too. Run the workflow by hand on main, as a dry run,
-before tagging. `cargo xtask icons` renders `assets/icon.svg` into
+tag: `fastemu-<version>-windows-x64-setup.exe`,
+`-windows-x64-portable.zip`, `-linux-x64.tar.gz`, `-linux-x64.deb`,
+`-linux-arm64.tar.gz`, `-macos-universal.zip` and `-android.apk`. The
+scripts in `packaging/` pack each one and run on your own machine too.
+Run the workflow by hand on main, as a dry run, before tagging.
+
+`packaging/windows/package.ps1` builds the setup from
+`packaging/windows/setup.nsi` with NSIS 3.13. It uses `makensis` from
+`PATH`, or downloads NSIS's zip and checks its SHA-256 first.
+`packaging/windows/check-setup.ps1` installs the setup for the current
+user, tries it and uninstalls it. CI runs both on every change. `cargo xtask icons` renders `assets/icon.svg` into
 `packaging/icons` and the Android launcher icons.
 
 ## Android

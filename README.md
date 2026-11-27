@@ -51,7 +51,7 @@ release has a `SHA256SUMS` file to check the downloads against.
 
 | System | What to do |
 | --- | --- |
-| Windows | Unpack `fastemu-<version>-windows-x64.zip` anywhere and run `fastemu.exe`. If SmartScreen warns, choose More info, then Run anyway: the program is not signed. |
+| Windows | Run `fastemu-<version>-windows-x64-setup.exe`. It installs FastEmu for your account without administrator rights. It adds FastEmu to the Start menu and to Open with for `.jar` and `.jad` files, and Settings, Apps uninstalls it. To skip installing, unpack `fastemu-<version>-windows-x64-portable.zip` anywhere and run `fastemu.exe`. If SmartScreen warns, choose More info, then Run anyway: the programs are not signed. |
 | Linux | Unpack `fastemu-<version>-linux-x64.tar.gz` (or `-linux-arm64`) anywhere and run `fastemu`, or install `fastemu-<version>-linux-x64.deb` on Debian and Ubuntu. It needs a Vulkan driver and a Wayland or X11 session. |
 | macOS | Unpack `fastemu-<version>-macos-universal.zip` and move the app to Applications. The app is not notarized: open it once from System Settings, Privacy & Security, Open Anyway. |
 | Android | Open `fastemu-<version>-android.apk` from your files. Android asks you to allow installs from that source the first time. |
@@ -111,7 +111,8 @@ fastemu run snake.jar --frames 300 --keys "wait:1500 5" --screenshot snake.png
 On Windows, type `fastemu` in Command Prompt or PowerShell, in FastEmu's
 folder or with it on `PATH`: that runs `fastemu.com`, which waits for the
 game and returns its exit code. `fastemu.exe` itself is the app, which
-opens no console window.
+opens no console window. The setup puts both in
+`%LOCALAPPDATA%\Programs\FastEmu`.
 
 The [documentation](https://fastemu.functionx.dev/docs/) has the full
 list of keys and shortcuts, the settings, the phone profiles, where saves

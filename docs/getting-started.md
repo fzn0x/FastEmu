@@ -12,14 +12,26 @@ Download the build for your system from the
 
 | System  | What to download                                                                  |
 | ------- | --------------------------------------------------------------------------------- |
-| Windows | `fastemu-<version>-windows-x64.zip`, unpack it anywhere                           |
+| Windows | `fastemu-<version>-windows-x64-setup.exe`, run it to install FastEmu              |
 | Linux   | `fastemu-<version>-linux-x64.tar.gz` or `-linux-arm64.tar.gz`, unpack it anywhere |
 | macOS   | `fastemu-<version>-macos-universal.zip`, move the app to Applications             |
 | Android | `fastemu-<version>-android.apk`, install it from your files                       |
 
-FastEmu does not need an installer and does not need Java installed. It
-carries its own virtual machine. On Debian and Ubuntu,
-`fastemu-<version>-linux-x64.deb` installs it with a menu entry instead.
+FastEmu does not need Java installed. It carries its own virtual
+machine.
+
+On Windows, the setup installs FastEmu for your account, with no
+administrator rights, into `%LOCALAPPDATA%\Programs\FastEmu`. It adds a
+Start menu shortcut, a desktop shortcut when you tick its box, and
+FastEmu under Open with for `.jar` and `.jad` files, leaving what opens
+them now as it is. Settings, Apps uninstalls it, and your games and
+settings stay. The setup takes `/S` to install without asking, and
+`Uninstall.exe /S` in the same folder uninstalls it the same way. To run
+FastEmu without installing it, unpack
+`fastemu-<version>-windows-x64-portable.zip` anywhere instead.
+
+On Debian and Ubuntu, `fastemu-<version>-linux-x64.deb` installs it with
+a menu entry.
 
 ## Get a game
 
