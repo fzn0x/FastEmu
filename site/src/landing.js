@@ -42,7 +42,7 @@
   // The clip of the desktop window plays while it is on screen, unless the
   // reader paused it or asks for less motion; its poster is a still of the
   // same window.
-  const clip = document.querySelector('.shot-demo video');
+  const clip = document.querySelector('.showcase video');
   if (clip) {
     const button = document.querySelector('.clip-toggle');
     let wanted = !reduce;
