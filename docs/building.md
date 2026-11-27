@@ -63,6 +63,13 @@ cargo build --release -p fastemu
 The program is `target/release/fastemu`. It needs a Vulkan driver and a
 Wayland or X11 session to open its window.
 
+`packaging/linux/package.sh` makes the four Linux files of a release on
+Debian or Ubuntu. It downloads nfpm 2.48.0 for the `.rpm` and
+appimagetool 1.9.1 with the type2 runtime for the AppImage, and checks
+each against its SHA-256. `packaging/linux/check-packages.sh` installs
+the `.deb` with apt and the `.rpm` with dnf in a Fedora container, and
+runs the AppImage. CI runs both on every change.
+
 ## macOS
 
 Install Xcode. GPUI compiles its Metal shaders with Xcode's Metal
@@ -78,13 +85,14 @@ The program is `target/release/fastemu`.
 ## Release builds
 
 `.github/workflows/release.yml` builds the files of a release from a
-tag: `fastemu-<version>-windows-x64-setup.exe`,
-`-windows-x64-portable.zip`, `-linux-x64.tar.gz`, `-linux-x64.deb`,
-`-linux-arm64.tar.gz`, `-macos-universal.dmg`, `-macos-universal.zip`
-and `-android.apk`. The scripts in `packaging/` pack each one and run on
-your own machine too. Run the workflow by hand on main, as a dry run,
-before tagging. `cargo xtask icons` renders `assets/icon.svg` into
-`packaging/icons` and the Android launcher icons.
+tag: `fastemu-<version>-windows-x64-setup.exe` and
+`-windows-x64-portable.zip`, then `-linux-x64` and `-linux-arm64` each
+as `.tar.gz`, `.deb`, `.rpm` and `.AppImage`, then
+`-macos-universal.dmg`, `-macos-universal.zip` and `-android.apk`. The
+scripts in `packaging/` pack each one and run on your own machine too.
+Run the workflow by hand on main, as a dry run, before tagging.
+`cargo xtask icons` renders `assets/icon.svg` into `packaging/icons` and
+the Android launcher icons.
 
 `packaging/windows/package.ps1` builds the setup from
 `packaging/windows/setup.nsi` with NSIS 3.13. It uses `makensis` from

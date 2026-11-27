@@ -13,7 +13,7 @@ Download the build for your system from the
 | System  | What to download                                                                  |
 | ------- | --------------------------------------------------------------------------------- |
 | Windows | `fastemu-<version>-windows-x64-setup.exe`, run it to install FastEmu              |
-| Linux   | `fastemu-<version>-linux-x64.tar.gz` or `-linux-arm64.tar.gz`, unpack it anywhere |
+| Linux   | `fastemu-<version>-linux-x64.AppImage` or `-linux-arm64.AppImage`, run it         |
 | macOS   | `fastemu-<version>-macos-universal.dmg`, drag the app onto Applications           |
 | Android | `fastemu-<version>-android.apk`, install it from your files                       |
 | Flatpak | `fastemu-<version>-linux-x64.flatpak`, `flatpak install` it                       |
@@ -31,8 +31,13 @@ settings stay. The setup takes `/S` to install without asking, and
 FastEmu without installing it, unpack
 `fastemu-<version>-windows-x64-portable.zip` anywhere instead.
 
-On Debian and Ubuntu, `fastemu-<version>-linux-x64.deb` installs it with
-a menu entry.
+On Linux, make the AppImage executable, with `chmod +x` or in your file
+manager's properties, and run it. For a menu entry, install
+`fastemu-<version>-linux-x64.deb` on Debian and Ubuntu or
+`fastemu-<version>-linux-x64.rpm` on Fedora and other RPM systems, or
+their `-linux-arm64` files on Arm64. `fastemu-<version>-linux-x64.tar.gz`
+holds the program to unpack anywhere. An AppImage needs FUSE to start.
+Without it, run it with `--appimage-extract-and-run`.
 
 ## Get a game
 
