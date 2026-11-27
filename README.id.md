@@ -111,6 +111,12 @@ gambar terakhir atau setiap gambar yang digambar game:
 fastemu run snake.jar --frames 300 --keys "wait:1500 5" --screenshot snake.png
 ```
 
+Di Windows, ketik `fastemu` di Command Prompt atau PowerShell, di folder
+FastEmu atau dengan folder itu di `PATH`: perintah itu menjalankan
+`fastemu.com`, yang menunggu game selesai dan mengembalikan kode
+keluarnya. `fastemu.exe` sendiri adalah aplikasinya, yang tidak membuka
+jendela konsol.
+
 [Dokumentasi](https://fastemu.functionx.dev/docs/) memuat daftar tombol
 dan pintasan lengkap, pengaturan, profil ponsel, lokasi data simpanan, dan
 semua opsi `fastemu run`.

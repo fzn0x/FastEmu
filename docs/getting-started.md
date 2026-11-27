@@ -64,7 +64,16 @@ It runs the game for 300 frames of its screen (five seconds, at 60 frames a
 second), presses 5 after a second and a half, saves the last picture as a
 PNG and prints what the game logged. It exits with 1 if the game crashes or
 shows nothing in its first 30 seconds, and with 2 for a mistake on the
-command line. The options:
+command line.
+
+On Windows, type `fastemu` in Command Prompt or PowerShell, in FastEmu's
+folder or with it on `PATH`. That runs `fastemu.com`, the console program
+beside `fastemu.exe`, which waits for the game, prints into the terminal
+and returns the exit code. `fastemu.exe` is the app: opened from Explorer
+or a shortcut, it shows no console window, and typed as `fastemu.exe` it
+prints too, but the terminal does not wait for it.
+
+The options:
 
 | Option | What it does |
 | --- | --- |

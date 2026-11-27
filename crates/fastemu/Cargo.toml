@@ -31,6 +31,12 @@ log = "0.4"
 # The headless runner's screenshots.
 png = "0.18"
 
+# Joining the terminal's console from the GUI program, and Ctrl+C in
+# fastemu.com (src/console.rs, src/bin/fastemu-console.rs). The version
+# GPUI already builds with.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Console"] }
+
 [dev-dependencies]
 tempfile = "3"
 

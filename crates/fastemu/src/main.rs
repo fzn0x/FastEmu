@@ -2,9 +2,17 @@
 //! and the folders, and opens the window. Everything inside the window
 //! lives in `fastemu-ui`, which the Android app shares. `fastemu run`
 //! runs a game without a window (see `run`).
+//!
+//! On Windows the program is a GUI program, which opens no console window
+//! (see `console`).
+
+// fastemu.exe opens no console window when started from Explorer or a
+// shortcut; `console::attach` finds the terminal that starts it.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod audio;
 mod cli;
+mod console;
 mod logger;
 mod paths;
 mod run;
@@ -32,6 +40,7 @@ actions!(
 );
 
 fn main() -> ExitCode {
+    console::attach();
     match cli::parse(std::env::args_os().skip(1)) {
         Ok(Command::Open { files, mock }) => {
             logger::init();

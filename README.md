@@ -108,6 +108,11 @@ picture or every picture the game draws:
 fastemu run snake.jar --frames 300 --keys "wait:1500 5" --screenshot snake.png
 ```
 
+On Windows, type `fastemu` in Command Prompt or PowerShell, in FastEmu's
+folder or with it on `PATH`: that runs `fastemu.com`, which waits for the
+game and returns its exit code. `fastemu.exe` itself is the app, which
+opens no console window.
+
 The [documentation](https://fastemu.functionx.dev/docs/) has the full
 list of keys and shortcuts, the settings, the phone profiles, where saves
 live and every option of `fastemu run`.

@@ -3,10 +3,14 @@
 #   packaging/windows/package.ps1 -Version 0.2.0 -Exe target/release/fastemu.exe -OutDir out
 #
 # It writes OutDir/fastemu-VERSION-windows-x64.zip: one folder of the same
-# name holding fastemu.exe, the README and the licenses. First it checks,
-# without running the program, that fastemu.exe carries the icon and the
-# version that crates/fastemu/build.rs embeds. Run it from the
-# repository's root, in Windows PowerShell 5.1 or PowerShell 7.
+# name holding fastemu.exe, fastemu.com, the README and the licenses.
+# fastemu.com is fastemu-console.exe from beside fastemu.exe, renamed: the
+# console program a terminal runs for `fastemu` (crates/fastemu/src/console.rs).
+# First it checks, without running either program, that fastemu.exe
+# carries the icon and the version that crates/fastemu/build.rs embeds,
+# and that fastemu.exe is a GUI program, which opens no console window,
+# and fastemu.com a console one. Run it from the repository's root, in
+# Windows PowerShell 5.1 or PowerShell 7.
 
 param(
     [Parameter(Mandatory = $true)][string]$Version,
@@ -17,6 +21,24 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $exePath = (Resolve-Path $Exe).Path
+$consolePath = Join-Path (Split-Path $exePath) 'fastemu-console.exe'
+if (-not (Test-Path $consolePath)) {
+    throw "$consolePath is missing: cargo build -p fastemu builds it beside fastemu.exe"
+}
+
+# The subsystem in a program's PE header: 2 for a GUI program, 3 for a
+# console program. It sits 92 bytes after the PE signature.
+function Get-Subsystem([string]$Path) {
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $pe = [System.BitConverter]::ToInt32($bytes, 0x3C)
+    return [System.BitConverter]::ToUInt16($bytes, $pe + 92)
+}
+if ((Get-Subsystem $exePath) -ne 2) {
+    throw "fastemu.exe is not a GUI program: it would open a console window"
+}
+if ((Get-Subsystem $consolePath) -ne 3) {
+    throw "fastemu-console.exe is not a console program: a terminal would not wait for it"
+}
 
 # The version Explorer's Properties show.
 $info = (Get-Item $exePath).VersionInfo
@@ -67,6 +89,7 @@ if (Test-Path $stage) {
 $folder = Join-Path $stage $name
 New-Item -ItemType Directory -Force $folder | Out-Null
 Copy-Item $exePath (Join-Path $folder 'fastemu.exe')
+Copy-Item $consolePath (Join-Path $folder 'fastemu.com')
 foreach ($file in 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md') {
     Copy-Item $file (Join-Path $folder $file)
 }

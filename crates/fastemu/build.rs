@@ -78,13 +78,31 @@ END
             // The resource compiler reads backslashes in strings as escapes.
             icon = rc_path(&icon),
         );
-        let out = PathBuf::from(env::var_os("OUT_DIR").expect("set by Cargo")).join("fastemu.rc");
-        fs::write(&out, rc).unwrap_or_else(|e| panic!("{}: {e}", out.display()));
-        embed_resource::compile_for(&out, ["fastemu"], embed_resource::NONE)
-            .manifest_required()
-            .unwrap_or_else(|e| {
-                panic!("{e}: install the Windows SDK, whose rc.exe builds the icon resource")
-            });
+        let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("set by Cargo"));
+        // fastemu-console.exe ships as fastemu.com, the console program
+        // beside fastemu.exe: the same icon and version, its own names.
+        let console_rc = rc
+            .replace(
+                r#""FileDescription", "FastEmu""#,
+                r#""FileDescription", "FastEmu command line""#,
+            )
+            .replace(
+                r#""InternalName", "fastemu""#,
+                r#""InternalName", "fastemu-console""#,
+            )
+            .replace(
+                r#""OriginalFilename", "fastemu.exe""#,
+                r#""OriginalFilename", "fastemu.com""#,
+            );
+        for (bin, script) in [("fastemu", rc), ("fastemu-console", console_rc)] {
+            let out = out_dir.join(format!("{bin}.rc"));
+            fs::write(&out, script).unwrap_or_else(|e| panic!("{}: {e}", out.display()));
+            embed_resource::compile_for(&out, [bin], embed_resource::NONE)
+                .manifest_required()
+                .unwrap_or_else(|e| {
+                    panic!("{e}: install the Windows SDK, whose rc.exe builds the icon resource")
+                });
+        }
     }
 
     /// A path as a resource script string holds it: forward slashes, without

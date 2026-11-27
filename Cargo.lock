@@ -2019,6 +2019,7 @@ dependencies = [
  "log",
  "png 0.18.1",
  "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
