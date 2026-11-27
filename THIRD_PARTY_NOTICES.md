@@ -75,7 +75,8 @@ Code copied into the tree, rather than used as a dependency, with the
 project it comes from, its license and the files. Behavior that FastEmu
 follows without copying code, such as that of MicroEmulator and
 J2ME Loader, is credited in the [README](README.md#credits) and does not
-belong here.
+belong here. Files that copy no code, but name another project's classes
+so that a tool compiles against them, are listed too.
 
 **gpui_android.** `crates/gpui_android/` is a modified copy of
 `crates/gpui_android` from the [Zed Android port](https://github.com/Dylanmurzello/zed-android-port)
@@ -86,6 +87,20 @@ copyright the FastEmu contributors. Apache License, Version 2.0, in full
 in [License texts](#apache-license-20). What FastEmu changed is in
 `crates/gpui_android/README.md` and at the top of each changed file; its
 `NOTICE` is in the same folder.
+
+**MicroEmulator's class names, for the benchmark.**
+`tools/xtask/bench/microemu-api/` holds 26 signature-only Java files.
+23 name public classes and members of MicroEmulator 2.0.4
+(`org.microemu`), and 3 name the MIDP classes its jar holds
+(`javax.microedition`). They let MeBench, the benchmark's wrapper for
+MicroEmulator, compile where MicroEmulator is not installed, such as in
+CI. They hold no MicroEmulator code: only the names and types MeBench
+uses, a few constant values, and methods that only throw. They are not
+in FastEmu's apps, and the bench compiles MeBench again against the
+real `microemulator.jar` before it measures. MicroEmulator is by Bartek
+Teodorczyk and its contributors, under the GNU Lesser General Public
+License, version 2.1 or any newer version, or the Apache License,
+Version 2.0, at the user's choice.
 
 ## Libraries
 

@@ -139,6 +139,11 @@ games expect:
   `--jobs N` pick the phone and how many games run at once.
   [docs/compatibility.md](docs/compatibility.md) lists the free games it
   was run with.
+- **`cargo run --release -p xtask -- bench`** runs the benchmark MIDlet
+  and real games in FastEmu and MicroEmulator 2.0.4 on Windows, with no
+  window, and writes `bench.md` and `bench.json`. `--build-only` builds
+  the MIDlet and MicroEmulator's wrapper in any build on any system.
+  [docs/benchmark.md](docs/benchmark.md) has the method.
 - **`fastemu run`** runs one game without a window, presses keys and
   touches the screen from a script, and saves a screenshot or every frame.
   [docs/getting-started.md](docs/getting-started.md#run-without-a-window)
