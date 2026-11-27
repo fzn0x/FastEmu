@@ -57,6 +57,7 @@ rilis punya file `SHA256SUMS` untuk memeriksa unduhan.
 | Linux | Ekstrak `fastemu-<versi>-linux-x64.tar.gz` (atau `-linux-arm64`) di mana saja dan jalankan `fastemu`, atau pasang `fastemu-<versi>-linux-x64.deb` di Debian dan Ubuntu. Butuh driver Vulkan dan sesi Wayland atau X11. |
 | macOS | Ekstrak `fastemu-<versi>-macos-universal.zip` dan pindahkan aplikasinya ke Applications. Aplikasinya belum dinotarisasi: buka sekali lewat System Settings, Privacy & Security, Open Anyway. |
 | Android | Buka `fastemu-<versi>-android.apk` dari berkas Anda. Android akan meminta izin memasang dari sumber itu pada pertama kali. |
+| Linux apa saja, dalam sandbox | Buka `fastemu-<versi>-linux-x64.flatpak` atau `-linux-arm64.flatpak` dengan pusat perangkat lunak Anda, atau jalankan `flatpak install ./fastemu-<versi>-linux-x64.flatpak`. Pertama kali, Flatpak mengambil runtime freedesktop dari Flathub. Di dalam sandbox-nya FastEmu melihat layar, suara dan jaringan, dan hanya file yang Anda pilih. |
 
 FastEmu tidak menyertakan game. Pakai file yang Anda miliki atau yang
 dibagikan gratis oleh pembuatnya.

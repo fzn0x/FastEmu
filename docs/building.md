@@ -98,6 +98,18 @@ rustup target add aarch64-linux-android x86_64-linux-android
 [Building the Android app](/docs/building-android/) has the exact
 versions and the commands for building, running and signing the `.apk`.
 
+## The Flatpak
+
+`packaging/flatpak/io.github.fzn0x.fastemu.yml` packs the program of a
+release's Linux tar.gz on the freedesktop runtime 26.08. The release
+builds it with flatpak-builder in Flathub's container, for x64 and
+Arm64. `packaging/flatpak/metainfo.py` writes the AppStream metadata with
+the releases of `CHANGELOG.md`, and `appstreamcli validate` checks it.
+`packaging/flatpak/check.sh` installs the bundle, checks the sandbox's
+permissions and runs `fastemu --version` in it. The manifest is not
+Flathub's: Flathub builds from source, and FastEmu is not published
+there.
+
 ## Tests
 
 ```
