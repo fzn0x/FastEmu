@@ -38,7 +38,9 @@ SDK, then:
 cargo build --release -p fastemu
 ```
 
-The program is `target\release\fastemu.exe`.
+The app is `target\release\fastemu.exe`, and its command line is
+`target\release\fastemu-console.exe`, which the release names
+`fastemu.com` (see [Run without a window](/docs/getting-started/#run-without-a-window)).
 
 ## Linux
 
