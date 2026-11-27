@@ -6,6 +6,44 @@ All notable changes to FastEmu are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-28
+
+### Added
+
+- The README and the website show FastEmu playing games: the window with
+  six games at once on a macOS desktop, beside the Android app (#82).
+- A setup for Windows: `fastemu-<version>-windows-x64-setup.exe` installs
+  FastEmu for your account without administrator rights. It adds a Start
+  menu shortcut, a desktop shortcut when you tick its box, and FastEmu
+  under Open with for `.jar` and `.jad` files, and Settings, Apps
+  uninstalls it. The zip is now `fastemu-<version>-windows-x64-portable.zip`
+  (#84).
+- A disk image for macOS: open `fastemu-<version>-macos-universal.dmg`
+  and drag FastEmu onto Applications. The zip with the same app stays
+  (#85).
+- More ways to install on Linux, for x64 and Arm64 alike: an AppImage
+  that runs on most distributions, an `.rpm` for Fedora and other RPM
+  systems, and a `.deb` for Arm64 beside the x64 one (#86).
+- A Flatpak for any Linux, for x64 and Arm64: install
+  `fastemu-<version>-linux-x64.flatpak` with `flatpak install` or your
+  software center. In its sandbox FastEmu sees the display, sound and the
+  network, and only the files you pick (#87).
+- One line installs FastEmu from a terminal, checked against the
+  release's `SHA256SUMS`: `curl -fsSL .../install.sh | sh` on Linux and
+  macOS, and `irm .../install.ps1 | iex` in PowerShell on Windows. Both
+  take a version to install and uninstall again (#88).
+- FastEmu in Homebrew and Scoop: `brew install --cask fzn0x/tap/fastemu`
+  on macOS, and `scoop install fastemu` from the fzn0x bucket on Windows
+  (#89).
+
+### Fixed
+
+- On Windows, opening FastEmu from Explorer, a shortcut or the Start menu
+  no longer opens a console window beside it. Typed in Command Prompt or
+  PowerShell, `fastemu` still prints into the terminal and returns the
+  exit code, through `fastemu.com`, the console program beside
+  `fastemu.exe` (#83).
+
 ## [0.1.0] - 2026-11-27
 
 ### Added
