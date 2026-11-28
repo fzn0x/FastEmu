@@ -911,7 +911,7 @@ impl FastEmuView {
         let cache = tile.screen.clone();
         let frame = tile.session.frame.clone();
         let instance = tile.session.instance.id();
-        let factor = fit.texture_factor;
+        let factor = super::screen::upload_factor(fit.texture_factor);
         let screen = div()
             .id("screen")
             .relative()

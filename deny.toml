@@ -58,14 +58,15 @@ wildcards = "allow"
 
 [sources]
 unknown-registry = "deny"
-# GPUI is not on crates.io: it comes from the Zed Android port, pinned to a
-# commit in the apps' manifests, with the forks listed below.
+# GPUI is not on crates.io: it comes from FastEmu's fork of the Zed Android
+# port, pinned to a commit in the apps' manifests, with the forks listed
+# below.
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # GPUI and the forks Zed builds it with, each pinned to a commit in Cargo.toml
 # or by GPUI's own manifest (the Zed Android port's revision).
 allow-git = [
-  "https://github.com/Dylanmurzello/zed-android-port",
+  "https://github.com/fzn0x/zed-android-port",
   "https://github.com/gfx-rs/wgpu",
   "https://github.com/zed-industries/async-process.git",
   "https://github.com/zed-industries/async-task.git",

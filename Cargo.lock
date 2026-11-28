@@ -697,7 +697,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 [[package]]
 name = "bench_metrics"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "anyhow",
  "criterion",
@@ -1124,7 +1124,7 @@ dependencies = [
 [[package]]
 name = "collections"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "gpui_util",
  "indexmap",
@@ -1638,7 +1638,7 @@ dependencies = [
 [[package]]
 name = "derive_refineable"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2593,7 +2593,7 @@ dependencies = [
 [[package]]
 name = "gpui"
 version = "0.2.2"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2681,7 +2681,7 @@ dependencies = [
 [[package]]
 name = "gpui_apple"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "anyhow",
  "async-task",
@@ -2720,7 +2720,7 @@ dependencies = [
 [[package]]
 name = "gpui_ios"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
@@ -2741,7 +2741,7 @@ dependencies = [
 [[package]]
 name = "gpui_linux"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -2785,7 +2785,7 @@ dependencies = [
 [[package]]
 name = "gpui_macos"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -2825,7 +2825,7 @@ dependencies = [
 [[package]]
 name = "gpui_macros"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -2836,7 +2836,7 @@ dependencies = [
 [[package]]
 name = "gpui_platform"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -2851,7 +2851,7 @@ dependencies = [
 [[package]]
 name = "gpui_shared_string"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "schemars",
  "serde",
@@ -2861,7 +2861,7 @@ dependencies = [
 [[package]]
 name = "gpui_util"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "anyhow",
  "log",
@@ -2872,7 +2872,7 @@ dependencies = [
 [[package]]
 name = "gpui_web"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2900,7 +2900,7 @@ dependencies = [
 [[package]]
 name = "gpui_wgpu"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2926,7 +2926,7 @@ dependencies = [
 [[package]]
 name = "gpui_windows"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -3128,7 +3128,7 @@ dependencies = [
 [[package]]
 name = "http_client"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "anyhow",
  "bytes",
@@ -5501,7 +5501,7 @@ dependencies = [
 [[package]]
 name = "refineable"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "derive_refineable",
 ]
@@ -5789,7 +5789,7 @@ dependencies = [
 [[package]]
 name = "scheduler"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "async-task",
  "backtrace",
@@ -6261,7 +6261,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sum_tree"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "heapless",
  "rayon",
@@ -8349,12 +8349,12 @@ dependencies = [
 [[package]]
 name = "zd_engine_core"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 
 [[package]]
 name = "zdroid_hooks"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "futures",
  "log",
@@ -8524,7 +8524,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 [[package]]
 name = "ztracing"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 dependencies = [
  "tracing",
  "ztracing_macro",
@@ -8533,7 +8533,7 @@ dependencies = [
 [[package]]
 name = "ztracing_macro"
 version = "0.1.0"
-source = "git+https://github.com/Dylanmurzello/zed-android-port?rev=746f088ee8d6b8b273354826757dd09e74565854#746f088ee8d6b8b273354826757dd09e74565854"
+source = "git+https://github.com/fzn0x/zed-android-port?rev=5a5acc9d7568c90b551c5e6c01aa55b08db8b45c#5a5acc9d7568c90b551c5e6c01aa55b08db8b45c"
 
 [[package]]
 name = "zune-core"

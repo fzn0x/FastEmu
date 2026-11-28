@@ -536,12 +536,14 @@ impl Render for FastEmuView {
         let now = cx.background_executor().now();
         self.poll_tiles(now);
         self.ask_for_text(cx);
-        // A link prompt that does not take clicks yet is dimmed, and gets
-        // its frames until it does, even over a game that has ended.
+        // A running game asks for no frames of its own: its notification
+        // wakes the window when it has a new frame, status, log lines or
+        // link. A link prompt that does not take clicks yet is dimmed, and
+        // gets its frames until it does, even over a game that has ended.
         self.animating = self
             .tiles
             .iter()
-            .any(|t| t.session.is_running() || (t.shows_link() && !t.session.link_armed(now)));
+            .any(|t| t.shows_link() && !t.session.link_armed(now));
         if self.animating {
             window.request_animation_frame();
         }

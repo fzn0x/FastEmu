@@ -236,8 +236,8 @@ no tap.
 
 | What | Value |
 | --- | --- |
-| Date | 2026-11-28, from 01:12 to 02:33 UTC |
-| FastEmu | 0.1.1 with the bench log of pull request [#107](https://github.com/fzn0x/FastEmu/pull/107), the release build for x86_64 |
+| Date | 2026-11-28, from 03:42 to 05:02 UTC |
+| FastEmu | main at commit `86d393c` with the window changes of [issue #108](https://github.com/fzn0x/FastEmu/issues/108), the release build for x86_64 |
 | J2ME Loader | 1.9.0, the open release, with the settings it gives a new game: 240x320, GLES drawing, no frame limit, keypad shown |
 | Both apps | installed fresh with `adb install -g`, then compiled with `cmd package compile -m speed -f` |
 | Emulator | Android emulator 34.2.16, a Pixel 8 with Android 15, API 35, x86_64, the Google Play system image |
@@ -252,49 +252,59 @@ way, so the comparison holds.
 
 ### Android in short
 
-- **Processor time.** FastEmu's app took about one whole core while a
-  game ran: 900 to 1040 ms of processor time a second in the six moving
-  games both ran, against 36 to 69 in J2ME Loader, 14 to 25 times more.
-  On Skocko's still screen it took 399, and J2ME Loader 2.2.
-- **Why.** The cost is FastEmu's window, not its game runtime. On
-  Windows, with no window, the same scene took 7.2 ms a second. While a
-  game runs, the window redraws at every refresh of the display, and
-  enlarges each new frame on the processor.
-  [Issue #108](https://github.com/fzn0x/FastEmu/issues/108) fixes both
-  for 0.2.0.
-- **Frames shown.** With its window that busy, FastEmu showed 22.8 of
-  the scene's 30 frames a second, and J2ME Loader 29.9. Stick Fight drew
-  29.3 frames a second in FastEmu, which showed 22.7; J2ME Loader showed
-  29.3. In the games that draw 20 frames a second, both kept up.
-- **Start.** About the same in games: the first frame was on screen 678
-  to 812 ms after the start in FastEmu, and 708 to 768 in J2ME Loader, in
-  the seven games both ran. The scene's first paint came 1.3 times sooner
-  in J2ME Loader: 533 ms against 711.
-- **Memory.** J2ME Loader's game process took 2.2 to 2.7 times less: 36
-  to 42 MiB against 78 to 112. It keeps its list of games in a second
-  process of about 18 MiB, and with both it still took 1.5 to 1.9 times
-  less. Every game at once took 144 MiB in FastEmu; J2ME Loader runs one
-  game at a time.
-- **Game code.** J2ME Loader ran the CPU kernels 5.6 to 158 times
-  faster once warm, and 4.9 to 64 times faster on the first repetition.
+- **Processor time.** In the six moving games both ran, FastEmu's app
+  took 140 to 243 ms of processor time a second, and J2ME Loader 35 to
+  69: 3.5 to 4.1 times less. On Skocko's still screen FastEmu took 15.3,
+  and J2ME Loader 1.8.
+- **What changed.** Before
+  [issue #108](https://github.com/fzn0x/FastEmu/issues/108), FastEmu's
+  window redrew at every refresh of the display while a game ran, and
+  enlarged each new frame on the processor. It took 900 to 1040 ms a
+  second in the same games, about a whole core, and 399 on Skocko's
+  still screen. Now the window draws only when a game has something new,
+  and the graphics card enlarges the screen.
+- **What is left.** Most of it is still the window. In a profile of
+  Block Fall, the window's thread took two thirds of the app's processor
+  time, mostly in graphics calls. On the emulator, each of them goes to
+  the computer and back.
+  [Issue #110](https://github.com/fzn0x/FastEmu/issues/110) makes fewer
+  of them. The game's own threads took about 45 ms a second, which
+  [#77](https://github.com/fzn0x/FastEmu/issues/77) and
+  [#78](https://github.com/fzn0x/FastEmu/issues/78) make faster.
+- **Frames shown.** FastEmu now shows nearly every frame a game draws:
+  29.9 of the scene's 30 a second, 29.3 of Stick Fight's 29.4, and 28.6
+  of BombMan's 29.1. In the games that draw 20 frames a second, both
+  apps showed 19.5.
+- **Start.** About the same in games: the first frame was on screen 638
+  to 853 ms after the start in FastEmu, and 706 to 769 in J2ME Loader, in
+  the seven games both ran. The scene's first paint came 1.4 times sooner
+  in J2ME Loader: 500 ms against 702.
+- **Memory.** J2ME Loader's game process took 2.1 to 2.4 times less: 36
+  to 43 MiB against 74 to 104. It keeps its list of games in a second
+  process of about 18 MiB, and with both it still took 1.4 to 1.7 times
+  less. FastEmu took 4 to 9 MiB less than before issue #108, with no
+  enlarged copy of each frame. Every game at once took 145 MiB in
+  FastEmu; J2ME Loader runs one game at a time.
+- **Game code.** J2ME Loader ran the CPU kernels 5.1 to 160 times
+  faster once warm, and 4.6 to 49 times faster on the first repetition.
   See [Where J2ME Loader is faster](#where-j2me-loader-is-faster).
 - **Drawing.** FastEmu was faster in six of the seven drawing kernels
-  compared, 1.1 to 7.6 times. J2ME Loader drew alpha images 2.0 times
+  compared, 1.2 to 8.3 times. J2ME Loader drew alpha images 1.8 times
   faster.
 
 ### The scene on Android
 
 The scene draws 30 frames a second. In FastEmu, its bench log counted
-all 30 a second; the window showed 22.8 of them.
+all 30 a second; the window showed 29.9 of them.
 
 | Measure | FastEmu | J2ME Loader | Ratio |
 | --- | --- | --- | --- |
-| Start to first paint, ms | 711 (547 to 785) | 533 (508 to 562) | J2ME Loader 1.3x sooner |
-| Frames shown a second | 22.8 (22.4 to 22.9) | 29.9 (29.9 to 30.0) | J2ME Loader 1.3x more |
-| CPU ms a second | 1009.4 (1007.8 to 1013.2) | 54.2 (51.7 to 57.6) | J2ME Loader 18.6x less |
-| PSS of the game's process, MiB | 81.3 (80.4 to 82.1) | 37.6 (36.3 to 37.7) | J2ME Loader 2.2x less |
-| PSS with J2ME Loader's main process, MiB | 81.3 | 55.4 | J2ME Loader 1.5x less |
-| Peak resident, MiB | 183.6 (183.5 to 183.9) | 150.1 (149.7 to 150.2) | J2ME Loader 1.2x less |
+| Start to first paint, ms | 702 (533 to 769) | 500 (460 to 523) | J2ME Loader 1.4x sooner |
+| Frames shown a second | 29.9 (29.9 to 30.0) | 30.0 (29.9 to 30.0) | about the same |
+| CPU ms a second | 208.7 (204.0 to 227.7) | 51.7 (49.7 to 52.6) | J2ME Loader 4.0x less |
+| PSS of the game's process, MiB | 73.0 (71.7 to 73.4) | 38.3 (36.9 to 38.5) | J2ME Loader 1.9x less |
+| PSS with J2ME Loader's main process, MiB | 73.0 | 55.9 | J2ME Loader 1.3x less |
+| Peak resident, MiB | 174.2 (174.1 to 174.3) | 148.7 (148.6 to 148.8) | J2ME Loader 1.2x less |
 
 ### The real games on Android
 
@@ -306,34 +316,33 @@ process. Only the first frame and CPU a second show their ranges;
 
 | Game | App | First frame, ms | Drawn | Shown | CPU ms/s | PSS, MiB |
 | --- | --- | --- | --- | --- | --- | --- |
-| Block Fall | FastEmu | 707 (617 to 788) | 19.6 | 31.2 | 902.6 (879.4 to 912.4) | 100.9 |
-| Block Fall | J2ME Loader | 709 (624 to 782) | n/a | 19.5 | 35.7 (34.3 to 37.3) | 37.5 |
-| BombMan | FastEmu | 692 (548 to 783) | 29.1 | 25.4 | 979.5 (975.1 to 987.2) | 103.8 |
-| BombMan | J2ME Loader | 768 (629 to 867) | n/a | 37.1 | 69.2 (63.3 to 76.7) | 41.8 |
-| Shooter | FastEmu | 684 (627 to 828) | 0.0 | 59.9 | 372.8 (277.4 to 483.9) | 95.9 |
+| Block Fall | FastEmu | 734 (659 to 909) | 19.6 | 19.5 | 140.0 (139.0 to 146.6) | 91.8 |
+| Block Fall | J2ME Loader | 713 (559 to 767) | n/a | 19.5 | 34.5 (34.0 to 36.3) | 38.1 |
+| BombMan | FastEmu | 790 (613 to 1356) | 29.1 | 28.6 | 243.3 (208.5 to 268.1) | 94.8 |
+| BombMan | J2ME Loader | 706 (543 to 844) | n/a | 37.1 | 69.3 (62.7 to 75.7) | 42.6 |
+| Shooter | FastEmu | 719 (659 to 742) | 0.0 | none | 8.3 (7.6 to 9.0) | 91.7 |
 | Shooter | J2ME Loader | could not install it | | | | |
-| Skocko | FastEmu | 678 (600 to 819) | 1.0 | 58.2 | 399.1 (322.0 to 493.8) | 78.1 |
-| Skocko | J2ME Loader | 708 (605 to 834) | n/a | 0.9 | 2.2 (1.7 to 2.3) | 35.7 |
-| Star Defender | FastEmu | 812 (699 to 916) | 19.6 | 31.2 | 899.8 (884.7 to 919.9) | 100.6 |
-| Star Defender | J2ME Loader | 709 (587 to 783) | n/a | 19.5 | 39.8 (37.3 to 41.3) | 39.2 |
-| Stick Fight | FastEmu | 715 (631 to 975) | 29.3 | 22.7 | 1040.2 (1036.3 to 1051.5) | 112.2 |
-| Stick Fight | J2ME Loader | 741 (595 to 833) | n/a | 29.3 | 61.0 (60.7 to 73.6) | 42.1 |
-| Tower Guard | FastEmu | 721 (676 to 816) | 19.6 | 31.0 | 900.1 (888.2 to 910.0) | 100.9 |
-| Tower Guard | J2ME Loader | 752 (587 to 830) | n/a | 19.5 | 37.2 (36.0 to 40.0) | 37.9 |
-| Traffic Dash | FastEmu | 696 (600 to 992) | 19.6 | 30.8 | 899.1 (886.5 to 941.1) | 101.2 |
-| Traffic Dash | J2ME Loader | 708 (650 to 745) | n/a | 19.5 | 38.3 (37.7 to 66.4) | 38.7 |
+| Skocko | FastEmu | 638 (615 to 756) | 1.0 | 0.9 | 15.3 (14.7 to 16.0) | 73.9 |
+| Skocko | J2ME Loader | 732 (682 to 840) | n/a | 0.9 | 1.8 (1.7 to 2.3) | 35.9 |
+| Star Defender | FastEmu | 743 (714 to 920) | 19.6 | 19.5 | 140.5 (138.7 to 144.7) | 91.8 |
+| Star Defender | J2ME Loader | 732 (613 to 827) | n/a | 19.5 | 39.5 (38.0 to 41.0) | 39.8 |
+| Stick Fight | FastEmu | 800 (689 to 1281) | 29.4 | 29.3 | 234.0 (229.7 to 245.0) | 104.2 |
+| Stick Fight | J2ME Loader | 711 (632 to 796) | n/a | 29.2 | 62.8 (59.0 to 87.0) | 42.8 |
+| Tower Guard | FastEmu | 753 (626 to 1012) | 19.6 | 19.5 | 144.6 (141.7 to 148.0) | 92.5 |
+| Tower Guard | J2ME Loader | 749 (586 to 839) | n/a | 19.5 | 36.8 (35.0 to 38.6) | 38.9 |
+| Traffic Dash | FastEmu | 853 (676 to 3278) | 19.6 | 19.5 | 145.3 (140.3 to 150.7) | 92.3 |
+| Traffic Dash | J2ME Loader | 769 (588 to 2310) | n/a | 19.5 | 38.5 (36.7 to 40.3) | 39.1 |
 
 - **Shooter**, whose suite is named MobileGame: J2ME Loader could not
   install it. Its converter stopped with `Uncaught translation error:
   aa2: stack: overflow`. FastEmu ran it, and the bench's keys took it to
-  its About screen, where it drew no new frames.
-- **Skocko** draws a new frame once a second. On that still screen,
-  FastEmu's window still showed 58 frames a second.
+  its About screen, where it drew no new frames. Android counted no
+  frame of FastEmu's on screen there.
+- **Skocko** draws a new frame once a second, and FastEmu's window now
+  shows just those.
 - **BombMan** drew 29.1 frames a second in FastEmu, under its frame cap,
   as on Windows. J2ME Loader has no cap and showed 37.1. So J2ME Loader
-  did more work in it, and still took 14 times less processor time.
-- FastEmu shows more frames than a 20-frame game draws, since its window
-  draws on its own pace, not the game's.
+  did more work in it, and still took 3.5 times less processor time.
 
 ### Kernels on Android
 
@@ -342,34 +351,35 @@ the first repetition. `+/-1` marks a time under 20 steps of the clock.
 
 | Kernel | FastEmu warm | J2ME Loader warm | Warm ratio | Cold ratio |
 | --- | --- | --- | --- | --- |
-| cpu.int | 502.00 | 14.12 (+/-1) | J2ME Loader 35.6x faster | J2ME Loader 10.9x faster |
-| cpu.call | 189.58 | 1.20 (+/-1) | J2ME Loader 158.5x faster | J2ME Loader 64.0x faster |
-| cpu.sieve | 187.17 | 9.68 (+/-1) | J2ME Loader 19.3x faster | J2ME Loader 12.4x faster |
-| cpu.sort | 170.42 | 4.65 (+/-1) | J2ME Loader 36.7x faster | J2ME Loader 14.4x faster |
-| cpu.actors | 201.92 | 2.57 (+/-1) | J2ME Loader 78.6x faster | J2ME Loader 19.9x faster |
-| cpu.long | 228.67 | 5.13 (+/-1) | J2ME Loader 44.6x faster | J2ME Loader 29.7x faster |
-| cpu.float | 242.17 | 22.49 | J2ME Loader 10.8x faster | J2ME Loader 10.1x faster |
-| cpu.string | 155.00 | 27.59 | J2ME Loader 5.6x faster | J2ME Loader 4.9x faster |
-| cpu.collections | 177.17 | 29.01 | J2ME Loader 6.1x faster | J2ME Loader 5.5x faster |
-| mem.small | 266.12 | 9.75 (+/-1) | J2ME Loader 27.3x faster | J2ME Loader 17.4x faster |
-| mem.arrays | 244.50 | 93.79 | J2ME Loader 2.6x faster | J2ME Loader 2.2x faster |
-| mem.gc | 4.84 (+/-1) | 10.29 (+/-1) | FastEmu 2.1x faster | FastEmu 2.0x faster |
-| draw.fillrect | 146.38 | 156.25 | FastEmu 1.1x faster | FastEmu 1.1x faster |
-| draw.line | 228.17 | 262.75 | FastEmu 1.2x faster | FastEmu 1.2x faster |
-| draw.image | 122.65 | 305.25 | FastEmu 2.5x faster | FastEmu 2.6x faster |
-| draw.alpha | 298.75 | 151.94 | J2ME Loader 2.0x faster | J2ME Loader 2.0x faster |
-| draw.region | 370.00 | 624.75 | FastEmu 1.7x faster | FastEmu 1.8x faster |
-| draw.text | 179.00 | 336.75 | not compared | not compared |
-| draw.rgb | 229.50 | 1743.00 | FastEmu 7.6x faster | FastEmu 7.5x faster |
-| draw.scene | 0.09 (+/-1) | 0.11 (+/-1) | FastEmu 1.3x faster | n/a |
+| cpu.int | 481.25 | 14.60 (+/-1) | J2ME Loader 33.0x faster | J2ME Loader 6.9x faster |
+| cpu.call | 194.83 | 1.22 (+/-1) | J2ME Loader 159.8x faster | J2ME Loader 48.9x faster |
+| cpu.sieve | 178.67 | 9.47 (+/-1) | J2ME Loader 18.9x faster | J2ME Loader 11.5x faster |
+| cpu.sort | 157.88 | 4.65 (+/-1) | J2ME Loader 34.0x faster | J2ME Loader 14.4x faster |
+| cpu.actors | 190.42 | 2.48 (+/-1) | J2ME Loader 76.8x faster | J2ME Loader 16.7x faster |
+| cpu.long | 211.33 | 5.14 (+/-1) | J2ME Loader 41.1x faster | J2ME Loader 26.9x faster |
+| cpu.float | 231.33 | 23.12 | J2ME Loader 10.0x faster | J2ME Loader 9.6x faster |
+| cpu.string | 139.94 | 27.45 | J2ME Loader 5.1x faster | J2ME Loader 4.6x faster |
+| cpu.collections | 164.94 | 29.38 | J2ME Loader 5.6x faster | J2ME Loader 5.0x faster |
+| mem.small | 250.58 | 9.55 (+/-1) | J2ME Loader 26.2x faster | J2ME Loader 15.9x faster |
+| mem.arrays | 256.50 | 90.62 | J2ME Loader 2.8x faster | J2ME Loader 2.6x faster |
+| mem.gc | 4.51 (+/-1) | 10.75 (+/-1) | FastEmu 2.4x faster | FastEmu 2.8x faster |
+| draw.fillrect | 136.25 | 160.88 | FastEmu 1.2x faster | FastEmu 1.2x faster |
+| draw.line | 214.75 | 265.62 | FastEmu 1.2x faster | FastEmu 1.3x faster |
+| draw.image | 117.65 | 314.75 | FastEmu 2.7x faster | FastEmu 2.6x faster |
+| draw.alpha | 282.62 | 154.62 | J2ME Loader 1.8x faster | J2ME Loader 1.9x faster |
+| draw.region | 346.75 | 633.00 | FastEmu 1.8x faster | FastEmu 1.8x faster |
+| draw.text | 170.25 | 335.88 | not compared | not compared |
+| draw.rgb | 210.67 | 1754.50 | FastEmu 8.3x faster | FastEmu 8.4x faster |
+| draw.scene | 0.09 (+/-1) | 0.11 (+/-1) | FastEmu 1.2x faster | n/a |
 
 Every CPU and memory kernel printed the same check value in both apps.
 Text is not compared: J2ME Loader draws its medium font at 22 pixels,
 FastEmu at 14.
 
-The whole kernel run took FastEmu 83545 ms of processor time in 63926
-of wall time, 1.31 cores in use, and J2ME Loader 70390 in 63252, 1.11.
-FastEmu's window draws beside the kernels, as it does beside a game.
+The whole kernel run took FastEmu 61875 ms of processor time in 63184
+of wall time, 0.98 cores in use, and J2ME Loader 70425 in 63671, 1.11.
+Before issue #108, FastEmu's window drew at every refresh beside the
+kernels, and FastEmu took 1.31 cores.
 
 ### Every game at once on Android
 
@@ -377,28 +387,29 @@ J2ME Loader runs one game at a time, so only FastEmu ran this.
 
 | Measure | FastEmu |
 | --- | --- |
-| Last game's first frame, ms | 912 (803 to 1123) |
-| CPU ms a second | 803.4 (633.7 to 950.5) |
-| PSS, MiB | 144.2 (142.2 to 145.2) |
-| Frames shown a second | 59.8 (56.5 to 59.8) |
+| Last game's first frame, ms | 930 (880 to 1045) |
+| CPU ms a second | 734.0 (600.8 to 834.4) |
+| PSS, MiB | 144.8 (144.2 to 147.4) |
+| Frames shown a second | 56.2 (55.2 to 56.8) |
 
-All eight took less processor time than one game alone. Each game's
-tile is small, so the window enlarges its frames less, which is the
-likely reason.
+All eight together took about five times what one game that draws 20
+frames a second takes alone. The window draws every game's tile
+whenever one of them has a new frame, 56 times a second here.
 
 ### What the Android bench flagged
 
 - The first kernel run of each app began while the emulator was still
-  busy after the install: after a minute's wait, it was at 3639 and 2683
-  busy ms a second. Both apps ran slower in it, FastEmu by up to 53
-  percent and J2ME Loader by up to 33, and the medians sit with the
-  other three runs.
-- In 7 of the 80 measurements, the rest of the emulator took over 500
-  busy ms a second while the samples ran. Two of them hold the highest
-  processor time of their rows: Skocko and every game at once, both on
-  FastEmu in run 4.
-- FastEmu's processor time on still screens spread widely: Shooter from
-  277 to 484 ms a second, Skocko from 322 to 494.
+  busy after the install: after a minute's wait, it was at 3842 busy ms
+  a second before FastEmu's and 1462 before J2ME Loader's. Both apps ran
+  slower in it, FastEmu by up to 36 percent and J2ME Loader by up to 45,
+  and the medians sit with the other three runs.
+- In 4 of the 80 measurements, the rest of the emulator took over 500
+  busy ms a second while the samples ran: the second runs of BombMan and
+  Stick Fight, in both apps. None of them holds the highest processor
+  time of its row.
+- Traffic Dash's first frame came once after 3.3 s in FastEmu and once
+  after 2.3 s in J2ME Loader, with a quiet emulator before each start.
+  Its medians are 853 and 769 ms.
 
 ## Where J2ME Loader is faster
 
@@ -406,20 +417,21 @@ J2ME Loader turns a game's classes into Android's own format when it
 installs the game. Android's runtime then runs them, and compiles the
 busy parts to machine code as they run. FastEmu interprets every
 instruction in a virtual machine of its own, as on Windows. So J2ME
-Loader ran the CPU kernels 5.6 to 158 times faster once warm, and 4.9 to
-64 times faster on the very first repetition. It made small objects 27.3
-times faster and arrays 2.6 times faster. FastEmu was faster at a full
-collection, 4.84 ms against 10.29.
+Loader ran the CPU kernels 5.1 to 160 times faster once warm, and 4.6 to
+49 times faster on the very first repetition. It made small objects 26.2
+times faster and arrays 2.8 times faster. FastEmu was faster at a full
+collection, 4.51 ms against 10.75.
 
-In drawing, J2ME Loader was faster at alpha images, 2.0 times. FastEmu
+In drawing, J2ME Loader was faster at alpha images, 1.8 times. FastEmu
 was faster at the other six kernels compared.
 
-In the games, the larger cost was FastEmu's window. It took about a
-whole core while any game ran, and 373 to 399 ms a second on a still
-screen. [Issue #108](https://github.com/fzn0x/FastEmu/issues/108) makes
-the window draw only when a game has something new, and enlarge a
-screen no more than it needs. Issues
-[#77](https://github.com/fzn0x/FastEmu/issues/77) and
+In the games, the larger cost is still FastEmu's window.
+[Issue #108](https://github.com/fzn0x/FastEmu/issues/108) made it draw
+only when a game has something new, and let the graphics card enlarge
+the screen. That took FastEmu from about a whole core in a game to 140
+to 243 ms a second. Most of the rest is the window's graphics calls, and
+[issue #110](https://github.com/fzn0x/FastEmu/issues/110) makes fewer of
+them. Issues [#77](https://github.com/fzn0x/FastEmu/issues/77) and
 [#78](https://github.com/fzn0x/FastEmu/issues/78) make game code faster:
 a faster interpreter, then compiling busy code to machine code.
 
@@ -427,7 +439,7 @@ J2ME Loader also took less memory. Its game process holds the game and
 its drawing, and its list of games is in a second process. FastEmu's one
 process holds the whole app beside the game: its interface, its library
 and its graphics. Counting both of J2ME Loader's processes, it still took
-1.5 to 1.9 times less.
+1.4 to 1.7 times less.
 
 ## How it was measured on Windows
 

@@ -706,6 +706,39 @@ fn the_keypad_and_the_keyboard_hold_keys_together(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_running_game_redraws_the_window_only_through_its_notify(cx: &mut TestAppContext) {
+    let mut h = open(cx);
+    h.add(&["snake.jar"]);
+    h.launch_first();
+    let game = h.launcher.instance(0);
+    *lock(&game.status) = InstanceStatus::Running;
+    game.show(1);
+    h.redraw();
+    assert!(
+        !h.read(|v| v.animating),
+        "a running game asks for no frames of its own"
+    );
+    let screen = h.read(|v| v.tiles[0].screen.clone());
+    assert_eq!(screen.borrow().uploads(), 1);
+
+    game.show(2);
+    h.cx.run_until_parked();
+    assert_eq!(
+        screen.borrow().uploads(),
+        1,
+        "nothing draws a new frame the game did not tell of"
+    );
+    let notify = h.launcher.request(0).notify.expect("a notify callback");
+    notify(game.id());
+    h.cx.run_until_parked();
+    assert_eq!(
+        screen.borrow().uploads(),
+        2,
+        "the game's notification alone draws its new frame"
+    );
+}
+
+#[gpui::test]
 fn new_frames_replace_the_uploaded_image(cx: &mut TestAppContext) {
     let mut h = open(cx);
     h.add(&["snake.jar"]);
@@ -721,6 +754,15 @@ fn new_frames_replace_the_uploaded_image(cx: &mut TestAppContext) {
         .cloned()
         .expect("the first frame is uploaded");
     assert_eq!(screen.borrow().uploads(), 1);
+    // Enlarged on the processor only where the GPU would blur it.
+    let drawn = screen.borrow().drawn().expect("the screen is drawn");
+    let scale = h.cx.update(|window, _| window.scale_factor());
+    let shown = (f32::from(drawn.size.width) * scale / 240.0).round() as u32;
+    assert!(shown >= 1);
+    assert_eq!(
+        first.size(0).width.0,
+        240 * super::screen::upload_factor(shown) as i32
+    );
 
     h.redraw();
     assert_eq!(

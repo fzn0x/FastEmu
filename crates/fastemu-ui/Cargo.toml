@@ -15,7 +15,7 @@ futures = "0.3"
 # GPUI from the Zed Android port, pinned to one commit so the desktop and
 # Android apps build the same GPUI. The platform backends are the apps'
 # business: this crate only uses the platform-neutral API.
-gpui = { git = "https://github.com/Dylanmurzello/zed-android-port", rev = "746f088ee8d6b8b273354826757dd09e74565854", default-features = false }
+gpui = { git = "https://github.com/fzn0x/zed-android-port", rev = "5a5acc9d7568c90b551c5e6c01aa55b08db8b45c", default-features = false }
 # GPUI takes screen pictures as `image` frames; it uses 0.25 too.
 image = { version = "0.25", default-features = false }
 log = "0.4"
@@ -25,7 +25,7 @@ serde_json = "1"
 
 [dev-dependencies]
 fastemu-core = { workspace = true, features = ["mock", "serde"] }
-gpui = { git = "https://github.com/Dylanmurzello/zed-android-port", rev = "746f088ee8d6b8b273354826757dd09e74565854", default-features = false, features = ["test-support"] }
+gpui = { git = "https://github.com/fzn0x/zed-android-port", rev = "5a5acc9d7568c90b551c5e6c01aa55b08db8b45c", default-features = false, features = ["test-support"] }
 tempfile = "3"
 
 [lints]
