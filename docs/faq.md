@@ -73,8 +73,9 @@ Not yet. Saves from other emulators use their own formats.
 
 They are separate projects. FastEmu is a new program, written in Rust,
 that owes much to them. Both kept these games playable for more than
-ten years. FastEmu's interface builds on Zed's GPUI. How they compare on
-one Windows computer is on the [benchmark](/docs/benchmark/) page.
+ten years. FastEmu's interface builds on Zed's GPUI. How FastEmu
+compares with MicroEmulator on Windows and with J2ME Loader on Android is
+on the [benchmark](/docs/benchmark/) page.
 
 ## How do I report a bug or a game that fails?
 

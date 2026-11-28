@@ -35,9 +35,10 @@ installed. Each game runs in its own virtual machine with its own memory,
 threads, saves and sound, and one window shows as many games as you start.
 A game that crashes or hangs does not stop the ones next to it.
 
-How it compares with MicroEmulator 2.0.4 on one Windows PC, in start
-time, memory, processor time and many games at once, and where
-MicroEmulator is faster, is on the [benchmark page](docs/benchmark.md).
+How it compares with MicroEmulator 2.0.4 on one Windows PC and with
+J2ME Loader 1.9.0 on Android, in start time, memory, processor time and
+many games at once, and where each of them is faster, is on the
+[benchmark page](docs/benchmark.md).
 
 [Install](#install) · [Usage](#usage) · [Supported APIs](#supported-apis) ·
 [Build from source](#building-from-source) · [Contributing](CONTRIBUTING.md) ·
