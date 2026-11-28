@@ -754,6 +754,15 @@ fn new_frames_replace_the_uploaded_image(cx: &mut TestAppContext) {
         .cloned()
         .expect("the first frame is uploaded");
     assert_eq!(screen.borrow().uploads(), 1);
+    // Enlarged on the processor only where the GPU would blur it.
+    let drawn = screen.borrow().drawn().expect("the screen is drawn");
+    let scale = h.cx.update(|window, _| window.scale_factor());
+    let shown = (f32::from(drawn.size.width) * scale / 240.0).round() as u32;
+    assert!(shown >= 1);
+    assert_eq!(
+        first.size(0).width.0,
+        240 * super::screen::upload_factor(shown) as i32
+    );
 
     h.redraw();
     assert_eq!(
