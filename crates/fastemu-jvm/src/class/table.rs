@@ -122,6 +122,9 @@ pub(crate) struct ClassTable {
     pub(super) budget: ClassBudget,
     /// Every method of the classes, by id, shared with the machine.
     pub(super) arena: Arc<MethodArena>,
+    /// The eight primitive array classes, once loaded, by
+    /// [`ArrayType`] in declaration order: a `newarray` names one.
+    prim_arrays: [Option<ClassId>; 8],
 }
 
 impl ClassTable {
@@ -146,6 +149,7 @@ impl ClassTable {
             mirrors: Vec::new(),
             budget: ClassBudget::new(max_class_bytes),
             arena: Arc::new(MethodArena::new()),
+            prim_arrays: [None; 8],
         }
     }
 
@@ -346,9 +350,15 @@ impl ClassTable {
     }
 
     pub(crate) fn prim_array(&mut self, t: ArrayType) -> ClassId {
+        if let Some(class) = self.prim_arrays[t as usize] {
+            return class;
+        }
         let name = format!("[{}", t.descriptor());
-        self.load(&name)
-            .expect("primitive array classes always load once Object has")
+        let class = self
+            .load(&name)
+            .expect("primitive array classes always load once Object has");
+        self.prim_arrays[t as usize] = Some(class);
+        class
     }
 
     /// The method a reference to `name` and `desc` in class `class`
