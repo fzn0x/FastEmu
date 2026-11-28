@@ -47,8 +47,8 @@ struct ImageKey {
 /// One tile's uploaded screen image and where it was last drawn.
 ///
 /// The image lives in GPUI's atlas until it is dropped there. A new frame
-/// replaces it and drops the old one at once, so a tile holds one image
-/// however long a game runs.
+/// replaces it, and the old one is dropped as soon as the new one is
+/// painted, so a tile holds one image however long a game runs.
 #[derive(Default)]
 pub struct ScreenCache {
     image: Option<(ImageKey, Arc<RenderImage>)>,
@@ -79,6 +79,7 @@ impl ScreenCache {
             serial: frame.serial(),
             factor,
         };
+        let mut replaced = None;
         if self.image.as_ref().is_none_or(|(k, _)| *k != key) {
             let Some(image) = render_image(screen_bgra(frame, factor)) else {
                 return;
@@ -87,9 +88,7 @@ impl ScreenCache {
             {
                 self.uploads += 1;
             }
-            if let Some((_, old)) = self.image.replace((key, image)) {
-                window.drop_image(old).ok();
-            }
+            replaced = self.image.replace((key, image)).map(|(_, old)| old);
         }
         if let Some((_, image)) = &self.image {
             window
@@ -102,6 +101,12 @@ impl ScreenCache {
                     false,
                 )
                 .ok();
+        }
+        // The old frame goes only once the new one is in the atlas. Dropped
+        // first, it could leave its atlas texture empty, which the atlas
+        // frees, and the new frame would need a texture made anew.
+        if let Some(old) = replaced {
+            window.drop_image(old).ok();
         }
     }
 
