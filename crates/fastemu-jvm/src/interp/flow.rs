@@ -67,14 +67,22 @@ fn effect(insn: Insn, cp: &ConstantPool) -> Result<(usize, usize), String> {
     use Insn as I;
     Ok(match insn {
         I::Nop | I::Iinc(..) | I::Goto(_) | I::Ret(_) | I::Return | I::Unsupported(_) => (0, 0),
-        I::AconstNull | I::Iconst(_) | I::Fconst(_) | I::LdcString(_) | I::Load(_) => (0, 1),
+        I::AconstNull
+        | I::Iconst(_)
+        | I::Fconst(_)
+        | I::LdcString(_)
+        | I::Load(_)
+        | I::ILoad(_)
+        | I::FLoad(_) => (0, 1),
         I::LdcClass(i) | I::New(i) => {
             class_entry(cp, i)?;
             (0, 1)
         }
-        I::Lconst(_) | I::Dconst(_) | I::Load2(_) => (0, 2),
+        I::Lconst(_) | I::Dconst(_) | I::LLoad(_) | I::DLoad(_) => (0, 2),
         I::Jsr(_) => (0, 1),
         I::Store(_)
+        | I::IStore(_)
+        | I::FStore(_)
         | I::Pop
         | I::Ifeq(_)
         | I::Ifne(_)
@@ -90,7 +98,8 @@ fn effect(insn: Insn, cp: &ConstantPool) -> Result<(usize, usize), String> {
         | I::Athrow
         | I::MonitorEnter
         | I::MonitorExit => (1, 0),
-        I::Store2(_)
+        I::LStore(_)
+        | I::DStore(_)
         | I::Pop2
         | I::Return2
         | I::IfIcmpeq(_)

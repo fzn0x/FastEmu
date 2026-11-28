@@ -100,12 +100,11 @@ fn decode_one(
             let index = b.u16()?;
             ldc2(cp, index)?
         }
-        0x15 | 0x17 | 0x19 => I::Load(u16::from(b.u8()?)),
-        0x16 | 0x18 => I::Load2(u16::from(b.u8()?)),
-        0x1a..=0x1d => I::Load(u16::from(op - 0x1a)),
-        0x1e..=0x21 => I::Load2(u16::from(op - 0x1e)),
-        0x22..=0x25 => I::Load(u16::from(op - 0x22)),
-        0x26..=0x29 => I::Load2(u16::from(op - 0x26)),
+        0x15..=0x19 => local(op - 0x15, u16::from(b.u8()?)),
+        0x1a..=0x1d => I::ILoad(u16::from(op - 0x1a)),
+        0x1e..=0x21 => I::LLoad(u16::from(op - 0x1e)),
+        0x22..=0x25 => I::FLoad(u16::from(op - 0x22)),
+        0x26..=0x29 => I::DLoad(u16::from(op - 0x26)),
         0x2a..=0x2d => I::Load(u16::from(op - 0x2a)),
         0x2e => I::Iaload,
         0x2f => I::Laload,
@@ -115,12 +114,11 @@ fn decode_one(
         0x33 => I::Baload,
         0x34 => I::Caload,
         0x35 => I::Saload,
-        0x36 | 0x38 | 0x3a => I::Store(u16::from(b.u8()?)),
-        0x37 | 0x39 => I::Store2(u16::from(b.u8()?)),
-        0x3b..=0x3e => I::Store(u16::from(op - 0x3b)),
-        0x3f..=0x42 => I::Store2(u16::from(op - 0x3f)),
-        0x43..=0x46 => I::Store(u16::from(op - 0x43)),
-        0x47..=0x4a => I::Store2(u16::from(op - 0x47)),
+        0x36..=0x3a => local(op - 0x36 + 5, u16::from(b.u8()?)),
+        0x3b..=0x3e => I::IStore(u16::from(op - 0x3b)),
+        0x3f..=0x42 => I::LStore(u16::from(op - 0x3f)),
+        0x43..=0x46 => I::FStore(u16::from(op - 0x43)),
+        0x47..=0x4a => I::DStore(u16::from(op - 0x47)),
         0x4b..=0x4e => I::Store(u16::from(op - 0x4b)),
         0x4f => I::Iastore,
         0x50 => I::Lastore,
@@ -314,10 +312,8 @@ fn decode_one(
             let wide_op = b.u8()?;
             let index = b.u16()?;
             match wide_op {
-                0x15 | 0x17 | 0x19 => I::Load(index),
-                0x16 | 0x18 => I::Load2(index),
-                0x36 | 0x38 | 0x3a => I::Store(index),
-                0x37 | 0x39 => I::Store2(index),
+                0x15..=0x19 => local(wide_op - 0x15, index),
+                0x36..=0x3a => local(wide_op - 0x36 + 5, index),
                 0xa9 => I::Ret(index),
                 0x84 => I::Iinc(index, b.i16()?),
                 _ => return Err(format!("wide at {pc} modifies opcode {wide_op:#x}")),
@@ -364,11 +360,36 @@ fn map_branch(insn: &mut Insn, map: &impl Fn(u32) -> Result<u32, String>) -> Res
     Ok(())
 }
 
+/// The load or store of local `index` that `kind` names: 0 to 4 for
+/// `iload`, `lload`, `fload`, `dload` and `aload`, and 5 to 9 for the
+/// stores, in the order of their opcodes.
+fn local(kind: u8, index: u16) -> Insn {
+    match kind {
+        0 => Insn::ILoad(index),
+        1 => Insn::LLoad(index),
+        2 => Insn::FLoad(index),
+        3 => Insn::DLoad(index),
+        4 => Insn::Load(index),
+        5 => Insn::IStore(index),
+        6 => Insn::LStore(index),
+        7 => Insn::FStore(index),
+        8 => Insn::DStore(index),
+        _ => Insn::Store(index),
+    }
+}
+
 /// Checks that local `index` (and the next, for two-slot values) exists.
 fn check_local(insn: &Insn, max_locals: u16) -> Result<(), String> {
     let (index, width) = match *insn {
-        Insn::Load(i) | Insn::Store(i) | Insn::Ret(i) | Insn::Iinc(i, _) => (i, 1),
-        Insn::Load2(i) | Insn::Store2(i) => (i, 2),
+        Insn::Load(i)
+        | Insn::ILoad(i)
+        | Insn::FLoad(i)
+        | Insn::Store(i)
+        | Insn::IStore(i)
+        | Insn::FStore(i)
+        | Insn::Ret(i)
+        | Insn::Iinc(i, _) => (i, 1),
+        Insn::LLoad(i) | Insn::DLoad(i) | Insn::LStore(i) | Insn::DStore(i) => (i, 2),
         _ => return Ok(()),
     };
     if u32::from(index) + width > u32::from(max_locals) {
@@ -507,9 +528,9 @@ mod tests {
             &*decoded.insns,
             &[
                 Insn::Iconst(0),
-                Insn::Store(0),
+                Insn::IStore(0),
                 Insn::Iinc(0, 1),
-                Insn::Load(0),
+                Insn::ILoad(0),
                 Insn::Iconst(10),
                 Insn::IfIcmplt(2),
                 Insn::Return,
@@ -548,7 +569,7 @@ mod tests {
         assert_eq!(
             &*decoded.insns,
             &[
-                Insn::Load(300),
+                Insn::ILoad(300),
                 Insn::Iinc(300, -1000),
                 Insn::Jsr(4),
                 Insn::Return,

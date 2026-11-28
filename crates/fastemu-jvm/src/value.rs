@@ -116,6 +116,32 @@ impl Value {
         }
     }
 
+    /// The `int` this value holds, or 0, with no check in debug builds:
+    /// for `iload` and `istore`, which crafted code can point at a slot
+    /// of another type.
+    #[inline]
+    pub(crate) fn int_or_zero(self) -> i32 {
+        if let Value::Int(v) = self { v } else { 0 }
+    }
+
+    /// The `long` this value holds, or 0, as [`Value::int_or_zero`].
+    #[inline]
+    pub(crate) fn long_or_zero(self) -> i64 {
+        if let Value::Long(v) = self { v } else { 0 }
+    }
+
+    /// The `float` this value holds, or 0, as [`Value::int_or_zero`].
+    #[inline]
+    pub(crate) fn float_or_zero(self) -> f32 {
+        if let Value::Float(v) = self { v } else { 0.0 }
+    }
+
+    /// The `double` this value holds, or 0, as [`Value::int_or_zero`].
+    #[inline]
+    pub(crate) fn double_or_zero(self) -> f64 {
+        if let Value::Double(v) = self { v } else { 0.0 }
+    }
+
     /// A `boolean` argument: any non-zero `int` is true.
     #[inline]
     pub fn boolean(self) -> bool {

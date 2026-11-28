@@ -843,11 +843,26 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                     s[sp] = s[bp + n as usize];
                     sp += 1;
                 }
-                Insn::Load2(n) => {
+                Insn::ILoad(n) => {
                     let s = &mut s!();
-                    let i = bp + n as usize;
-                    s[sp] = s[i];
-                    s[sp + 1] = s[i + 1];
+                    s[sp] = Value::Int(s[bp + n as usize].int_or_zero());
+                    sp += 1;
+                }
+                Insn::FLoad(n) => {
+                    let s = &mut s!();
+                    s[sp] = Value::Float(s[bp + n as usize].float_or_zero());
+                    sp += 1;
+                }
+                Insn::LLoad(n) => {
+                    let s = &mut s!();
+                    s[sp] = Value::Long(s[bp + n as usize].long_or_zero());
+                    s[sp + 1] = Value::Void;
+                    sp += 2;
+                }
+                Insn::DLoad(n) => {
+                    let s = &mut s!();
+                    s[sp] = Value::Double(s[bp + n as usize].double_or_zero());
+                    s[sp + 1] = Value::Void;
                     sp += 2;
                 }
                 Insn::Store(n) => {
@@ -855,12 +870,29 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                     sp -= 1;
                     s[bp + n as usize] = s[sp];
                 }
-                Insn::Store2(n) => {
+                Insn::IStore(n) => {
+                    let s = &mut s!();
+                    sp -= 1;
+                    s[bp + n as usize] = Value::Int(s[sp].int_or_zero());
+                }
+                Insn::FStore(n) => {
+                    let s = &mut s!();
+                    sp -= 1;
+                    s[bp + n as usize] = Value::Float(s[sp].float_or_zero());
+                }
+                Insn::LStore(n) => {
                     let s = &mut s!();
                     sp -= 2;
                     let i = bp + n as usize;
-                    s[i] = s[sp];
-                    s[i + 1] = s[sp + 1];
+                    s[i] = Value::Long(s[sp].long_or_zero());
+                    s[i + 1] = Value::Void;
+                }
+                Insn::DStore(n) => {
+                    let s = &mut s!();
+                    sp -= 2;
+                    let i = bp + n as usize;
+                    s[i] = Value::Double(s[sp].double_or_zero());
+                    s[i + 1] = Value::Void;
                 }
                 Insn::Iaload => aload!(Ints, Value::Int, false),
                 Insn::Laload => aload!(Longs, Value::Long, true),
@@ -1002,7 +1034,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                         break Err(Fault::DivideByZero);
                     }
                     let a = s[sp - 2].int();
-                    s[sp - 2] = Value::Int(if *insn == Insn::Idiv {
+                    s[sp - 2] = Value::Int(if matches!(*insn, Insn::Idiv) {
                         a.wrapping_div(b)
                     } else {
                         a.wrapping_rem(b)
@@ -1016,7 +1048,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                         break Err(Fault::DivideByZero);
                     }
                     let a = s[sp - 4].long();
-                    s[sp - 4] = Value::Long(if *insn == Insn::Ldiv {
+                    s[sp - 4] = Value::Long(if matches!(*insn, Insn::Ldiv) {
                         a.wrapping_div(b)
                     } else {
                         a.wrapping_rem(b)
@@ -1388,7 +1420,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                         break Err(Fault::NullPointer);
                     };
                     sync!();
-                    tri!(monitor(ctx, obj, *insn == Insn::MonitorEnter));
+                    tri!(monitor(ctx, obj, matches!(*insn, Insn::MonitorEnter)));
                     again!();
                 }
                 Insn::Unsupported(op) => break Err(unsupported(op)),

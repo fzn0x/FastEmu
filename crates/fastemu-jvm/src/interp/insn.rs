@@ -20,12 +20,22 @@ pub(crate) enum Insn {
     LdcString(u16),
     /// `ldc` of a `CONSTANT_Class`.
     LdcClass(u16),
-    /// A one-slot load (`iload`, `fload`, `aload`) from local `n`.
+    /// `aload` of local `n`: a whole slot, a reference.
     Load(u16),
-    /// A two-slot load (`lload`, `dload`).
-    Load2(u16),
+    /// `iload`, `fload`, `lload` and `dload`: each copies only the value of
+    /// its type, so that a value just written is read back at the size it
+    /// was written, and the processor forwards it from the store.
+    ILoad(u16),
+    FLoad(u16),
+    LLoad(u16),
+    DLoad(u16),
+    /// `astore` of local `n`: a whole slot, a reference or a `jsr`
+    /// return address.
     Store(u16),
-    Store2(u16),
+    IStore(u16),
+    FStore(u16),
+    LStore(u16),
+    DStore(u16),
     Iaload,
     Laload,
     Faload,
