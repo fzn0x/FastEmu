@@ -216,13 +216,7 @@ impl Measurement {
     /// The warm time of `name` in this run: the median time per
     /// repetition of the rounds after the first.
     pub fn warm(&self, name: &str) -> Option<f64> {
-        let per_rep: Vec<f64> = self
-            .rounds
-            .iter()
-            .filter(|r| r.name == name && r.round > 1 && r.reps > 0)
-            .map(|r| r.ms as f64 / r.reps as f64)
-            .collect();
-        median(&per_rep)
+        warm_of(&self.rounds, name)
     }
 
     /// The cores the kernel run kept busy: its CPU time over its wall time.
@@ -235,10 +229,7 @@ impl Measurement {
 
     /// The cold time of `name`: the first repetition of the first round.
     pub fn cold(&self, name: &str) -> Option<f64> {
-        self.rounds
-            .iter()
-            .find(|r| r.name == name && r.round == 1)
-            .map(|r| r.first as f64)
+        cold_of(&self.rounds, name)
     }
 
     /// Every check value `name` gave.
@@ -249,6 +240,26 @@ impl Measurement {
             .map(|r| r.check)
             .collect()
     }
+}
+
+/// The warm time of kernel `name` among `rounds`: the median time per
+/// repetition of the rounds after the first.
+pub fn warm_of(rounds: &[KernelRound], name: &str) -> Option<f64> {
+    let per_rep: Vec<f64> = rounds
+        .iter()
+        .filter(|r| r.name == name && r.round > 1 && r.reps > 0)
+        .map(|r| r.ms as f64 / r.reps as f64)
+        .collect();
+    median(&per_rep)
+}
+
+/// The cold time of kernel `name` among `rounds`: the first repetition
+/// of the first round.
+pub fn cold_of(rounds: &[KernelRound], name: &str) -> Option<f64> {
+    rounds
+        .iter()
+        .find(|r| r.name == name && r.round == 1)
+        .map(|r| r.first as f64)
 }
 
 /// A game of the corpus.
@@ -348,6 +359,11 @@ pub enum Better {
 /// The ratio of `fastemu` to `microemu` in words, such as `FastEmu 12.0x
 /// less` or `MicroEmulator 30.0x faster`.
 pub fn verdict(fastemu: f64, microemu: f64, better: Better) -> String {
+    verdict_vs(fastemu, microemu, better, "MicroEmulator")
+}
+
+/// [`verdict`] against the emulator named `rival`.
+pub fn verdict_vs(fastemu: f64, microemu: f64, better: Better, rival: &str) -> String {
     if !(fastemu > 0.0 && microemu > 0.0) {
         return "n/a".into();
     }
@@ -359,11 +375,7 @@ pub fn verdict(fastemu: f64, microemu: f64, better: Better) -> String {
     if ratio < 1.05 {
         return "about the same".into();
     }
-    let who = if fastemu_wins {
-        "FastEmu"
-    } else {
-        "MicroEmulator"
-    };
+    let who = if fastemu_wins { "FastEmu" } else { rival };
     let word = match better {
         Better::Faster => "faster",
         Better::Less => "less",
@@ -375,6 +387,11 @@ pub fn verdict(fastemu: f64, microemu: f64, better: Better) -> String {
 /// The verdicts of many pairs at once, as a range: `MicroEmulator 7.0x to
 /// 98.0x faster`, or both directions when the winner changes.
 pub fn verdict_range(pairs: &[(f64, f64)], better: Better) -> String {
+    verdict_range_vs(pairs, better, "MicroEmulator")
+}
+
+/// [`verdict_range`] against the emulator named `rival`.
+pub fn verdict_range_vs(pairs: &[(f64, f64)], better: Better, rival: &str) -> String {
     let mut fastemu = Vec::new();
     let mut microemu = Vec::new();
     let mut same = 0;
@@ -403,7 +420,7 @@ pub fn verdict_range(pairs: &[(f64, f64)], better: Better) -> String {
     let range = |who: &str, ratios: &[f64]| {
         let lo = ratios.iter().copied().fold(f64::INFINITY, f64::min);
         let hi = ratios.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        if ratios.len() == 1 || (hi - lo) < 0.05 {
+        if ratios.len() == 1 || format!("{lo:.1}") == format!("{hi:.1}") {
             format!("{who} {hi:.1}x {word}")
         } else {
             format!("{who} {lo:.1}x to {hi:.1}x {word}")
@@ -411,11 +428,7 @@ pub fn verdict_range(pairs: &[(f64, f64)], better: Better) -> String {
     };
     let mut parts = Vec::new();
     if !microemu.is_empty() {
-        parts.push(format!(
-            "{} in {}",
-            range("MicroEmulator", &microemu),
-            microemu.len()
-        ));
+        parts.push(format!("{} in {}", range(rival, &microemu), microemu.len()));
     }
     if !fastemu.is_empty() {
         parts.push(format!(

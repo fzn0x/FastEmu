@@ -20,6 +20,9 @@ fastemu-midp.workspace = true
 fastemu-audio.workspace = true
 # The screenshots of `cargo xtask compat`, with the version the app uses.
 png = "0.18"
+# `cargo xtask bench --android` checks the J2ME Loader APK it installs by
+# its SHA-256. The version the lockfile already has.
+sha2 = "0.10"
 # `cargo xtask icons` renders the app's SVG icon. Only the renderer: the
 # icon has no text or embedded images. The version GPUI already builds
 # with, so the lockfile gains no second copy.

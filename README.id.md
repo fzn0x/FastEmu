@@ -36,10 +36,10 @@ sendiri dengan memori, thread, data simpanan, dan suara sendiri, dan satu
 jendela menampilkan sebanyak apa pun game yang Anda jalankan. Game yang
 crash atau macet tidak menghentikan game di sebelahnya.
 
-Perbandingannya dengan MicroEmulator 2.0.4 di satu PC Windows, dalam
-waktu mulai, memori, waktu prosesor dan banyak game sekaligus, serta
-bagian di mana MicroEmulator lebih cepat, ada di
-[halaman benchmark](docs/benchmark.md).
+Perbandingannya dengan MicroEmulator 2.0.4 di satu PC Windows dan
+dengan J2ME Loader 1.9.0 di Android, dalam waktu mulai, memori, waktu
+prosesor dan banyak game sekaligus, serta bagian di mana masing-masing
+lebih cepat, ada di [halaman benchmark](docs/benchmark.md).
 
 [Pasang](#pasang) · [Penggunaan](#penggunaan) · [API yang didukung](#api-yang-didukung) ·
 [Build dari sumber](#build-dari-sumber) · [Kontribusi](CONTRIBUTING.md) ·
