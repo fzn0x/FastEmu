@@ -123,9 +123,9 @@ The apps are built on [GPUI](https://github.com/zed-industries/zed), the
 UI framework of the Zed editor. The `gpui` crate is under the Apache License, Version 2.0:
 <https://www.apache.org/licenses/LICENSE-2.0>. The apps take GPUI from
 FastEmu's fork, <https://github.com/fzn0x/zed-android-port>, of Dylan
-Murzello's port of Zed to Android. The fork adds one change: its wgpu
-renderer magnifies images with the nearest filter, so game screens stay
-crisp.
+Murzello's port of Zed to Android. The fork changes only its wgpu
+renderer: it magnifies images with the nearest filter, so game screens
+stay crisp, and it makes fewer graphics calls in each frame.
 
 The AppImages, `fastemu-<version>-linux-<arch>.AppImage`, start with the
 AppImage type2 runtime, release 20251108, from
