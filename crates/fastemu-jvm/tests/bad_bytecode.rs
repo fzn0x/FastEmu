@@ -311,6 +311,28 @@ fn typed_loads_and_stores_read_another_type_as_zero() {
 }
 
 #[test]
+fn the_empty_object_constructor_still_checks_its_receiver() {
+    let mut c = ClassBuilder::new("Bad", "java/lang/Object", 49, 0);
+    let init = c.method_ref("java/lang/Object", "<init>", "()V");
+    let [h, l] = idx(init);
+    // aconst_null; invokespecial Object.<init>; return
+    c.method(
+        PUBLIC | STATIC,
+        "f",
+        "()V",
+        1,
+        0,
+        &[0x01, 0xb7, h, l, 0xb1],
+        &[],
+    );
+    let result = run_classes(&[("Bad", c.build())]);
+    assert!(
+        result.starts_with("java.lang.NullPointerException"),
+        "got {result}"
+    );
+}
+
+#[test]
 fn athrow_of_an_object_that_is_not_a_throwable_is_refused() {
     // new Object; dup; invokespecial Object.<init>; athrow
     let mut c = ClassBuilder::new("Bad", "java/lang/Object", 49, 0);

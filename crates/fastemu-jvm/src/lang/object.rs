@@ -12,7 +12,7 @@ use crate::value::Value;
 pub(crate) fn classes() -> Vec<NativeClass> {
     vec![
         NativeClass::new("java/lang/Object")
-            .method("<init>", "()V", |_, _| Ok(Value::Void))
+            .empty_method("<init>", "()V")
             .method("hashCode", "()I", |_, a| {
                 Ok(Value::Int(identity_hash(this(a))))
             })

@@ -86,6 +86,7 @@ impl Ctx<'_> {
                 self.thread.native_depth -= 1;
                 result
             }
+            MethodBody::Empty => Ok(Value::Void),
             MethodBody::Abstract => {
                 let name = method.describe().replace('/', ".");
                 Err(self.new_exception("java/lang/AbstractMethodError", Some(&name)))

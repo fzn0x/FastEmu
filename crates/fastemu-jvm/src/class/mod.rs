@@ -171,6 +171,10 @@ pub(crate) struct Bytecode {
 pub(crate) enum MethodBody {
     Bytecode(Box<Bytecode>),
     Native(NativeFn),
+    /// A library method that does nothing and returns nothing, such as
+    /// `Object.<init>`: a call to it only takes its arguments off the
+    /// stack.
+    Empty,
     Abstract,
     /// A `native` method of a class file, which FastEmu cannot run.
     Unlinked,

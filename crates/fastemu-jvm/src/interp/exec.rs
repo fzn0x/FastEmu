@@ -468,63 +468,98 @@ fn call(ctx: &mut Ctx<'_>, fi: usize, m: &Method, sp: &mut usize) -> Result<bool
                 return Err(f);
             }
             if m.is_synchronized() {
-                let obj = if m.is_static() {
-                    lang::class::mirror(&mut ctx.state, m.class)
-                } else {
-                    ctx.thread.slots[new_bp]
-                        .obj()
-                        .expect("the receiver was null-checked")
-                };
-                if let Err(e) = ctx.monitor_enter(obj) {
-                    ctx.thread.frames.pop();
-                    ctx.thread.frames[fi].sp = *sp as u32;
-                    return Err(e.into());
-                }
-                if let Some(frame) = ctx.thread.frames.last_mut() {
-                    frame.sync = Some(obj);
-                }
+                enter_synchronized(ctx, fi, m, new_bp, *sp)?;
             }
             Ok(true)
         }
-        MethodBody::Native(f) => {
-            let args: SmallVec<[Value; 8]> = ctx.thread.slots[new_bp..*sp]
-                .iter()
-                .copied()
-                .filter(|v| !matches!(v, Value::Void))
-                .collect();
-            ctx.baseline = ctx.state.heap.used();
-            let v = ctx.call_native(m, f, new_bp, &args)?;
-            let s = &mut ctx.thread.slots;
-            let mut top = new_bp;
-            match m.ret {
-                Kind::Void => {}
-                Kind::Long | Kind::Double => {
-                    s[top] = if v == Value::Void {
-                        m.ret.default_value()
-                    } else {
-                        v
-                    };
-                    s[top + 1] = Value::Void;
-                    top += 2;
-                }
-                kind => {
-                    s[top] = if v == Value::Void {
-                        kind.default_value()
-                    } else {
-                        v
-                    };
-                    top += 1;
-                }
-            }
-            *sp = top;
+        // It cannot throw, allocate, wait or look at the frames, so no
+        // frame is pushed for it. The call itself counted in the budget.
+        MethodBody::Empty => {
+            *sp = new_bp;
             Ok(false)
         }
-        MethodBody::Abstract => Err(abstract_error(m)),
-        MethodBody::Unlinked => Err(Fault::Error(
-            "java/lang/UnsatisfiedLinkError",
-            m.describe().replace('/', "."),
-        )),
+        _ => call_native(ctx, m, new_bp, sp).map(|()| false),
     }
+}
+
+/// Takes the monitor of a synchronized method whose frame was just pushed
+/// above frame `fi`, whose operand stack ended at `sp` before the call.
+#[cold]
+#[inline(never)]
+fn enter_synchronized(
+    ctx: &mut Ctx<'_>,
+    fi: usize,
+    m: &Method,
+    new_bp: usize,
+    sp: usize,
+) -> Result<(), Fault> {
+    let obj = if m.is_static() {
+        lang::class::mirror(&mut ctx.state, m.class)
+    } else {
+        ctx.thread.slots[new_bp]
+            .obj()
+            .expect("the receiver was null-checked")
+    };
+    if let Err(e) = ctx.monitor_enter(obj) {
+        ctx.thread.frames.pop();
+        ctx.thread.frames[fi].sp = sp as u32;
+        return Err(e.into());
+    }
+    if let Some(frame) = ctx.thread.frames.last_mut() {
+        frame.sync = Some(obj);
+    }
+    Ok(())
+}
+
+/// Runs native method `m`, whose arguments are on the stack from `new_bp`
+/// to `sp`, and leaves its result there; or throws for a method with no
+/// body.
+#[inline(never)]
+fn call_native(ctx: &mut Ctx<'_>, m: &Method, new_bp: usize, sp: &mut usize) -> Result<(), Fault> {
+    let f = match &m.body {
+        MethodBody::Native(f) => f,
+        MethodBody::Abstract => return Err(abstract_error(m)),
+        MethodBody::Unlinked => {
+            return Err(Fault::Error(
+                "java/lang/UnsatisfiedLinkError",
+                m.describe().replace('/', "."),
+            ));
+        }
+        MethodBody::Bytecode(_) | MethodBody::Empty => {
+            unreachable!("call runs bytecode and empty methods itself")
+        }
+    };
+    let args: SmallVec<[Value; 8]> = ctx.thread.slots[new_bp..*sp]
+        .iter()
+        .copied()
+        .filter(|v| !matches!(v, Value::Void))
+        .collect();
+    ctx.baseline = ctx.state.heap.used();
+    let v = ctx.call_native(m, f, new_bp, &args)?;
+    let s = &mut ctx.thread.slots;
+    let mut top = new_bp;
+    match m.ret {
+        Kind::Void => {}
+        Kind::Long | Kind::Double => {
+            s[top] = if v == Value::Void {
+                m.ret.default_value()
+            } else {
+                v
+            };
+            s[top + 1] = Value::Void;
+            top += 2;
+        }
+        kind => {
+            s[top] = if v == Value::Void {
+                kind.default_value()
+            } else {
+                v
+            };
+            top += 1;
+        }
+    }
+    *sp = top;
+    Ok(())
 }
 
 /// Looks for a handler of `exc` in the frames above `base`, popping the

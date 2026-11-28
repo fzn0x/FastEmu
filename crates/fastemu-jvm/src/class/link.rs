@@ -38,6 +38,7 @@ pub(super) struct FieldDef {
 pub(super) enum MethodSrc {
     Code(CodeAttr),
     Native(NativeFn),
+    Empty,
     Abstract,
     Unlinked,
 }
@@ -81,6 +82,7 @@ pub(super) fn from_native(native: NativeClass) -> Result<ClassDef, LoadError> {
             desc: m.desc.into(),
             access: m.access,
             src: match m.body {
+                _ if m.empty => MethodSrc::Empty,
                 Some(f) => MethodSrc::Native(f),
                 None => MethodSrc::Abstract,
             },
@@ -391,6 +393,7 @@ impl ClassTable {
                     }))
                 }
                 MethodSrc::Native(f) => MethodBody::Native(f),
+                MethodSrc::Empty => MethodBody::Empty,
                 MethodSrc::Abstract => MethodBody::Abstract,
                 MethodSrc::Unlinked => MethodBody::Unlinked,
             };
