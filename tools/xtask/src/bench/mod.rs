@@ -15,6 +15,7 @@
 //!
 //! The runtime is measured, not changed: nothing here is in the crates.
 
+pub mod android;
 pub mod child;
 mod java;
 mod keys;
@@ -50,6 +51,9 @@ pub struct Options {
     pub me_no_headless_awt: bool,
     /// Adds rows of MicroEmulator capped at this frame rate.
     pub me_max_fps: Option<u32>,
+    /// Measures FastEmu's app against J2ME Loader on an Android emulator
+    /// instead: `--android`.
+    pub android: Option<android::AndroidOptions>,
 }
 
 impl Options {
@@ -69,7 +73,14 @@ impl Options {
             me_jvm_args: Vec::new(),
             me_no_headless_awt: false,
             me_max_fps: None,
+            android: None,
         };
+        let mut android = false;
+        let mut fastemu_apk: Option<PathBuf> = None;
+        let mut j2ml_apk: Option<PathBuf> = None;
+        let mut avd: Option<String> = None;
+        let mut gpu: Option<String> = None;
+        let mut sdk: Option<PathBuf> = None;
         let mut iter = args.iter();
         while let Some(arg) = iter.next() {
             let mut value = |name: &str| {
@@ -105,8 +116,46 @@ impl Options {
                             .ok_or_else(|| format!("bad frame rate {n}"))?,
                     );
                 }
+                "--android" => android = true,
+                "--fastemu-apk" => fastemu_apk = Some(value(arg)?.into()),
+                "--j2meloader-apk" => j2ml_apk = Some(value(arg)?.into()),
+                "--avd" => avd = Some(value(arg)?),
+                "--gpu" => gpu = Some(value(arg)?),
+                "--sdk" => sdk = Some(value(arg)?.into()),
                 other => return Err(format!("unknown argument {other}")),
             }
+        }
+        if android {
+            if options.windows || options.fastemu_only || options.microemu.is_some() {
+                return Err(
+                    "--android measures FastEmu's app against J2ME Loader: not with                      --windows, --fastemu-only or --microemu"
+                        .into(),
+                );
+            }
+            if !options.build_only {
+                let (Some(fastemu_apk), Some(j2ml_apk)) = (fastemu_apk, j2ml_apk) else {
+                    return Err("--android needs --fastemu-apk PATH, an APK of FastEmu with                          the bench log, and --j2meloader-apk PATH,                          J2ME_Loader-1.9.0-open-release.apk"
+                        .into());
+                };
+                options.android = Some(android::AndroidOptions {
+                    fastemu_apk,
+                    j2ml_apk,
+                    avd: avd.unwrap_or_else(|| android::DEFAULT_AVD.into()),
+                    gpu: gpu.unwrap_or_else(|| android::DEFAULT_GPU.into()),
+                    sdk,
+                });
+            }
+            return Ok(options);
+        }
+        if fastemu_apk.is_some()
+            || j2ml_apk.is_some()
+            || avd.is_some()
+            || gpu.is_some()
+            || sdk.is_some()
+        {
+            return Err(
+                "--fastemu-apk, --j2meloader-apk, --avd, --gpu and --sdk go with --android".into(),
+            );
         }
         if options.microemu.is_none() && !options.fastemu_only && !options.build_only {
             return Err(
@@ -196,7 +245,8 @@ fn claim_out(out: &Path) -> Result<(), String> {
 
 /// Runs `cargo xtask bench`. `root` is the repository.
 pub fn run(options: &Options, root: &Path) -> Result<(), String> {
-    if !options.build_only {
+    // The Android bench only directs the emulator, so any build may run it.
+    if !options.build_only && options.android.is_none() {
         may_measure()?;
     }
     claim_out(&options.out)?;
@@ -215,6 +265,9 @@ pub fn run(options: &Options, root: &Path) -> Result<(), String> {
             }
         );
         return Ok(());
+    }
+    if let Some(android) = &options.android {
+        return android::run(options, android, &built);
     }
     let report = measure::run(options, &built, root)?;
     let md = options.out.join("bench.md");
