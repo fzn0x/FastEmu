@@ -1,16 +1,19 @@
 # Benchmark
 
 This page compares FastEmu with MicroEmulator 2.0.4 on one Windows
-computer. It measures how soon a game shows its first frame, how much
+computer, and FastEmu's Android app with J2ME Loader 1.9.0 on an Android
+emulator. It measures how soon a game shows its first frame, how much
 memory and processor time a game takes, many games at once, and how fast
-each runs game code. It also says plainly where MicroEmulator is faster.
+each runs game code. It also says plainly where MicroEmulator and J2ME
+Loader are faster.
 
 The numbers come from `cargo xtask bench`, a tool in FastEmu's
 repository. It runs the same JARs on both emulators the same way, with no
-window and no person at the keyboard. Anyone with a Windows computer can
-run it again: see [Run it yourself](#run-it-yourself).
+window on the computer and no person at the keyboard. Anyone can run it
+again: see [Run it yourself on Windows](#run-it-yourself-on-windows) and
+[Run it yourself on Android](#run-it-yourself-on-android).
 
-## Results
+## Results on Windows
 
 These numbers come from one run of the bench, 4 runs of each
 measurement, with no window.
@@ -225,7 +228,208 @@ cores beside the game, and the bench counts the processor time of every
 thread. In the kernel run, that came to 1.03 cores in use against
 FastEmu's 0.99.
 
-## How it was measured
+## Results on Android
+
+FastEmu's Android app and J2ME Loader ran the same JARs on one Android
+emulator, 4 runs of each measurement, with no window on the computer and
+no tap.
+
+| What | Value |
+| --- | --- |
+| Date | 2026-11-28, from 01:12 to 02:33 UTC |
+| FastEmu | 0.1.1 with the bench log of pull request [#107](https://github.com/fzn0x/FastEmu/pull/107), the release build for x86_64 |
+| J2ME Loader | 1.9.0, the open release, with the settings it gives a new game: 240x320, GLES drawing, no frame limit, keypad shown |
+| Both apps | installed fresh with `adb install -g`, then compiled with `cmd package compile -m speed -f` |
+| Emulator | Android emulator 34.2.16, a Pixel 8 with Android 15, API 35, x86_64, the Google Play system image |
+| Emulator settings | 4 processors, 4 GB, no window, drawing on the computer's graphics card (`-gpu host`) |
+| Computer | the one above: Intel Core i7-12700F, NVIDIA GeForce RTX 3060, Windows 11 Pro |
+
+Each number is the median of the 4 runs, with the smallest and the
+largest in brackets. Times are in milliseconds and memory in MiB. The
+emulator runs x86_64 Android on the computer's own processor, so these
+are not a phone's numbers. Both apps ran on the same emulator the same
+way, so the comparison holds.
+
+### Android in short
+
+- **Processor time.** FastEmu's app took about one whole core while a
+  game ran: 900 to 1040 ms of processor time a second in the six moving
+  games both ran, against 36 to 69 in J2ME Loader, 14 to 25 times more.
+  On Skocko's still screen it took 399, and J2ME Loader 2.2.
+- **Why.** The cost is FastEmu's window, not its game runtime. On
+  Windows, with no window, the same scene took 7.2 ms a second. While a
+  game runs, the window redraws at every refresh of the display, and
+  enlarges each new frame on the processor.
+  [Issue #108](https://github.com/fzn0x/FastEmu/issues/108) fixes both
+  for 0.2.0.
+- **Frames shown.** With its window that busy, FastEmu showed 22.8 of
+  the scene's 30 frames a second, and J2ME Loader 29.9. Stick Fight drew
+  29.3 frames a second in FastEmu, which showed 22.7; J2ME Loader showed
+  29.3. In the games that draw 20 frames a second, both kept up.
+- **Start.** About the same in games: the first frame was on screen 678
+  to 812 ms after the start in FastEmu, and 708 to 768 in J2ME Loader, in
+  the seven games both ran. The scene's first paint came 1.3 times sooner
+  in J2ME Loader: 533 ms against 711.
+- **Memory.** J2ME Loader's game process took 2.2 to 2.7 times less: 36
+  to 42 MiB against 78 to 112. It keeps its list of games in a second
+  process of about 18 MiB, and with both it still took 1.5 to 1.9 times
+  less. Every game at once took 144 MiB in FastEmu; J2ME Loader runs one
+  game at a time.
+- **Game code.** J2ME Loader ran the CPU kernels 5.6 to 158 times
+  faster once warm, and 4.9 to 64 times faster on the first repetition.
+  See [Where J2ME Loader is faster](#where-j2me-loader-is-faster).
+- **Drawing.** FastEmu was faster in six of the seven drawing kernels
+  compared, 1.1 to 7.6 times. J2ME Loader drew alpha images 2.0 times
+  faster.
+
+### The scene on Android
+
+The scene draws 30 frames a second. In FastEmu, its bench log counted
+all 30 a second; the window showed 22.8 of them.
+
+| Measure | FastEmu | J2ME Loader | Ratio |
+| --- | --- | --- | --- |
+| Start to first paint, ms | 711 (547 to 785) | 533 (508 to 562) | J2ME Loader 1.3x sooner |
+| Frames shown a second | 22.8 (22.4 to 22.9) | 29.9 (29.9 to 30.0) | J2ME Loader 1.3x more |
+| CPU ms a second | 1009.4 (1007.8 to 1013.2) | 54.2 (51.7 to 57.6) | J2ME Loader 18.6x less |
+| PSS of the game's process, MiB | 81.3 (80.4 to 82.1) | 37.6 (36.3 to 37.7) | J2ME Loader 2.2x less |
+| PSS with J2ME Loader's main process, MiB | 81.3 | 55.4 | J2ME Loader 1.5x less |
+| Peak resident, MiB | 183.6 (183.5 to 183.9) | 150.1 (149.7 to 150.2) | J2ME Loader 1.2x less |
+
+### The real games on Android
+
+Shown is the frames on screen a second, as Android counts them for the
+app. Drawn is the frames the game drew a second, from FastEmu's bench
+log; J2ME Loader has no such count. PSS is the memory of the game's
+process. Only the first frame and CPU a second show their ranges;
+`android.md` has the rest.
+
+| Game | App | First frame, ms | Drawn | Shown | CPU ms/s | PSS, MiB |
+| --- | --- | --- | --- | --- | --- | --- |
+| Block Fall | FastEmu | 707 (617 to 788) | 19.6 | 31.2 | 902.6 (879.4 to 912.4) | 100.9 |
+| Block Fall | J2ME Loader | 709 (624 to 782) | n/a | 19.5 | 35.7 (34.3 to 37.3) | 37.5 |
+| BombMan | FastEmu | 692 (548 to 783) | 29.1 | 25.4 | 979.5 (975.1 to 987.2) | 103.8 |
+| BombMan | J2ME Loader | 768 (629 to 867) | n/a | 37.1 | 69.2 (63.3 to 76.7) | 41.8 |
+| Shooter | FastEmu | 684 (627 to 828) | 0.0 | 59.9 | 372.8 (277.4 to 483.9) | 95.9 |
+| Shooter | J2ME Loader | could not install it | | | | |
+| Skocko | FastEmu | 678 (600 to 819) | 1.0 | 58.2 | 399.1 (322.0 to 493.8) | 78.1 |
+| Skocko | J2ME Loader | 708 (605 to 834) | n/a | 0.9 | 2.2 (1.7 to 2.3) | 35.7 |
+| Star Defender | FastEmu | 812 (699 to 916) | 19.6 | 31.2 | 899.8 (884.7 to 919.9) | 100.6 |
+| Star Defender | J2ME Loader | 709 (587 to 783) | n/a | 19.5 | 39.8 (37.3 to 41.3) | 39.2 |
+| Stick Fight | FastEmu | 715 (631 to 975) | 29.3 | 22.7 | 1040.2 (1036.3 to 1051.5) | 112.2 |
+| Stick Fight | J2ME Loader | 741 (595 to 833) | n/a | 29.3 | 61.0 (60.7 to 73.6) | 42.1 |
+| Tower Guard | FastEmu | 721 (676 to 816) | 19.6 | 31.0 | 900.1 (888.2 to 910.0) | 100.9 |
+| Tower Guard | J2ME Loader | 752 (587 to 830) | n/a | 19.5 | 37.2 (36.0 to 40.0) | 37.9 |
+| Traffic Dash | FastEmu | 696 (600 to 992) | 19.6 | 30.8 | 899.1 (886.5 to 941.1) | 101.2 |
+| Traffic Dash | J2ME Loader | 708 (650 to 745) | n/a | 19.5 | 38.3 (37.7 to 66.4) | 38.7 |
+
+- **Shooter**, whose suite is named MobileGame: J2ME Loader could not
+  install it. Its converter stopped with `Uncaught translation error:
+  aa2: stack: overflow`. FastEmu ran it, and the bench's keys took it to
+  its About screen, where it drew no new frames.
+- **Skocko** draws a new frame once a second. On that still screen,
+  FastEmu's window still showed 58 frames a second.
+- **BombMan** drew 29.1 frames a second in FastEmu, under its frame cap,
+  as on Windows. J2ME Loader has no cap and showed 37.1. So J2ME Loader
+  did more work in it, and still took 14 times less processor time.
+- FastEmu shows more frames than a 20-frame game draws, since its window
+  draws on its own pace, not the game's.
+
+### Kernels on Android
+
+Time of one repetition, ms. Warm is the median of rounds 2 to 5; cold is
+the first repetition. `+/-1` marks a time under 20 steps of the clock.
+
+| Kernel | FastEmu warm | J2ME Loader warm | Warm ratio | Cold ratio |
+| --- | --- | --- | --- | --- |
+| cpu.int | 502.00 | 14.12 (+/-1) | J2ME Loader 35.6x faster | J2ME Loader 10.9x faster |
+| cpu.call | 189.58 | 1.20 (+/-1) | J2ME Loader 158.5x faster | J2ME Loader 64.0x faster |
+| cpu.sieve | 187.17 | 9.68 (+/-1) | J2ME Loader 19.3x faster | J2ME Loader 12.4x faster |
+| cpu.sort | 170.42 | 4.65 (+/-1) | J2ME Loader 36.7x faster | J2ME Loader 14.4x faster |
+| cpu.actors | 201.92 | 2.57 (+/-1) | J2ME Loader 78.6x faster | J2ME Loader 19.9x faster |
+| cpu.long | 228.67 | 5.13 (+/-1) | J2ME Loader 44.6x faster | J2ME Loader 29.7x faster |
+| cpu.float | 242.17 | 22.49 | J2ME Loader 10.8x faster | J2ME Loader 10.1x faster |
+| cpu.string | 155.00 | 27.59 | J2ME Loader 5.6x faster | J2ME Loader 4.9x faster |
+| cpu.collections | 177.17 | 29.01 | J2ME Loader 6.1x faster | J2ME Loader 5.5x faster |
+| mem.small | 266.12 | 9.75 (+/-1) | J2ME Loader 27.3x faster | J2ME Loader 17.4x faster |
+| mem.arrays | 244.50 | 93.79 | J2ME Loader 2.6x faster | J2ME Loader 2.2x faster |
+| mem.gc | 4.84 (+/-1) | 10.29 (+/-1) | FastEmu 2.1x faster | FastEmu 2.0x faster |
+| draw.fillrect | 146.38 | 156.25 | FastEmu 1.1x faster | FastEmu 1.1x faster |
+| draw.line | 228.17 | 262.75 | FastEmu 1.2x faster | FastEmu 1.2x faster |
+| draw.image | 122.65 | 305.25 | FastEmu 2.5x faster | FastEmu 2.6x faster |
+| draw.alpha | 298.75 | 151.94 | J2ME Loader 2.0x faster | J2ME Loader 2.0x faster |
+| draw.region | 370.00 | 624.75 | FastEmu 1.7x faster | FastEmu 1.8x faster |
+| draw.text | 179.00 | 336.75 | not compared | not compared |
+| draw.rgb | 229.50 | 1743.00 | FastEmu 7.6x faster | FastEmu 7.5x faster |
+| draw.scene | 0.09 (+/-1) | 0.11 (+/-1) | FastEmu 1.3x faster | n/a |
+
+Every CPU and memory kernel printed the same check value in both apps.
+Text is not compared: J2ME Loader draws its medium font at 22 pixels,
+FastEmu at 14.
+
+The whole kernel run took FastEmu 83545 ms of processor time in 63926
+of wall time, 1.31 cores in use, and J2ME Loader 70390 in 63252, 1.11.
+FastEmu's window draws beside the kernels, as it does beside a game.
+
+### Every game at once on Android
+
+J2ME Loader runs one game at a time, so only FastEmu ran this.
+
+| Measure | FastEmu |
+| --- | --- |
+| Last game's first frame, ms | 912 (803 to 1123) |
+| CPU ms a second | 803.4 (633.7 to 950.5) |
+| PSS, MiB | 144.2 (142.2 to 145.2) |
+| Frames shown a second | 59.8 (56.5 to 59.8) |
+
+All eight took less processor time than one game alone. Each game's
+tile is small, so the window enlarges its frames less, which is the
+likely reason.
+
+### What the Android bench flagged
+
+- The first kernel run of each app began while the emulator was still
+  busy after the install: after a minute's wait, it was at 3639 and 2683
+  busy ms a second. Both apps ran slower in it, FastEmu by up to 53
+  percent and J2ME Loader by up to 33, and the medians sit with the
+  other three runs.
+- In 7 of the 80 measurements, the rest of the emulator took over 500
+  busy ms a second while the samples ran. Two of them hold the highest
+  processor time of their rows: Skocko and every game at once, both on
+  FastEmu in run 4.
+- FastEmu's processor time on still screens spread widely: Shooter from
+  277 to 484 ms a second, Skocko from 322 to 494.
+
+## Where J2ME Loader is faster
+
+J2ME Loader turns a game's classes into Android's own format when it
+installs the game. Android's runtime then runs them, and compiles the
+busy parts to machine code as they run. FastEmu interprets every
+instruction in a virtual machine of its own, as on Windows. So J2ME
+Loader ran the CPU kernels 5.6 to 158 times faster once warm, and 4.9 to
+64 times faster on the very first repetition. It made small objects 27.3
+times faster and arrays 2.6 times faster. FastEmu was faster at a full
+collection, 4.84 ms against 10.29.
+
+In drawing, J2ME Loader was faster at alpha images, 2.0 times. FastEmu
+was faster at the other six kernels compared.
+
+In the games, the larger cost was FastEmu's window. It took about a
+whole core while any game ran, and 373 to 399 ms a second on a still
+screen. [Issue #108](https://github.com/fzn0x/FastEmu/issues/108) makes
+the window draw only when a game has something new, and enlarge a
+screen no more than it needs. Issues
+[#77](https://github.com/fzn0x/FastEmu/issues/77) and
+[#78](https://github.com/fzn0x/FastEmu/issues/78) make game code faster:
+a faster interpreter, then compiling busy code to machine code.
+
+J2ME Loader also took less memory. Its game process holds the game and
+its drawing, and its list of games is in a second process. FastEmu's one
+process holds the whole app beside the game: its interface, its library
+and its graphics. Counting both of J2ME Loader's processes, it still took
+1.5 to 1.9 times less.
+
+## How it was measured on Windows
 
 ### The two emulators
 
@@ -376,7 +580,82 @@ For a run, put the computer on mains power and in its best performance
 mode, pause browsers, editors, chat, OneDrive and Windows Update, and
 mute the speakers.
 
-## Run it yourself
+## How it was measured on Android
+
+### The two apps
+
+- **FastEmu**: its Android app, the release build for x86_64, with its
+  bench log turned on by `setprop log.tag.FastEmuBench DEBUG` before it
+  starts. The log writes to logcat what the bench cannot see from
+  outside: each game's first frame, its frame count once a second, what
+  it prints and how it ended. Its part of
+  [Building the Android app](/docs/building-android/) has the lines.
+- **J2ME Loader 1.9.0**, the open release from its GitHub page, checked
+  by its SHA-256. It installs a game by converting its classes to
+  Android's format, once for each JAR, before the runs. The bench writes
+  the settings J2ME Loader gives a new game as the game's `config.json`,
+  so the game starts straight from the shell, with no settings screen.
+- Both are installed fresh, with every permission they ask for, and
+  compiled ahead of time with `cmd package compile -m speed -f`.
+
+### What runs on Android
+
+- The same benchmark MIDlet as on Windows: its kernels, and its scene at
+  30 frames a second.
+- The same real games, each for 45 s, sampled at 10 s and at 40 s.
+- Every game at once, for 60 s, sampled at 15 s and at 55 s, on FastEmu
+  only.
+- Each JAR reaches both apps the same way. The bench pushes it to the
+  emulator's Downloads folder and opens it by its `content://` address,
+  with read permission, as a file manager would, with no tap. FastEmu
+  starts the game it is handed. J2ME Loader converts it once, and the
+  bench then starts the installed game.
+- Before each start, the bench stops both apps and clears FastEmu's data
+  and J2ME Loader's saves of the game, so nothing carries over from one
+  measurement to the next.
+
+### Where each Android number comes from
+
+| Number | Source | How |
+| --- | --- | --- |
+| Kernel times | The MIDlet's clock | As on Windows, read from FastEmu's bench log and J2ME Loader's `System.out` in logcat |
+| Start to first paint, scene | logcat | From Android's line that starts the app's activity to the MIDlet's first paint, on the same clock |
+| First frame, real games | SurfaceFlinger | From the activity's start to the first frame of the app on screen; in FastEmu, the first after its bench log's first frame, since its window shows its library before |
+| Frames shown | SurfaceFlinger | `dumpsys SurfaceFlinger --timestats`: the app's frames on screen between the two samples |
+| Frames drawn | FastEmu's bench log | The game's frame count between the two samples |
+| Processor time | `/proc/PID/stat` | The game process's user and system time between the two samples |
+| Memory | `dumpsys meminfo`, `/proc/PID/status` | PSS of the game's process at the second sample, and its peak resident set, `VmHWM` |
+| Other load | `/proc/stat` | The emulator's busy time, minus the game's process |
+
+PSS counts a process's own memory and its share of what it shares with
+other processes. It is the measure Android uses itself. J2ME Loader runs
+a game in a process of its own, beside its main one; FastEmu runs games
+in its app's one process. The tables give the game's process, and J2ME
+Loader's main process beside it.
+
+### Fair rules on Android
+
+- Both apps run the same JAR on a 240x320 screen. The MIDlet printed the
+  same size in both.
+- Both get the same keys at the same times after the game's first frame,
+  through `input keyevent`: the arrows, and Enter as fire. Both apps map
+  these keys the same way.
+- FastEmu holds a game to 60 frames a second; J2ME Loader, with no frame
+  limit, does not. The table gives the frames beside the processor time.
+- Both draw on the computer's graphics card, through the emulator. Its
+  time there is outside the emulator's counters, for both apps.
+- Each measurement runs 4 times. FastEmu and J2ME Loader take turns going
+  first.
+
+### Runs and a quiet emulator
+
+Before each start, the bench waits until the emulator's processors are
+quiet, under 150 busy ms a second, for up to a minute, and records the
+load. `android.md` gives the load before the starts and the rest of the
+emulator's load during the samples. The emulator's time on the computer
+is not measured: the numbers come from inside it.
+
+## Run it yourself on Windows
 
 You need Windows, a JDK 17 (any Java 8 or newer runs MicroEmulator),
 Rust, and about 90 minutes. In PowerShell, download MicroEmulator 2.0.4
@@ -431,10 +710,72 @@ rights on the computer: it has no sandbox.** Run only games you trust in
 it. FastEmu runs games in a virtual machine of its own, which reaches
 only what FastEmu gives it.
 
+## Run it yourself on Android
+
+You need the Android SDK's emulator and platform tools, an x86_64 system
+image of Android 15, a JDK 17, Rust, and about 90 minutes. The bench runs
+wherever the emulator does. Make the AVD once, from the SDK's
+`cmdline-tools/latest/bin`:
+
+```sh
+sdkmanager "emulator" "platform-tools" "system-images;android-35;google_apis_playstore;x86_64"
+avdmanager create avd -n Pixel_8_API_35 \
+  -k "system-images;android-35;google_apis_playstore;x86_64" -d pixel_8
+```
+
+FastEmu's APK must have the bench log. Every build from main has it, and
+so does every release from 0.2.0 on; 0.1.1 has none. To build one for
+the emulator, as [Building the Android app](/docs/building-android/)
+says:
+
+```sh
+cargo ndk -t x86_64 -P 31 -o android/app/src/main/jniLibs \
+  build --release -p fastemu-android
+(cd android && ./gradlew assembleRelease -Pfastemu.skipCargo)
+```
+
+Download J2ME Loader 1.9.0 and check it. The bench checks it too, and
+refuses any other file:
+
+```sh
+curl -L -o J2ME_Loader-1.9.0-open-release.apk \
+  https://github.com/nikita36078/J2ME-Loader/releases/download/1.9.0/J2ME_Loader-1.9.0-open-release.apk
+sha256sum J2ME_Loader-1.9.0-open-release.apk
+# 32f0cf8124d3e608e583799d604cbd7815a790e746f5c49ebd79e13247c85c96
+```
+
+Put the JARs of the games to run in a folder, here `~/bench/games`. Then
+build the bench and run it from the repository:
+
+```sh
+cargo build --release --locked -p xtask
+./target/release/xtask bench --android \
+  --fastemu-apk android/app/build/outputs/apk/release/app-release.apk \
+  --j2meloader-apk J2ME_Loader-1.9.0-open-release.apk \
+  --games ~/bench/games --out ~/bench/out
+```
+
+The bench starts the emulator itself, with no window, on port 5580, and
+stops it at the end. It refuses to start while another emulator uses
+that port. It starts the AVD read-only, so the AVD stays as it was, and
+both apps are installed fresh each time. It writes `android.md` and
+`android.json` to `android` in the output folder, with the logcat of
+each measurement and a screenshot of each game in each app. Read the load and the
+problems at the end of `android.md` before you trust a number.
+
+- `--avd NAME` names another AVD. Its numbers are then its own.
+- `--gpu MODE` gives the emulator another `-gpu` mode. `host` draws on
+  the computer's graphics card; `swiftshader_indirect` draws on its
+  processor, for a computer without a graphics card the emulator can
+  use, and counts that drawing outside both apps.
+- `--sdk DIR` names the SDK. Without it, the bench looks in
+  `ANDROID_HOME`, `ANDROID_SDK_ROOT` and the SDK's usual folders.
+- `--runs N` changes the number of runs.
+
 ## Not measured
 
-- J2ME Loader, which runs only on Android. How FastEmu compares with it
-  stays unmeasured.
+- A phone. The Android numbers come from an x86_64 emulator on a desktop
+  processor; a phone's Arm processor and its heat give other numbers.
 - macOS and Linux.
 - A cold disk cache: the bench runs each emulator once first, so files
   are in memory.
