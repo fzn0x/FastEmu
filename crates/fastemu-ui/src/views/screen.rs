@@ -1,5 +1,11 @@
 //! Drawing a game's screen: uploading each new frame to GPUI's image atlas
-//! once, at the size it is shown, and freeing the frame before it.
+//! once, and freeing the frame before it.
+//!
+//! Where the renderer magnifies images with the nearest filter, a frame is
+//! uploaded at the game's own size and the GPU enlarges it, pixel for
+//! pixel. FastEmu's GPUI does that in its wgpu renderer, which Android and
+//! Linux use. Elsewhere the frame is enlarged on the processor to the size
+//! it is shown, since the GPU would blur it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -9,6 +15,20 @@ use fastemu_core::{Frame, InstanceId};
 use gpui::{Bounds, Corners, Pixels, RenderImage, Window};
 
 use crate::pixels::{Bgra, screen_bgra};
+
+/// Whether the platform's renderer magnifies images with the nearest
+/// filter, so that a screen can be uploaded at the game's own size.
+pub const GPU_ENLARGES_CRISPLY: bool = cfg!(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "freebsd"
+));
+
+/// How many times a frame is enlarged before upload, for a screen shown
+/// `shown` times its size.
+pub fn upload_factor(shown: u32) -> u32 {
+    if GPU_ENLARGES_CRISPLY { 1 } else { shown }
+}
 
 /// Wraps BGRA bytes in the image type GPUI paints.
 pub fn render_image(bgra: Bgra) -> Option<Arc<RenderImage>> {
