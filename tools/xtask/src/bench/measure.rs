@@ -60,8 +60,17 @@ pub struct Running {
 }
 
 impl Running {
+    pub fn new(child: Child) -> Self {
+        Self { child }
+    }
+
     pub fn pid(&self) -> u32 {
         self.child.id()
+    }
+
+    /// Whether the process has ended.
+    pub fn has_ended(&mut self) -> bool {
+        !matches!(self.child.try_wait(), Ok(None))
     }
 }
 
