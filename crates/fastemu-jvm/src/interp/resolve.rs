@@ -6,10 +6,10 @@
 //! resolution is not cached, so it throws again each time, as the JVM
 //! specification requires.
 
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, OnceLock, Weak};
 
-use crate::class::{ClassId, Method, RtPool, Selector};
+use crate::class::{ClassId, Method, MethodArena, MethodId, RtPool, Selector};
 use crate::classfile::Constant;
 use crate::ctx::{Ctx, JResult};
 use crate::descriptor::Kind;
@@ -39,9 +39,9 @@ pub(crate) enum FieldRes {
 
 /// A resolved method reference and what dispatch needs from it.
 pub(crate) struct MethodRes {
-    /// The resolved method; weak so constant pools do not keep methods,
-    /// and through them other pools, alive in a cycle.
-    pub(crate) method: Weak<Method>,
+    /// The resolved method. An id, so that constant pools do not keep
+    /// methods, and through them other pools, alive in a cycle.
+    pub(crate) method: MethodId,
     pub(crate) class: ClassId,
     pub(crate) selector: Selector,
     pub(crate) arg_slots: u16,
@@ -51,18 +51,17 @@ pub(crate) struct MethodRes {
     /// Private and final methods need no dispatch.
     pub(crate) direct: bool,
     /// The method `invokespecial` selects, once computed.
-    pub(crate) special: OnceLock<Weak<Method>>,
+    pub(crate) special: OnceLock<MethodId>,
     /// The last receiver class of `invokeinterface` (plus one, high half)
     /// and the vtable index it dispatched to (low half).
     pub(crate) icache: AtomicU64,
 }
 
 impl MethodRes {
+    /// The resolved method, in `methods`, the arena of its machine.
     #[inline]
-    pub(crate) fn target(&self) -> Arc<Method> {
-        self.method
-            .upgrade()
-            .expect("methods live as long as their class table")
+    pub(crate) fn target<'m>(&self, methods: &'m MethodArena) -> &'m Method {
+        methods.get(self.method)
     }
 }
 
@@ -190,7 +189,7 @@ impl Ctx<'_> {
             || method.access & crate::classfile::access::FINAL != 0
             || &*method.name == "<init>";
         let res = MethodRes {
-            method: Arc::downgrade(&method),
+            method: method.id,
             class: method.class,
             selector: method.selector,
             arg_slots: method.arg_slots,

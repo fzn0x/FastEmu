@@ -81,9 +81,8 @@ impl Ctx<'_> {
             MethodBody::Native(f) => {
                 // A native that calls another native recurses on the host
                 // stack just as one that calls bytecode does.
-                let f = Arc::clone(f);
                 self.thread.native_depth += 1;
-                let result = self.call_native(method, &f, top, args);
+                let result = self.call_native(method, f, top, args);
                 self.thread.native_depth -= 1;
                 result
             }
@@ -100,7 +99,7 @@ impl Ctx<'_> {
 
     /// Takes the monitor of a synchronized method's `this` (or class) for
     /// the frame just pushed.
-    fn enter_synchronized(&mut self, method: &Arc<Method>, args: &[Value]) -> JResult<()> {
+    fn enter_synchronized(&mut self, method: &Method, args: &[Value]) -> JResult<()> {
         if !method.is_synchronized() {
             return Ok(());
         }
@@ -124,14 +123,14 @@ impl Ctx<'_> {
     /// and synchronization.
     pub(crate) fn call_native(
         &mut self,
-        method: &Arc<Method>,
+        method: &Method,
         f: &crate::native::NativeFn,
         bp: usize,
         args: &[Value],
     ) -> JResult<Value> {
         let mark = self.thread.locals.len();
         self.thread.frames.push(Frame {
-            method: Arc::clone(method),
+            method: method.id,
             pc: 0,
             bp: bp as u32,
             sp: (bp + method.arg_slots as usize) as u32,

@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::budget::ClassBudget;
-use super::{ArrayType, Class, ClassId, ClassKind, Field, Method, Selector};
+use super::{ArrayType, Class, ClassId, ClassKind, Field, Method, MethodArena, MethodId, Selector};
 use crate::classfile::{ClassFile, access};
 use crate::native::NativeClass;
 use crate::source::ClassSource;
@@ -120,6 +120,8 @@ pub(crate) struct ClassTable {
     /// interfaces included. Classes are never unloaded, so only a class
     /// that fails to load gives anything back.
     pub(super) budget: ClassBudget,
+    /// Every method of the classes, by id, shared with the machine.
+    pub(super) arena: Arc<MethodArena>,
 }
 
 impl ClassTable {
@@ -143,7 +145,13 @@ impl ClassTable {
             init: Vec::new(),
             mirrors: Vec::new(),
             budget: ClassBudget::new(max_class_bytes),
+            arena: Arc::new(MethodArena::new()),
         }
+    }
+
+    /// Every method of the classes, by id.
+    pub(crate) fn arena(&self) -> &Arc<MethodArena> {
+        &self.arena
     }
 
     #[inline]
@@ -449,8 +457,8 @@ impl ClassTable {
         &self,
         current: ClassId,
         super_semantics: bool,
-        resolved: &Arc<Method>,
-    ) -> Arc<Method> {
+        resolved: &Method,
+    ) -> MethodId {
         let cur = self.get(current);
         let target = self.get(resolved.class);
         if !super_semantics
@@ -459,7 +467,7 @@ impl ClassTable {
             || resolved.class == current
             || !self.is_subclass(current, resolved.class)
         {
-            return Arc::clone(resolved);
+            return resolved.id;
         }
         let mut next = cur.superclass;
         while let Some(id) = next {
@@ -467,11 +475,11 @@ impl ClassTable {
             if let Some(m) = c.declared_method(&resolved.name, &resolved.desc)
                 && !m.is_static()
             {
-                return Arc::clone(m);
+                return m.id;
             }
             next = c.superclass;
         }
-        Arc::clone(resolved)
+        resolved.id
     }
 
     /// Whether `sub` is `sup` or a subclass of it (classes only).

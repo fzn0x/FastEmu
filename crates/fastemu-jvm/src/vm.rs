@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use fastemu_core::{LogLevel, LogLine};
 use parking_lot::{Mutex, MutexGuard};
 
-use crate::class::{ClassId, ClassTable};
+use crate::class::{ClassId, ClassTable, MethodArena};
 use crate::clock::{Clock, VmClock};
 use crate::ctx::{Ctx, JResult};
 use crate::heap::{Heap, HeapStats};
@@ -277,6 +277,9 @@ pub(crate) struct VmShared {
     pub(crate) released_globals: Mutex<Vec<u32>>,
     pub(crate) this: Weak<VmShared>,
     pub(crate) id: u64,
+    /// Every method of the machine, by id: the class table's, outside the
+    /// lock, so the interpreter borrows a method without counting it.
+    pub(crate) methods: Arc<MethodArena>,
 }
 
 /// How long [`Vm::stop`], [`Vm::pause`] and [`Vm::resume`] wait for the VM
@@ -483,7 +486,9 @@ impl Vm {
             exit_code: None,
             live_threads: 0,
         };
+        let methods = Arc::clone(state.classes.arena());
         let shared = Arc::new_cyclic(|this| VmShared {
+            methods,
             state: Mutex::new(state),
             cond: WaitQueue::default(),
             stopping: AtomicBool::new(false),
@@ -726,6 +731,26 @@ mod tests {
         drop(clone);
         assert!(weak.is_freed());
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn a_freed_machine_frees_its_methods() {
+        let config = VmConfig {
+            log: Arc::new(|_| {}),
+            ..VmConfig::default()
+        };
+        let vm = Vm::new(config, Arc::new(crate::MemorySource::new()), Vec::new());
+        let arena = Arc::downgrade(&vm.shared.methods);
+        let object = {
+            let state = vm.shared.state.lock();
+            let id = state.classes.lookup("java/lang/Object").expect("loaded");
+            let method = Arc::clone(&state.classes.get(id).methods[0]);
+            assert!(Arc::ptr_eq(vm.shared.methods.get(method.id), &method));
+            Arc::downgrade(&method)
+        };
+        drop(vm);
+        assert!(arena.upgrade().is_none(), "the arena went with the machine");
+        assert!(object.upgrade().is_none(), "and its methods with it");
     }
 
     #[test]

@@ -6,7 +6,6 @@
 //! creating an exception (its stack trace reads the frame) or running a
 //! static initializer (which pushes frames above this one).
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use smallvec::SmallVec;
@@ -20,7 +19,7 @@ use crate::descriptor::Kind;
 use crate::heap::{Body, Heap};
 use crate::lang;
 use crate::value::{ObjRef, Value};
-use crate::vm::VmState;
+use crate::vm::{VmShared, VmState};
 
 /// Backward branches and calls between safepoints.
 const YIELD_INTERVAL: u32 = 4096;
@@ -336,12 +335,21 @@ fn abstract_error(m: &Method) -> Fault {
     )
 }
 
-/// Picks the method an invoke instruction runs.
-fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc<Method>, Fault> {
+/// Picks the method an invoke instruction runs. The method is the
+/// machine's, borrowed from its arena, so the call counts no reference.
+#[inline(never)]
+fn select<'vm>(
+    ctx: &mut Ctx<'vm>,
+    pool: &RtPool,
+    insn: Insn,
+    sp: usize,
+) -> Result<&'vm Method, Fault> {
+    let shared: &'vm VmShared = ctx.shared;
+    let methods = &*shared.methods;
     match insn {
         Insn::InvokeStatic(i) => {
             let res = method_res(ctx, pool, i)?;
-            let m = res.target();
+            let m = res.target(methods);
             if !res.is_static {
                 return Err(incompatible(format!(
                     "Expected static method '{}'",
@@ -354,7 +362,7 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
         Insn::InvokeVirtual(i) => {
             let res = method_res(ctx, pool, i)?;
             if res.is_static {
-                let m = res.target();
+                let m = res.target(methods);
                 return Err(incompatible(format!(
                     "Expecting non-static method '{}'",
                     m.describe()
@@ -362,7 +370,7 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
             }
             let recv = receiver(ctx, sp, res)?;
             if res.direct {
-                return Ok(res.target());
+                return Ok(res.target(methods));
             }
             let rc = ctx.state.heap.class_of(recv);
             let class = ctx.state.classes.get(rc);
@@ -378,11 +386,11 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
                 None => class.virtual_method(res.selector),
             };
             match found {
-                Some(m) => Ok(Arc::clone(m)),
+                Some(m) => Ok(methods.method(m.id)),
                 None => Err(incompatible(format!(
                     "Class {} does not have the method '{}'",
                     ctx.class_name(rc).replace('/', "."),
-                    res.target().describe().replace('/', ".")
+                    res.target(methods).describe().replace('/', ".")
                 ))),
             }
         }
@@ -393,7 +401,7 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
             let class = ctx.state.classes.get(rc);
             let packed = res.icache.load(Ordering::Relaxed);
             if (packed >> 32) as u32 == rc.0 + 1 {
-                return Ok(Arc::clone(&class.vtable[packed as u32 as usize]));
+                return Ok(methods.method(class.vtable[packed as u32 as usize].id));
             }
             match class.vmap.get(&res.selector) {
                 Some(&v) => {
@@ -401,11 +409,11 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
                         (u64::from(rc.0) + 1) << 32 | u64::from(v),
                         Ordering::Relaxed,
                     );
-                    Ok(Arc::clone(&class.vtable[v as usize]))
+                    Ok(methods.method(class.vtable[v as usize].id))
                 }
                 None => {
                     if ctx.state.classes.is_assignable(rc, res.class) {
-                        Err(abstract_error(&res.target()))
+                        Err(abstract_error(res.target(methods)))
                     } else {
                         Err(incompatible(format!(
                             "Class {} does not implement the requested interface {}",
@@ -419,23 +427,21 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
         Insn::InvokeSpecial(i) => {
             let res = method_res(ctx, pool, i)?;
             if res.is_static {
-                let m = res.target();
+                let m = res.target(methods);
                 return Err(incompatible(format!(
                     "Expecting non-static method '{}'",
                     m.describe()
                 )));
             }
             receiver(ctx, sp, res)?;
-            let chosen = res.special.get_or_init(|| {
-                Arc::downgrade(&ctx.state.classes.select_special(
+            let chosen = *res.special.get_or_init(|| {
+                ctx.state.classes.select_special(
                     pool.class,
                     pool.super_semantics,
-                    &res.target(),
-                ))
+                    res.target(methods),
+                )
             });
-            Ok(chosen
-                .upgrade()
-                .expect("methods live as long as their class table"))
+            Ok(methods.method(chosen))
         }
         _ => unreachable!("select is only called for invoke instructions"),
     }
@@ -444,7 +450,7 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
 /// Calls `m` with its arguments on top of frame `fi`'s operand stack.
 /// Returns whether a callee frame was pushed; for natives, runs them and
 /// leaves the result on the stack.
-fn call(ctx: &mut Ctx<'_>, fi: usize, m: Arc<Method>, sp: &mut usize) -> Result<bool, Fault> {
+fn call(ctx: &mut Ctx<'_>, fi: usize, m: &Method, sp: &mut usize) -> Result<bool, Fault> {
     // The stack walk counted these arguments, so this holds for code that
     // passed it. A release build would wrap on a bug and run far off the
     // frame.
@@ -457,7 +463,7 @@ fn call(ctx: &mut Ctx<'_>, fi: usize, m: Arc<Method>, sp: &mut usize) -> Result<
     match &m.body {
         MethodBody::Bytecode(_) => {
             ctx.thread.frames[fi].sp = new_bp as u32;
-            if let Err(f) = push_frame(ctx, &m, new_bp) {
+            if let Err(f) = push_frame(ctx, m, new_bp) {
                 ctx.thread.frames[fi].sp = *sp as u32;
                 return Err(f);
             }
@@ -481,14 +487,13 @@ fn call(ctx: &mut Ctx<'_>, fi: usize, m: Arc<Method>, sp: &mut usize) -> Result<
             Ok(true)
         }
         MethodBody::Native(f) => {
-            let f = Arc::clone(f);
             let args: SmallVec<[Value; 8]> = ctx.thread.slots[new_bp..*sp]
                 .iter()
                 .copied()
                 .filter(|v| !matches!(v, Value::Void))
                 .collect();
             ctx.baseline = ctx.state.heap.used();
-            let v = ctx.call_native(&m, &f, new_bp, &args)?;
+            let v = ctx.call_native(m, f, new_bp, &args)?;
             let s = &mut ctx.thread.slots;
             let mut top = new_bp;
             match m.ret {
@@ -514,7 +519,7 @@ fn call(ctx: &mut Ctx<'_>, fi: usize, m: Arc<Method>, sp: &mut usize) -> Result<
             *sp = top;
             Ok(false)
         }
-        MethodBody::Abstract => Err(abstract_error(&m)),
+        MethodBody::Abstract => Err(abstract_error(m)),
         MethodBody::Unlinked => Err(Fault::Error(
             "java/lang/UnsatisfiedLinkError",
             m.describe().replace('/', "."),
@@ -526,10 +531,11 @@ fn call(ctx: &mut Ctx<'_>, fi: usize, m: Arc<Method>, sp: &mut usize) -> Result<
 /// frames that have none. Returns whether one was found; its frame is
 /// then on top with the exception on its operand stack.
 fn catch(ctx: &mut Ctx<'_>, base: usize, exc: ObjRef) -> bool {
+    let shared = ctx.shared;
     let exc_class = ctx.state.heap.class_of(exc);
     while ctx.thread.frames.len() > base {
         let frame = ctx.thread.frames.last().expect("more frames than base");
-        let method = Arc::clone(&frame.method);
+        let method = shared.methods.method(frame.method);
         let pc = frame.pc.saturating_sub(1);
         if !frame.native
             && let (Some(Ok(code)), Some(pool)) = (method.code(), method.pool())
@@ -595,7 +601,10 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
     let locals_mark = ctx.thread.locals.len();
     loop {
         let fi = ctx.thread.frames.len() - 1;
-        let method = Arc::clone(&ctx.thread.frames[fi].method);
+        // The frame's method is borrowed from the machine's arena, which
+        // outlives this thread, so a call and a return count no reference.
+        let shared: &VmShared = ctx.shared;
+        let method = shared.methods.method(ctx.thread.frames[fi].method);
         let Some(Ok(code)) = method.code() else {
             unreachable!("frames are pushed only for decoded bytecode")
         };
@@ -1407,7 +1416,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                 // returned: the caller's stack walk counted on that, and
                 // bytecode can load a long as one slot or the second half
                 // of one.
-                match frame.method.ret.slots() {
+                match method.ret.slots() {
                     0 => {}
                     2 => {
                         t.slots[at] = v;
