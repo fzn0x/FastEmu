@@ -128,14 +128,19 @@ impl Options {
         if android {
             if options.windows || options.fastemu_only || options.microemu.is_some() {
                 return Err(
-                    "--android measures FastEmu's app against J2ME Loader: not with                      --windows, --fastemu-only or --microemu"
+                    "--android measures FastEmu's app against J2ME Loader: not with \
+                     --windows, --fastemu-only or --microemu"
                         .into(),
                 );
             }
             if !options.build_only {
                 let (Some(fastemu_apk), Some(j2ml_apk)) = (fastemu_apk, j2ml_apk) else {
-                    return Err("--android needs --fastemu-apk PATH, an APK of FastEmu with                          the bench log, and --j2meloader-apk PATH,                          J2ME_Loader-1.9.0-open-release.apk"
-                        .into());
+                    return Err(
+                        "--android needs --fastemu-apk PATH, an APK of FastEmu with \
+                         the bench log, and --j2meloader-apk PATH, \
+                         J2ME_Loader-1.9.0-open-release.apk"
+                            .into(),
+                    );
                 };
                 options.android = Some(android::AndroidOptions {
                     fastemu_apk,
