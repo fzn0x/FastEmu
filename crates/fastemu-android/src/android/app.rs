@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use fastemu_audio::Engine;
+use fastemu_core::Launcher;
 use fastemu_midp::MidpLauncher;
 use fastemu_ui::{AppConfig, AppPaths, FastEmuView};
 use futures::StreamExt as _;
@@ -13,6 +14,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{App, AppContext as _, AppLifecyclePhase, WindowHandle, WindowOptions};
 
 use super::{picker, text_entry};
+use crate::bench_log::{self, BenchLauncher};
 use crate::files;
 
 /// The app's folders.
@@ -42,8 +44,16 @@ pub(super) fn start(
     opened: UnboundedReceiver<String>,
 ) {
     fastemu_ui::init(cx);
+    let mut launcher: Arc<dyn Launcher> = Arc::new(MidpLauncher::new(Some(engine)));
+    if bench_log_on() {
+        log::info!("app: the bench log is on");
+        launcher = Arc::new(BenchLauncher::new(
+            launcher,
+            Arc::new(|line: &str| log::info!("{}: {line}", bench_log::NAME)),
+        ));
+    }
     let config = AppConfig {
-        launcher: Arc::new(MidpLauncher::new(Some(engine))),
+        launcher,
         paths: folders.app_paths(),
         text_entry: Some(text_entry::entry()),
     };
@@ -62,6 +72,17 @@ pub(super) fn start(
     open_games_from_other_apps(cx, window, opened);
     follow_the_lifecycle(cx, window);
     keep_the_screen_on(cx);
+}
+
+/// Whether `adb shell setprop log.tag.FastEmuBench DEBUG` turned the
+/// bench log on before the app started (see [`bench_log`]).
+fn bench_log_on() -> bool {
+    std::process::Command::new("/system/bin/getprop")
+        .arg(format!("log.tag.{}", bench_log::NAME))
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .is_some_and(|out| bench_log::turned_on(&String::from_utf8_lossy(&out.stdout)))
 }
 
 /// Adds and starts each game another app opens with FastEmu.
