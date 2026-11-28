@@ -399,10 +399,13 @@ impl Heap {
             let Some(obj) = slot else { continue };
             if self.marks[index / 64] & (1 << (index % 64)) == 0 {
                 *slot = None;
-                self.free.push(index as u32);
                 freed += 1;
             } else {
-                obj.counted = obj.measure();
+                // Only a payload can change size after allocation; fields
+                // and arrays keep theirs.
+                if obj.payload.is_some() {
+                    obj.counted = obj.measure();
+                }
                 used += obj.counted as usize;
                 live += 1;
             }
@@ -412,9 +415,17 @@ impl Heap {
         while matches!(self.objects.last(), Some(None)) {
             self.objects.pop();
         }
-        let len = self.objects.len() as u32;
-        self.free.retain(|&i| i < len);
-        self.free.sort_unstable_by(|a, b| b.cmp(a));
+        // The free slots, highest first, so that allocation takes the
+        // lowest one.
+        self.free.clear();
+        self.free.extend(
+            self.objects
+                .iter()
+                .enumerate()
+                .rev()
+                .filter(|(_, slot)| slot.is_none())
+                .map(|(index, _)| index as u32),
+        );
         self.used = used;
         self.live = live;
         self.collections += 1;
