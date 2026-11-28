@@ -1,8 +1,36 @@
 //! Values as the virtual machine stores them: in local variables, on the
 //! operand stack, in fields and as arguments to native methods.
 
+use std::collections::HashMap;
 use std::fmt;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::num::NonZeroU32;
+
+/// A map keyed by object handles, hashed with one multiply. The machine
+/// makes the handles and a game never chooses one, so a game cannot fill
+/// one bucket, and SipHash's guard against that costs more than the
+/// lookup it guards.
+pub(crate) type HandleMap<V> = HashMap<ObjRef, V, BuildHasherDefault<HandleHasher>>;
+
+/// The hasher of [`HandleMap`].
+#[derive(Default)]
+pub(crate) struct HandleHasher(u64);
+
+impl Hasher for HandleHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0.rotate_left(8) ^ u64::from(b)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        }
+    }
+
+    fn write_u32(&mut self, n: u32) {
+        self.0 = (self.0 ^ u64::from(n)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+}
 
 /// A reference to an object on one virtual machine's heap.
 ///

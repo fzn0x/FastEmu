@@ -21,7 +21,7 @@ use crate::monitor::Monitor;
 use crate::native::NativeClass;
 use crate::source::ClassSource;
 use crate::thread::{self, Starter, ThreadEntry, ThreadId};
-use crate::value::ObjRef;
+use crate::value::{HandleMap, ObjRef};
 use crate::wait::WaitQueue;
 
 /// Receives what the virtual machine prints: `System.out` and
@@ -214,7 +214,7 @@ pub(crate) struct VmState {
     pub(crate) next_thread: u32,
     /// Numbers the default names `Thread-0`, `Thread-1`, ...
     pub(crate) thread_names: u32,
-    pub(crate) monitors: HashMap<ObjRef, Monitor>,
+    pub(crate) monitors: HandleMap<Monitor>,
     pub(crate) interned: HashMap<Box<[u16]>, ObjRef>,
     /// `WeakReference` objects and their referents, and each running
     /// `Timer`'s queue and its timer (see `util::timer::reap`).
@@ -462,7 +462,7 @@ impl Vm {
             threads: HashMap::new(),
             next_thread: 1,
             thread_names: 0,
-            monitors: HashMap::new(),
+            monitors: HandleMap::default(),
             interned: HashMap::new(),
             weak: HashMap::new(),
             globals: Vec::new(),
