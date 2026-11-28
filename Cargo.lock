@@ -2028,6 +2028,7 @@ version = "0.1.1"
 dependencies = [
  "android_logger",
  "fastemu-audio",
+ "fastemu-core",
  "fastemu-midp",
  "fastemu-ui",
  "futures",
