@@ -149,6 +149,24 @@ Input can be driven from adb: `input tap X Y` taps,
 `input swipe X Y X Y 1500` holds a key for 1.5 seconds, and
 `input keyevent KEYCODE_DPAD_LEFT` presses a hardware key.
 
+### The bench log
+
+Every build, release ones too, can write the bench log: the lines the
+Android bench reads, since it cannot see into the app. It is off until you
+turn it on with adb, before the app starts:
+
+```sh
+adb shell setprop log.tag.FastEmuBench DEBUG
+adb shell am force-stop io.github.fzn0x.fastemu
+adb logcat -s fastemu | grep FastEmuBench
+```
+
+Each line carries `FastEmuBench: ` and then a line of the desktop bench, for
+each game in the order it started: `RUN first` at its first frame, `log`
+for each line it prints, `RUN frames` with its frame count once a second,
+and `RUN end` with how it ended. `setprop log.tag.FastEmuBench ""` or a
+reboot turns it off. Off, the app starts games just as it does without it.
+
 ## Tests and lints
 
 The views the app shows test on the host, through GPUI's test platform,
