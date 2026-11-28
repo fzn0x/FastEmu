@@ -27,6 +27,7 @@ code must follow, and how to define a Java class in Rust.
   |    threads     each thread's entry and its parked stack          |
   |    monitors    interned strings  weak refs  global roots         |
   |    posted tasks  extensions  system properties  output buffers   |
+  |  MethodArena: every method by id, read without the lock          |
   +------------------------------------------------------------------+
         ^
         |  every native method gets a Ctx: the locked state plus the
@@ -55,8 +56,8 @@ code must follow, and how to define a Java class in Rust.
 | --- | --- |
 | `classfile` | The class file parser and modified UTF-8. Public. |
 | `descriptor` | Field and method descriptors. Public. |
-| `class` | Runtime classes, fields and methods; the class table; linking (field layout, vtables, interface maps). |
-| `interp` | Decoding bytecode to instructions, lazy constant pool resolution, the interpreter loop. |
+| `class` | Runtime classes, fields and methods; the class table; linking (field layout, vtables, interface maps); the arena of every method by id. |
+| `interp` | Decoding bytecode to instructions (typed loads and stores, fused sequences), lazy constant pool resolution, the interpreter loop. |
 | `heap`, `gc` | The object slab, payloads, the mark and sweep collector and its roots. |
 | `thread`, `monitor`, `init` | Java threads, monitors and `wait`/`notify`, class initialization. |
 | `ctx` | The `Ctx` API for natives. |
@@ -982,10 +983,40 @@ so a recursion of large frames ends in `StackOverflowError` long before
 `max_frames`. A handler that catches an exception counts toward the
 safepoint budget (see [Threads and the VM lock](#threads-and-the-vm-lock)).
 
+Decoding does two things for speed. Loads and stores of `int`,
+`long`, `float` and `double` locals become typed instructions that copy
+only the value of their type, so a value just written is read back at
+the size it was written. For crafted code, this means an `istore` of a
+slot that holds a reference stores 0, and an `iload` of a slot that
+holds a `long` reads 0. A verified class does neither, and no
+instruction makes a reference from a number. And common sequences fuse
+into one instruction: an `int` load and a load or a constant and an
+operation, a local compared with a local or a constant and the branch,
+an operation and the store after it, `iinc` and its `goto`, the `long`,
+`float` and `double` forms of these, and a `lcmp`, `fcmp` or `dcmp`
+with its branch. A fused instruction stands in the place of the first
+instruction of its sequence, and the others stay behind it, so every
+index keeps its meaning: branch targets, handler ranges, line numbers
+and the stack heights `ret` checks need no change. A sequence fuses only
+when no branch, switch, handler start, end or target, and no `jsr`
+return lands inside it, and none of the fused instructions can throw.
+A backward branch in one counts toward the safepoint budget as a plain
+one does.
+
+Frames, resolved call sites and stack traces name a method by its id in
+the machine's method arena, which lives beside the VM lock and outlives
+every thread. The interpreter borrows the method of the frame it runs
+from there, so a call and a return count no reference. The library's
+empty `Object.<init>`, which every constructor ends in, runs without a
+native frame: the call checks its receiver and takes it off the stack.
+
 Speed, from the benchmark (`cargo test -p fastemu-jvm --release --test
-bench -- --ignored --nocapture`): about 590 million bytecodes per second
-on a tight arithmetic loop and 190 million with a static call in every
-iteration, on the development machine. Phones ran 1 to 20 million.
+bench -- --ignored --nocapture`): about 1200 million bytecodes per
+second on a tight arithmetic loop and 440 million with a static call in
+every iteration, on the development machine, where version 0.1 ran 590
+and 190 million. Phones ran 1 to 20 million. `tests/kernels.rs` times
+the bench MIDlet's CPU and memory kernels on the virtual machine alone;
+see [Where the time goes](#where-the-time-goes).
 
 What a crafted class can do is limited, as there is no type verifier.
 Decoding checks what the interpreter counts on. A reachable return that
@@ -1010,6 +1041,110 @@ crashed. No other game is affected. The report of an uncaught exception
 has its own guard, so a thread whose exception has a plain `Object` as
 its cause still ends, releases its monitors and wakes the threads that
 join it.
+
+## Where the time goes
+
+`cargo test -p fastemu-jvm --release --test kernels -- --ignored
+--nocapture` runs the bench MIDlet's CPU and memory kernels, with the
+bench's sizes, on the virtual machine alone. Warm milliseconds a
+repetition on the development machine, the median of three runs pinned
+to one processor, before and after the interpreter work of
+[#77](https://github.com/fzn0x/FastEmu/issues/77), each built as the
+repository built it then:
+
+| Kernel | Before, ms | After, ms | After / before |
+| --- | ---: | ---: | ---: |
+| `cpu.int` | 465.61 | 270.73 | 0.58 |
+| `cpu.call` | 165.16 | 80.88 | 0.49 |
+| `cpu.sieve` | 170.84 | 110.70 | 0.65 |
+| `cpu.sort` | 147.64 | 121.91 | 0.83 |
+| `cpu.actors` | 177.11 | 140.35 | 0.79 |
+| `cpu.long` | 206.57 | 146.62 | 0.71 |
+| `cpu.float` | 225.10 | 169.58 | 0.75 |
+| `cpu.string` | 132.88 | 108.63 | 0.82 |
+| `cpu.collections` | 164.22 | 118.91 | 0.72 |
+| `mem.small` | 236.60 | 161.10 | 0.68 |
+| `mem.arrays` | 45.25 | 32.16 | 0.71 |
+| `mem.gc` | 3.59 | 2.57 | 0.72 |
+
+Where each kernel's time goes, from a sampler that read the virtual
+machine's thread every 250 microseconds and sorted each sample by the
+source line it fell in. Before is version 0.1, after is with #77. A
+fused instruction does the work of two or three, so its share counts
+locals, arithmetic and branches together.
+
+| Kernel | After | Before |
+| --- | --- | --- |
+| `cpu.int` | fused instructions 41%, dispatch 36%, locals and stack 15%, arithmetic 4% | locals and stack 39%, dispatch 38%, arithmetic and branches 16% |
+| `cpu.call` | calls and returns 69%, of which the class's initialization check 5%; dispatch 15%, fused 5% | calls and returns 78%, dispatch 12% |
+| `cpu.sieve` | arrays 33%, dispatch 28%, fused 20%, locals and stack 11% | dispatch 52%, locals and stack 18%, arrays 12%, arithmetic 10% |
+| `cpu.sort` | arrays 34%, dispatch 26%, locals and stack 17%, arithmetic 9%, fused 6% | dispatch 44%, arrays 19%, locals and stack 16%, arithmetic 9% |
+| `cpu.actors` | fields 31%, calls and returns 24%, dispatch 13%, locals and stack 8% | calls and returns 41%, dispatch 20%, fields 20% |
+| `cpu.long` | dispatch 39%, fused 30%, locals and stack 14%, arithmetic 13% | locals and stack 41%, dispatch 39%, arithmetic 16% |
+| `cpu.float` | arithmetic 29%, fused 28%, dispatch 26%, locals and stack 10% | dispatch 38%, arithmetic 28%, locals and stack 23% |
+| `cpu.string` | library natives 51%, the native call 15%, calls 11%, collection 7% | library natives 40%, calls 26%, the native call 17%, collection 6% |
+| `cpu.collections` | lookups by name 30%, mostly `Vector`'s natives finding their own fields; monitors 11%, the native call 9%, library natives 8%, calls 7%, allocation 7% | lookups by name 26%, calls 21%, monitors 12%, the native call 12% |
+| `mem.small` | allocation 31%, collection 14%, calls 12%, dispatch 8%, fields 7% | calls 31%, allocation 20%, dispatch 12%, collection 9%, the native call of `Object.<init>` 7% |
+| `mem.arrays` | allocation 65%, collection 15% | allocation 49%, collection 20%, the array class looked up by name 13% |
+| `mem.gc` | the collection, all of it: marking the live objects, then the sweep | marking 63%, measuring every live object again in the sweep 33% |
+
+The loop kernels move by up to 15 percent between builds whose loop is
+the same code, with where the loop lands next to the cache lines. Two
+such builds measured `cpu.int` at 243.8 and 269.4 ms. So the numbers
+above are those of one build, and another build of the same code can
+differ by that much. To measure a change, build both sides with every
+function on a 64-byte boundary:
+
+```text
+RUSTFLAGS="-C llvm-args=-align-all-functions=6" cargo test -p fastemu-jvm --release --test kernels --no-run
+```
+
+Aligned, the two builds above measured 257.2 and 257.8 ms, and agreed
+within half a percent on every loop kernel, so what is left is the
+change. 32-byte alignment did not hold the speed still. The shipped
+builds are not aligned: it made every game show its first frame 2 to 5
+ms later, about a tenth, `drawRGB` 4 percent slower, and the binaries 6
+percent bigger.
+
+What each step bought, measured on the kernels its code touches, over
+several runs of each build:
+
+- **Calls.** Frames named their method with an `Arc`, and a call and a
+  return took eight atomic reference count operations. Method ids took
+  `cpu.call` to 0.57 times its time, and `mem.small`, `cpu.string` and
+  `cpu.collections` to about 0.8.
+- **Locals.** A load copied the whole 16-byte slot just written as two
+  4-byte stores, which the processor cannot forward: the hottest
+  instruction of the integer loops waited on it. Typed loads and stores
+  copy the value at the size it was written.
+- **Dispatch.** Fused sequences run two or three instructions in one
+  dispatch. With the typed loads and stores they took `cpu.int` to 0.63
+  times its time and `cpu.sieve` to 0.81, and the `long`, `float` and
+  `double` forms then took `cpu.float` to 0.87 and `cpu.long` to 0.93.
+- **Allocation.** The empty `Object.<init>` without a native frame, the
+  primitive array classes cached instead of looked up by name, and a
+  sweep that measures only the objects with a payload: `mem.arrays`
+  0.76, `mem.gc` 0.86, `mem.small` 0.96. Then a sweep that gathers its
+  free list in its own pass, instead of sorting it or walking the slots
+  again: `mem.gc` 0.85 and `mem.arrays` 0.91 more, both builds aligned.
+- **Monitors.** The monitor table hashes handles with one multiply
+  instead of SipHash: `cpu.collections` 0.87.
+
+What is left:
+
+- The interpreter loop keeps its program counter and stack top in
+  memory, not in registers, because many of its cases call out and the
+  compiler spills around those calls. A loop of only the simple
+  instructions kept them in registers, but entering it cost more than
+  it saved on calls, so it was not kept.
+- `cpu.string` and `cpu.collections` spend most of their time in
+  library natives: `Vector`'s natives look up their field ids by class
+  name on each call, and `StringBuffer.append` builds a buffer for each
+  argument.
+- Every call still pushes a frame and every instruction is a dispatch.
+  Compiling busy methods to machine code is
+  [#78](https://github.com/fzn0x/FastEmu/issues/78).
+- The loops' speed depends on where the build puts them, as above.
 
 ## The class library
 
@@ -1196,3 +1331,9 @@ What natives and games can rely on:
   and from a native.
 - `tests/bench.rs` is the benchmark: a plain loop, static calls and
   `StringBuffer.append`.
+- `tests/kernels.rs` runs the bench MIDlet's CPU and memory kernels on
+  the virtual machine alone: at scale 1 each must give HotSpot's answer,
+  and an ignored test times them as the bench does.
+- `tests/java/Fused.java` runs every fused sequence at the edges of its
+  operands (shifts by 0, 31, 32, 33 and -1, `MIN_VALUE`, NaN compares)
+  against the JDK.
