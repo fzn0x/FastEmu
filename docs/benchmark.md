@@ -20,60 +20,60 @@ measurement, with no window.
 
 | What | Value |
 | --- | --- |
-| Date | 2026-11-26, from 21:43 to 23:05 UTC |
-| FastEmu | main at commit `e945f8b`, the release build, with the sound engine on a silent output |
+| Date | 2026-11-28, from 15:57 to 17:22 UTC |
+| FastEmu | main at commit `b580901` with the interpreter changes of issue [#77](https://github.com/fzn0x/FastEmu/issues/77), the release build, with the sound engine on a silent output |
 | MicroEmulator | 2.0.4, headless through MeBench, relaxed class loading, the JVM's default options |
 | Java | Java SE 21.0.2, HotSpot 64-Bit Server VM |
 | Processor | Intel Core i7-12700F, 12 cores, 20 logical processors |
 | Memory | 31.8 GB |
 | Windows | Windows 11 Pro, build 22621, the Balanced power plan |
-| Load | idle baseline 353 ms a second; other load during the measurements 307 (247 to 574) |
+| Load | idle baseline 614 ms a second; other load during the measurements 456 (284 to 1268) |
 
 Each number is the median of the 4 runs, with the smallest and the
 largest in brackets. Times are in milliseconds and memory in MiB.
 
 ### In short
 
-- **Start.** FastEmu showed a game's first frame 2.5 to 7.2 times
-  sooner: 28 to 88 ms against 198 to 223 ms in the six games compared.
-- **Memory.** In the six games compared, one game took 38 to 50 MiB of
-  RAM in FastEmu and 66 to 190 MiB in MicroEmulator, 1.7 to 4.6 times
-  more. All eight games at once took 87 MiB in
-  FastEmu and 803 MiB in MicroEmulator's eight processes, or 671 MiB
-  with the small heap.
+- **Start.** FastEmu showed a game's first frame 4.0 to 7.7 times
+  sooner: 28 to 52 ms against 201 to 225 ms in the six games compared.
+- **Memory.** In the six games compared, one game took 47 to 59 MiB of
+  RAM in FastEmu and 68 to 191 MiB in MicroEmulator, 1.4 to 3.9 times
+  more. All eight games at once took 95 MiB in FastEmu and 802 MiB in
+  MicroEmulator's eight processes, or 673 MiB with the small heap.
 - **Processor time in real games.** At the same frame rate, FastEmu used
-  1.6 to 5.8 times less processor time in four games. In Stick Fight it
-  used 1.1 times more. All eight at once used 63.7 ms a second in
-  FastEmu and 190.7 in MicroEmulator.
-- **Game code.** MicroEmulator ran the CPU kernels 5.5 to 131 times
-  faster once its compiler warmed up, and 4.0 to 54.8 times faster on
+  less processor time in all five games compared, 1.1 to 6.0 times
+  less. Stick Fight comes closest: 25.4 ms a second against 27.1. All
+  eight at once used 56.3 ms a second in FastEmu and 175.8 in
+  MicroEmulator.
+- **Game code.** MicroEmulator ran the CPU kernels 4.3 to 104 times
+  faster once its compiler warmed up, and 3.0 to 36.4 times faster on
   the very first repetition. See
   [Where MicroEmulator is faster](#where-microemulator-is-faster).
-- **Drawing.** Mixed: FastEmu was faster in five of the eight drawing
-  kernels, MicroEmulator in two, and one was about the same.
+- **Drawing.** Mixed: FastEmu was faster in six of the eight drawing
+  kernels, MicroEmulator in two.
 
 ### Headline
 
 | Measure | FastEmu | MicroEmulator | Ratio |
 | --- | --- | --- | --- |
-| Start to first frame, scene, ms | 46 (27 to 308) | 207 (196 to 329) | FastEmu 4.6x faster |
-| Real games, start to first frame | see below | see below | FastEmu 2.5x to 7.2x faster in 6 |
-| Real games, CPU at the same frame rate | see below | see below | FastEmu 1.6x to 5.8x less in 4; MicroEmulator 1.1x less in 1 |
-| Real games, peak working set | see below | see below | FastEmu 1.7x to 4.6x less in 6 |
-| Scene at 30 fps, CPU ms a second | 7.2 (6.7 to 7.7) | 12.0 (11.7 to 12.8) | FastEmu 1.7x less |
-| Scene, peak working set, MiB | 23.8 (23.8 to 23.9) | 76.7 (76.4 to 76.8) | FastEmu 3.2x less |
-| Scene, private bytes, MiB | 18.3 (18.1 to 18.4) | 626.4 (626.2 to 626.5) | FastEmu 34.2x less |
-| Scene, peak working set, MiB, MicroEmulator small heap | 23.8 (23.8 to 23.9) | 72.1 (71.9 to 72.2) | FastEmu 3.0x less |
-| Eight at once, peak working set, MiB (MicroEmulator: sum of 8 processes) | 87.1 (86.9 to 87.8) | 802.6 (782.9 to 815.2) | FastEmu 9.2x less |
-| Eight at once, private bytes, MiB (MicroEmulator: sum) | 79.8 (79.0 to 80.5) | 5054.7 (5050.9 to 5069.0) | FastEmu 63.4x less |
-| Eight at once, CPU ms a second | 63.7 (63.1 to 66.1) | 190.7 (159.5 to 192.1) | FastEmu 3.0x less |
-| CPU kernels, warm | see below | see below | MicroEmulator 5.5x to 131.0x faster in 9 |
-| CPU kernels, cold | see below | see below | MicroEmulator 4.0x to 54.8x faster in 9 |
-| Memory kernels, warm | see below | see below | MicroEmulator 11.2x to 95.8x faster in 2; FastEmu 3.2x faster in 1 |
-| Drawing kernels, warm | see below | see below | FastEmu 1.6x to 6.9x faster in 5; MicroEmulator 1.3x to 1.8x faster in 2; about the same in 1 |
-| Drawing kernels, cold | see below | see below | FastEmu 1.7x to 6.7x faster in 4; MicroEmulator 1.5x faster in 2; about the same in 1 |
-| Unpaced frame loop, frames a second | 17883.5 (17656.0 to 18132.7) | 7992.5 (7910.0 to 8009.0) | FastEmu 2.2x more frames |
-| Kernel run, cores in use (CPU time over wall time) | 0.99 (0.99 to 0.99) | 1.03 (1.03 to 1.04) | about the same |
+| Start to first frame, scene, ms | 31 (27 to 61) | 214 (205 to 219) | FastEmu 6.9x faster |
+| Real games, start to first frame | see below | see below | FastEmu 4.0x to 7.7x faster in 6 |
+| Real games, CPU at the same frame rate | see below | see below | FastEmu 1.1x to 6.0x less in 5 |
+| Real games, peak working set | see below | see below | FastEmu 1.4x to 3.9x less in 6 |
+| Scene at 30 fps, CPU ms a second | 7.1 (6.9 to 7.9) | 12.0 (11.5 to 12.3) | FastEmu 1.7x less |
+| Scene, peak working set, MiB | 32.7 (32.5 to 32.7) | 77.0 (77.0 to 77.3) | FastEmu 2.4x less |
+| Scene, private bytes, MiB | 18.0 (17.9 to 18.1) | 626.8 (626.6 to 627.1) | FastEmu 34.7x less |
+| Scene, peak working set, MiB, MicroEmulator small heap | 32.7 (32.5 to 32.7) | 72.5 (72.4 to 72.7) | FastEmu 2.2x less |
+| Eight at once, peak working set, MiB (MicroEmulator: sum of 8 processes) | 94.5 (94.3 to 95.7) | 801.7 (800.1 to 811.2) | FastEmu 8.5x less |
+| Eight at once, private bytes, MiB (MicroEmulator: sum) | 80.4 (79.3 to 81.9) | 5057.2 (5053.8 to 5067.5) | FastEmu 62.9x less |
+| Eight at once, CPU ms a second | 56.3 (54.9 to 57.3) | 175.8 (168.6 to 189.7) | FastEmu 3.1x less |
+| CPU kernels, warm | see below | see below | MicroEmulator 4.3x to 103.8x faster in 9 |
+| CPU kernels, cold | see below | see below | MicroEmulator 3.0x to 36.4x faster in 9 |
+| Memory kernels, warm | see below | see below | MicroEmulator 3.7x to 61.1x faster in 2; FastEmu 4.2x faster in 1 |
+| Drawing kernels, warm | see below | see below | FastEmu 1.1x to 6.9x faster in 6; MicroEmulator 1.2x to 1.7x faster in 2 |
+| Drawing kernels, cold | see below | see below | FastEmu 1.2x to 6.8x faster in 5; MicroEmulator 1.4x faster in 2 |
+| Unpaced frame loop, frames a second | 18489.3 (18450.3 to 18696.7) | 7930.3 (7334.0 to 8025.0) | FastEmu 2.3x more frames |
+| Kernel run, cores in use (CPU time over wall time) | 0.99 (0.98 to 0.99) | 1.03 (1.03 to 1.03) | about the same |
 
 ### The real games
 
@@ -86,28 +86,28 @@ rest.
 
 | Game | Emulator | First frame, ms | fps | CPU ms/s | CPU ms/frame | Peak WS, MiB | Private, MiB | Screen |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Scene, 30 fps | FastEmu | 46 (27 to 308) | 30.0 | 7.2 (6.7 to 7.7) | 0.24 | 23.8 | 18.3 | 240x320 |
-| Scene, 30 fps | MicroEmulator | 207 (196 to 329) | 30.0 | 12.0 (11.7 to 12.8) | 0.40 | 76.7 | 626.4 | 240x320 |
-| Scene, 30 fps | MicroEmulator, small heap | 199 (198 to 200) | 30.0 | 11.2 (11.0 to 11.5) | 0.37 | 72.1 | 53.7 | 240x320 |
-| Block Fall | FastEmu | 50 (46 to 91) | 19.9 | 5.9 (5.8 to 6.0) | 0.30 | 38.4 | 32.2 | 240x320 |
-| Block Fall | MicroEmulator | 198 (195 to 218) | 19.3 | 24.1 (24.0 to 35.6) | 1.24 | 91.1 | 635.0 | 240x320 |
-| BombMan | FastEmu | 28 (27 to 30) | 29.8 | 17.3 (16.7 to 17.5) | 0.58 | 41.1 | 34.3 | 240x320 |
-| BombMan | MicroEmulator | 200 (196 to 221) | 39.6 | 63.2 (62.7 to 67.0) | 1.60 | 190.2 | 636.9 | 240x320 |
-| Shooter | FastEmu | 31 (28 to 39) | 0.0 | 1.9 (1.9 to 2.0) | n/a | 38.2 | 31.6 | 240x320 |
-| Shooter | MicroEmulator | 194 (193 to 197) | 0.0 | 1.1 (0.9 to 1.1) | n/a | 57.4 | 624.8 | 176x176 |
-| Skocko | FastEmu | 30 (29 to 34) | 1.0 | 2.1 (2.1 to 2.1) | 2.12 | 24.1 | 18.3 | 240x320 |
-| Skocko | MicroEmulator | 204 (194 to 209) | 1.0 | 1.6 (1.5 to 4.4) | 1.64 | 59.1 | 625.9 | 176x176 |
-| Star Defender | FastEmu | 48 (46 to 105) | 19.9 | 5.7 (5.6 to 5.8) | 0.29 | 38.4 | 32.0 | 240x320 |
-| Star Defender | MicroEmulator | 198 (195 to 201) | 19.7 | 21.9 (20.4 to 39.2) | 1.12 | 90.2 | 630.3 | 240x320 |
-| Stick Fight | FastEmu | 88 (85 to 90) | 30.0 | 31.8 (30.8 to 32.4) | 1.06 | 50.4 | 44.2 | 240x320 |
-| Stick Fight | MicroEmulator | 223 (216 to 228) | 29.4 | 27.8 (26.8 to 30.8) | 0.95 | 105.5 | 636.1 | 240x320 |
-| Tower Guard | FastEmu | 47 (47 to 96) | 19.9 | 6.6 (6.4 to 6.7) | 0.33 | 38.9 | 32.5 | 240x320 |
-| Tower Guard | MicroEmulator | 204 (196 to 206) | 19.2 | 38.1 (37.7 to 38.2) | 1.99 | 89.5 | 629.7 | 240x320 |
-| Traffic Dash | FastEmu | 49 (47 to 52) | 19.9 | 7.4 (7.1 to 8.0) | 0.37 | 38.7 | 32.4 | 240x320 |
-| Traffic Dash | MicroEmulator | 203 (193 to 248) | 19.3 | 11.5 (10.8 to 11.7) | 0.60 | 66.5 | 628.3 | 240x320 |
-| All at once | FastEmu | 69 (68 to 111) | 140.3 | 63.7 (63.1 to 66.1) | 0.45 | 87.1 | 79.8 | 240x320 |
-| All at once | MicroEmulator | 373 (347 to 392) | 147.2 | 190.7 (159.5 to 192.1) | 1.29 | 802.6 | 5054.7 | 176x176, 240x320 |
-| All at once | MicroEmulator, small heap | 364 (350 to 717) | 147.2 | 160.2 (159.2 to 170.8) | 1.09 | 670.5 | 503.9 | 176x176, 240x320 |
+| Scene, 30 fps | FastEmu | 31 (27 to 61) | 30.0 | 7.1 (6.9 to 7.9) | 0.24 | 32.7 | 18.0 | 240x320 |
+| Scene, 30 fps | MicroEmulator | 214 (205 to 219) | 30.0 | 12.0 (11.5 to 12.3) | 0.40 | 77.0 | 626.8 | 240x320 |
+| Scene, 30 fps | MicroEmulator, small heap | 213 (204 to 220) | 30.0 | 11.6 (11.0 to 11.9) | 0.39 | 72.5 | 53.7 | 240x320 |
+| Block Fall | FastEmu | 50 (46 to 53) | 19.9 | 5.8 (5.8 to 5.8) | 0.29 | 46.7 | 32.3 | 240x320 |
+| Block Fall | MicroEmulator | 201 (195 to 214) | 19.2 | 25.5 (24.8 to 26.5) | 1.33 | 91.8 | 634.7 | 240x320 |
+| BombMan | FastEmu | 28 (27 to 28) | 29.7 | 16.8 (16.7 to 17.0) | 0.57 | 49.1 | 34.4 | 240x320 |
+| BombMan | MicroEmulator | 216 (213 to 219) | 39.6 | 68.0 (66.2 to 71.1) | 1.72 | 191.2 | 637.5 | 240x320 |
+| Shooter | FastEmu | 30 (27 to 34) | 0.0 | 1.9 (1.8 to 1.9) | n/a | 46.6 | 31.9 | 240x320 |
+| Shooter | MicroEmulator | 206 (194 to 211) | 0.0 | 1.0 (1.0 to 1.1) | n/a | 58.3 | 625.1 | 176x176 |
+| Skocko | FastEmu | 30 (28 to 32) | 1.0 | 2.1 (2.0 to 2.1) | 2.07 | 33.0 | 18.3 | 240x320 |
+| Skocko | MicroEmulator | 201 (199 to 210) | 1.0 | 1.7 (1.6 to 4.5) | 1.70 | 59.0 | 626.0 | 176x176 |
+| Star Defender | FastEmu | 49 (47 to 53) | 19.9 | 5.6 (5.6 to 7.0) | 0.28 | 46.7 | 32.0 | 240x320 |
+| Star Defender | MicroEmulator | 203 (199 to 213) | 19.7 | 22.9 (21.1 to 27.6) | 1.16 | 91.2 | 637.7 | 240x320 |
+| Stick Fight | FastEmu | 52 (52 to 53) | 30.0 | 25.4 (24.7 to 26.6) | 0.85 | 58.7 | 44.4 | 240x320 |
+| Stick Fight | MicroEmulator | 225 (219 to 228) | 29.4 | 27.1 (26.0 to 27.7) | 0.92 | 106.0 | 636.1 | 240x320 |
+| Tower Guard | FastEmu | 50 (47 to 57) | 19.9 | 6.3 (6.2 to 6.4) | 0.32 | 47.0 | 32.5 | 240x320 |
+| Tower Guard | MicroEmulator | 211 (202 to 214) | 19.1 | 38.0 (37.9 to 45.8) | 1.99 | 90.0 | 629.1 | 240x320 |
+| Traffic Dash | FastEmu | 50 (46 to 55) | 19.9 | 6.6 (6.1 to 7.9) | 0.33 | 46.9 | 32.3 | 240x320 |
+| Traffic Dash | MicroEmulator | 213 (200 to 230) | 19.3 | 13.0 (11.8 to 13.3) | 0.68 | 67.5 | 628.8 | 240x320 |
+| All at once | FastEmu | 74 (71 to 77) | 140.3 | 56.3 (54.9 to 57.3) | 0.40 | 94.5 | 80.4 | 240x320 |
+| All at once | MicroEmulator | 429 (392 to 480) | 147.2 | 175.8 (168.6 to 189.7) | 1.19 | 801.7 | 5057.2 | 176x176, 240x320 |
+| All at once | MicroEmulator, small heap | 430 (404 to 461) | 147.2 | 159.7 (147.6 to 186.5) | 1.08 | 672.9 | 505.4 | 176x176, 240x320 |
 
 Three games are left out of some ratios:
 
@@ -116,7 +116,7 @@ Three games are left out of some ratios:
   different pictures, and these games are left out of every ratio.
   Shooter's title screen drew no new frame while it was measured, on
   either emulator.
-- **BombMan** ran at 29.8 frames a second on FastEmu and 39.6 on
+- **BombMan** ran at 29.7 frames a second on FastEmu and 39.6 on
   MicroEmulator, so its processor times are not compared. Its loop waits
   50 ms less the whole time of the frame before, waits included. So it
   takes turns between a short frame and a long one. Under FastEmu's
@@ -126,8 +126,15 @@ Three games are left out of some ratios:
   second.
 
 Block Fall, Star Defender, Tower Guard and Traffic Dash ran at 19.9
-frames a second on FastEmu and at 19.2 to 19.7 on MicroEmulator. Stick
+frames a second on FastEmu and at 19.1 to 19.7 on MicroEmulator. Stick
 Fight ran at 30.0 and 29.4.
+
+FastEmu's working set is about 8 MiB more in every row than in the run
+of `e945f8b` this page showed before, with the same private bytes. That
+part moves between runs of one build: two runs of main in the measuring
+of issue [#77](https://github.com/fzn0x/FastEmu/issues/77) gave the
+scene 32.6 MiB and 24.3 MiB, both with 18.0 MiB private. So it is not
+the interpreter's changes.
 
 ### CPU kernels
 
@@ -137,15 +144,15 @@ it is within S ms of the true time.
 
 | Kernel | FastEmu warm | FastEmu cold | MicroEmulator warm | MicroEmulator cold | Warm ratio |
 | --- | --- | --- | --- | --- | --- |
-| cpu.int | 465.62 (464.25 to 466.25) | 466 | 13.54 (13.50 to 13.58) | 16 (+/-2) | MicroEmulator 34.4x faster |
-| cpu.call | 164.75 (164.50 to 166.00) | 164 | 2.27 (2.26 to 2.27) | 3 (+/-2) | MicroEmulator 72.6x faster |
-| cpu.sieve | 172.08 (171.83 to 188.83) | 172 | 6.08 (6.06 to 6.11) | 12 (+/-2) | MicroEmulator 28.3x faster |
-| cpu.sort | 148.56 (148.38 to 148.88) | 148 | 8.27 (8.22 to 8.31) | 10 (+/-2) | MicroEmulator 18.0x faster |
-| cpu.actors | 178.58 (177.67 to 179.33) | 178 | 1.36 (1.36 to 1.38) | 4 (+/-2) | MicroEmulator 131.0x faster |
-| cpu.long | 209.17 (207.67 to 227.17) | 210 | 3.87 (3.86 to 3.90) | 6 (+/-2) | MicroEmulator 54.0x faster |
-| cpu.float | 243.50 (242.67 to 246.00) | 243 | 22.67 (22.63 to 22.75) | 21 (+/-2) | MicroEmulator 10.7x faster |
-| cpu.string | 135.44 (133.00 to 136.12) | 136 | 10.82 (10.80 to 10.88) | 18 (+/-2) | MicroEmulator 12.5x faster |
-| cpu.collections | 161.00 (159.50 to 169.42) | 158 | 29.30 (29.19 to 29.33) | 40 | MicroEmulator 5.5x faster |
+| cpu.int | 259.50 (256.00 to 262.25) | 256 | 13.59 (13.49 to 13.88) | 16 (+/-2) | MicroEmulator 19.1x faster |
+| cpu.call | 83.00 (83.00 to 86.83) | 86 | 2.28 (2.26 to 2.30) | 3 (+/-2) | MicroEmulator 36.4x faster |
+| cpu.sieve | 110.50 (110.20 to 111.20) | 112 | 6.12 (6.02 to 6.30) | 10 (+/-2) | MicroEmulator 18.1x faster |
+| cpu.sort | 121.50 (119.70 to 123.70) | 124 | 8.31 (8.29 to 8.42) | 10 (+/-2) | MicroEmulator 14.6x faster |
+| cpu.actors | 143.88 (141.75 to 148.12) | 146 | 1.39 (1.27 to 1.48) | 4 (+/-2) | MicroEmulator 103.8x faster |
+| cpu.long | 157.38 (156.25 to 160.62) | 158 | 3.89 (3.84 to 3.93) | 5 (+/-2) | MicroEmulator 40.5x faster |
+| cpu.float | 166.65 (164.12 to 169.17) | 165 | 22.78 (22.65 to 23.00) | 21 (+/-2) | MicroEmulator 7.3x faster |
+| cpu.string | 108.90 (106.70 to 120.40) | 113 | 10.92 (10.82 to 10.98) | 18 (+/-2) | MicroEmulator 10.0x faster |
+| cpu.collections | 125.28 (123.30 to 127.40) | 128 | 29.34 (29.19 to 30.15) | 42 | MicroEmulator 4.3x faster |
 
 ### Memory kernels
 
@@ -153,9 +160,9 @@ Time of one repetition, ms; `mem.gc` is one full collection.
 
 | Kernel | FastEmu warm | FastEmu cold | MicroEmulator warm | MicroEmulator cold | Warm ratio |
 | --- | --- | --- | --- | --- | --- |
-| mem.small | 240.58 (234.17 to 256.00) | 240 | 2.51 (2.43 to 2.56) | 6 (+/-2) | MicroEmulator 95.8x faster |
-| mem.arrays | 149.18 (102.70 to 193.33) | 192 | 13.37 (13.13 to 14.41) | 15 (+/-2) | MicroEmulator 11.2x faster |
-| mem.gc | 3.46 (3.03 to 3.73) | 5 (+/-1) | 11.00 (10.89 to 11.08) | 12 (+/-2) | FastEmu 3.2x faster |
+| mem.small | 157.94 (156.75 to 163.00) | 155 | 2.58 (2.54 to 3.34) | 6 (+/-2) | MicroEmulator 61.1x faster |
+| mem.arrays | 48.98 (42.46 to 62.94) | 94 | 13.30 (13.08 to 14.06) | 16 (+/-2) | MicroEmulator 3.7x faster |
+| mem.gc | 2.57 (2.28 to 2.81) | 2 (+/-1) | 10.88 (10.82 to 11.07) | 12 (+/-2) | FastEmu 4.2x faster |
 
 Every CPU and memory kernel printed the same check value on both
 emulators.
@@ -166,36 +173,36 @@ Time of one repetition, ms, into a 240x320 image.
 
 | Kernel | FastEmu warm | FastEmu cold | MicroEmulator warm | MicroEmulator cold | Warm ratio |
 | --- | --- | --- | --- | --- | --- |
-| draw.fillrect | 142.62 (142.00 to 143.38) | 142 | 224.08 (198.50 to 230.50) | 238 | FastEmu 1.6x faster |
-| draw.line | 223.00 (221.83 to 226.83) | 224 | 170.42 (163.50 to 174.33) | 154 | MicroEmulator 1.3x faster |
-| draw.image | 118.20 (117.10 to 119.00) | 118 | 112.90 (112.10 to 113.90) | 122 | about the same |
-| draw.alpha | 172.25 (172.00 to 174.17) | 172 | 283.75 (280.75 to 284.75) | 288 | FastEmu 1.6x faster |
-| draw.region | 221.58 (220.67 to 222.67) | 221 | 655.75 (650.50 to 679.00) | 668 | FastEmu 3.0x faster |
-| draw.text | 185.25 (184.83 to 186.17) | 186 | 104.70 (102.10 to 105.20) | 130 | MicroEmulator 1.8x faster |
-| draw.rgb | 138.56 (138.25 to 139.25) | 138 | 960.75 (953.50 to 970.50) | 923 | FastEmu 6.9x faster |
-| draw.scene | 0.05 (0.05 to 0.05) | 0 (+/-1) | 0.10 (0.10 to 0.11) | 0 (+/-2) | FastEmu 2.2x faster |
+| draw.fillrect | 120.90 (120.20 to 123.20) | 122 | 224.83 (196.17 to 236.33) | 230 | FastEmu 1.9x faster |
+| draw.line | 204.92 (201.83 to 207.17) | 211 | 167.15 (153.96 to 187.17) | 152 | MicroEmulator 1.2x faster |
+| draw.image | 104.60 (104.30 to 107.40) | 104 | 113.45 (111.30 to 114.10) | 121 | FastEmu 1.1x faster |
+| draw.alpha | 167.48 (165.96 to 176.17) | 167 | 285.75 (278.50 to 292.50) | 298 | FastEmu 1.7x faster |
+| draw.region | 210.83 (207.33 to 219.33) | 206 | 658.75 (654.00 to 672.00) | 672 | FastEmu 3.1x faster |
+| draw.text | 182.83 (179.00 to 190.83) | 182 | 105.15 (102.20 to 109.80) | 132 | MicroEmulator 1.7x faster |
+| draw.rgb | 138.88 (137.62 to 140.62) | 137 | 960.75 (950.00 to 977.50) | 936 | FastEmu 6.9x faster |
+| draw.scene | 0.05 (0.04 to 0.05) | 0 (+/-1) | 0.11 (0.10 to 0.11) | 1 (+/-2) | FastEmu 2.3x faster |
 
 ### The kernel run
 
 | Emulator | Clock step, ms | CPU time, ms | Wall time, ms | Cores in use | Unpaced frames a second |
 | --- | --- | --- | --- | --- | --- |
-| FastEmu | 1 | 63525 (62471 to 64285) | 64405 (62989 to 64988) | 0.99 | 17883.5 (17656.0 to 18132.7) |
-| MicroEmulator | 2 | 60160 (59827 to 60596) | 58291 (58119 to 58446) | 1.03 | 7992.5 (7910.0 to 8009.0) |
+| FastEmu | 1 | 59690 (59303 to 60310) | 60456 (59840 to 60982) | 0.99 | 18489.3 (18450.3 to 18696.7) |
+| MicroEmulator | 2 | 60055 (59597 to 60343) | 58379 (58053 to 58651) | 1.03 | 7930.3 (7334.0 to 8025.0) |
 
 ### What the bench flagged
 
-- Three measurements ran while other load passed the threshold: Tower
-  Guard on FastEmu in run 1, at 574 ms a second, and Tower Guard and
-  Traffic Dash on MicroEmulator in run 2, at 480 and 489. Each gave about
-  the numbers of its other three runs.
-- MicroEmulator's processor time spread more than 15 percent in five
-  rows: Block Fall, Shooter, Skocko, Star Defender and all at once. In
-  all but Shooter, one run of the four differs, and the median sits
-  with the other three. Shooter's runs spread from 0.9 to 1.1 ms a
-  second.
+- Twelve of the 88 measurements of the scene, the games and all at once ran while
+  other load passed the threshold, at 715 to 1268 ms a second: four on
+  FastEmu and eight on MicroEmulator. No row has more than two of them.
+- Processor time spread more than 15 percent in six rows. In three, one
+  run of the four is high and the median sits with the other three:
+  Skocko and Tower Guard on MicroEmulator, and Star Defender on FastEmu.
+  In the other three the runs spread out: on MicroEmulator, Star
+  Defender from 21.1 to 27.6 ms a second and all at once with the small
+  heap from 147.6 to 186.5; on FastEmu, Traffic Dash from 6.1 to 7.9.
 
-The run was on the Balanced power plan, with a few programs open but
-idle, not in the best performance mode that
+The run was on the Balanced power plan, with other programs open, not
+in the best performance mode that
 [Runs and a quiet machine](#runs-and-a-quiet-machine) suggests. The load
 numbers above say how quiet the computer was.
 
@@ -206,22 +213,22 @@ virtual machine you installed, and that machine compiles the code to
 machine code as it runs. FastEmu has a virtual machine of its own that
 interprets the code, one instruction at a time. So in long loops of
 arithmetic, method calls and array work, MicroEmulator runs game code
-many times faster. In the CPU kernels it was 5.5 to 131 times faster
-once warm, and 4.0 to 54.8 times faster on the very first repetition,
+many times faster. In the CPU kernels it was 4.3 to 104 times faster
+once warm, and 3.0 to 36.4 times faster on the very first repetition,
 before its compiler had warmed up. It also made small objects and
-arrays 95.8 and 11.2 times faster. FastEmu was faster at one of them: a
-full collection took 3.46 ms against 11.00.
+arrays 61.1 and 3.7 times faster. FastEmu was faster at one of them: a
+full collection took 2.57 ms against 10.88.
 
-In drawing, MicroEmulator was faster at lines, 1.3 times, and at text,
-1.8 times. Drawing images was about the same.
+In drawing, MicroEmulator was faster at lines, 1.2 times, and at text,
+1.7 times.
 
 A game that draws a few sprites a frame and then sleeps until the next
 one spends little time in such loops. For it, the costs that show are
 starting up, memory, and the processor time a frame takes, and there
-FastEmu used less in four of the five games compared. Stick Fight is
-the one where FastEmu used more: 31.8 ms a second against 27.8, 1.1
-times. A game that runs more of its own code each frame than these can
-cost more on FastEmu, by up to the kernels' ratios.
+FastEmu used less in all five games compared. Stick Fight comes
+closest: 25.4 ms a second against 27.1. A game that runs more of its
+own code each frame than these can cost more on FastEmu, by up to the
+kernels' ratios.
 
 The Java virtual machine's compiler and garbage collector run on other
 cores beside the game, and the bench counts the processor time of every
@@ -248,7 +255,9 @@ Each number is the median of the 4 runs, with the smallest and the
 largest in brackets. Times are in milliseconds and memory in MiB. The
 emulator runs x86_64 Android on the computer's own processor, so these
 are not a phone's numbers. Both apps ran on the same emulator the same
-way, so the comparison holds.
+way, so the comparison holds. This run came before the interpreter
+changes of issue [#77](https://github.com/fzn0x/FastEmu/issues/77), so
+FastEmu's kernel times here are those of the interpreter before them.
 
 ### Android in short
 
