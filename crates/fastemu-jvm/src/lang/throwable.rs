@@ -60,8 +60,9 @@ pub(crate) fn fill_in_stack_trace(ctx: &mut Ctx<'_>, exc: ObjRef) {
     let throwable = ctx.state.wk.throwable;
     let mut trace = Vec::new();
     let mut skipping = true;
+    let methods = &*ctx.shared.methods;
     for frame in ctx.thread.frames.iter().rev() {
-        let m = &frame.method;
+        let m = methods.get(frame.method);
         if skipping {
             let building = (&*m.name == "<init>"
                 && ctx.state.classes.is_subclass(m.class, throwable))

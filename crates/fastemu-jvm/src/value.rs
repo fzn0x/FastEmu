@@ -1,8 +1,36 @@
 //! Values as the virtual machine stores them: in local variables, on the
 //! operand stack, in fields and as arguments to native methods.
 
+use std::collections::HashMap;
 use std::fmt;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::num::NonZeroU32;
+
+/// A map keyed by object handles, hashed with one multiply. The machine
+/// makes the handles and a game never chooses one, so a game cannot fill
+/// one bucket, and SipHash's guard against that costs more than the
+/// lookup it guards.
+pub(crate) type HandleMap<V> = HashMap<ObjRef, V, BuildHasherDefault<HandleHasher>>;
+
+/// The hasher of [`HandleMap`].
+#[derive(Default)]
+pub(crate) struct HandleHasher(u64);
+
+impl Hasher for HandleHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0.rotate_left(8) ^ u64::from(b)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        }
+    }
+
+    fn write_u32(&mut self, n: u32) {
+        self.0 = (self.0 ^ u64::from(n)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+}
 
 /// A reference to an object on one virtual machine's heap.
 ///
@@ -114,6 +142,32 @@ impl Value {
             Value::Ref(r) => r,
             _ => mismatch(self, None),
         }
+    }
+
+    /// The `int` this value holds, or 0, with no check in debug builds:
+    /// for `iload` and `istore`, which crafted code can point at a slot
+    /// of another type.
+    #[inline]
+    pub(crate) fn int_or_zero(self) -> i32 {
+        if let Value::Int(v) = self { v } else { 0 }
+    }
+
+    /// The `long` this value holds, or 0, as [`Value::int_or_zero`].
+    #[inline]
+    pub(crate) fn long_or_zero(self) -> i64 {
+        if let Value::Long(v) = self { v } else { 0 }
+    }
+
+    /// The `float` this value holds, or 0, as [`Value::int_or_zero`].
+    #[inline]
+    pub(crate) fn float_or_zero(self) -> f32 {
+        if let Value::Float(v) = self { v } else { 0.0 }
+    }
+
+    /// The `double` this value holds, or 0, as [`Value::int_or_zero`].
+    #[inline]
+    pub(crate) fn double_or_zero(self) -> f64 {
+        if let Value::Double(v) = self { v } else { 0.0 }
     }
 
     /// A `boolean` argument: any non-zero `int` is true.

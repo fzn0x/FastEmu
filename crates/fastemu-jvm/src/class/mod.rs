@@ -5,6 +5,7 @@
 //! override its methods, and native code reaches game overrides through
 //! the same virtual dispatch the interpreter uses.
 
+mod arena;
 mod budget;
 mod link;
 mod table;
@@ -19,6 +20,7 @@ use crate::interp::{Code, Resolved};
 use crate::native::NativeFn;
 use crate::value::Value;
 
+pub(crate) use arena::{MAX_METHODS, MethodArena, MethodId};
 pub(crate) use table::{
     ClassTable, InitState, LoadError, MAX_CLASS_NAME, MAX_LOADABLE_NAME, short,
 };
@@ -169,6 +171,10 @@ pub(crate) struct Bytecode {
 pub(crate) enum MethodBody {
     Bytecode(Box<Bytecode>),
     Native(NativeFn),
+    /// A library method that does nothing and returns nothing, such as
+    /// `Object.<init>`: a call to it only takes its arguments off the
+    /// stack.
+    Empty,
     Abstract,
     /// A `native` method of a class file, which FastEmu cannot run.
     Unlinked,
@@ -176,6 +182,8 @@ pub(crate) enum MethodBody {
 
 /// A declared method.
 pub(crate) struct Method {
+    /// Its id in the machine's [`MethodArena`].
+    pub(crate) id: MethodId,
     pub(crate) class: ClassId,
     pub(crate) class_name: Arc<str>,
     pub(crate) name: Arc<str>,
@@ -190,6 +198,24 @@ pub(crate) struct Method {
 }
 
 impl Method {
+    /// An abstract method with nothing in it, for tests of the arena.
+    #[cfg(test)]
+    pub(crate) fn placeholder(id: MethodId) -> Self {
+        Method {
+            id,
+            class: ClassId(0),
+            class_name: Arc::from("T"),
+            name: Arc::from("m"),
+            desc: Arc::from("()V"),
+            access: 0,
+            selector: Selector(0),
+            arg_slots: 0,
+            ret: Kind::Void,
+            body: MethodBody::Abstract,
+            source_file: None,
+        }
+    }
+
     pub(crate) fn is_static(&self) -> bool {
         self.access & access::STATIC != 0
     }

@@ -274,6 +274,64 @@ fn a_return_leaves_the_slots_the_method_declares() {
     assert_eq!(call_around_a_return(&[0x06, 0xac]), Value::Int(5));
 }
 
+/// Calls `static int Bad.v()`, whose code `build` makes, and returns what
+/// it returned.
+fn call_v(build: impl FnOnce(&mut ClassBuilder) -> Vec<u8>) -> Value {
+    let mut c = ClassBuilder::new("Bad", "java/lang/Object", 49, 0);
+    let code = build(&mut c);
+    c.method(PUBLIC | STATIC, "v", "()I", 4, 2, &code, &[]);
+    let source = support::source(&[("Bad", c.build())]);
+    let vm = Vm::new(VmConfig::default(), Arc::new(source), Vec::new());
+    vm.attach("test", |ctx| {
+        match ctx.call_static("Bad", "v", "()I", &[]) {
+            Ok(v) => v,
+            Err(Throw::Exception(e)) => panic!("{}", ctx.describe_exception(e)),
+            Err(Throw::Stop) => panic!("stopped"),
+        }
+    })
+}
+
+#[test]
+fn typed_loads_and_stores_read_another_type_as_zero() {
+    // ldc_w "s"; istore_0; iload_0; ireturn: a reference stored as an int
+    // reads back as 0, never as the reference.
+    let reference = call_v(|c| {
+        let [h, l] = idx(c.string("s"));
+        vec![0x13, h, l, 0x3b, 0x1a, 0xac]
+    });
+    assert_eq!(reference, Value::Int(0));
+    // lconst_1; lstore_0; iload_0; iload_1; iadd; ireturn: a long read as
+    // two ints.
+    let halves = call_v(|_| vec![0x0a, 0x3f, 0x1a, 0x1b, 0x60, 0xac]);
+    assert_eq!(halves, Value::Int(0));
+    // fconst_2; fstore_0; iload_0; ireturn: a float read as an int.
+    assert_eq!(call_v(|_| vec![0x0d, 0x44, 0x1a, 0xac]), Value::Int(0));
+    // iconst_5; istore_0; iload_0; ireturn: an int reads back as itself.
+    assert_eq!(call_v(|_| vec![0x08, 0x3b, 0x1a, 0xac]), Value::Int(5));
+}
+
+#[test]
+fn the_empty_object_constructor_still_checks_its_receiver() {
+    let mut c = ClassBuilder::new("Bad", "java/lang/Object", 49, 0);
+    let init = c.method_ref("java/lang/Object", "<init>", "()V");
+    let [h, l] = idx(init);
+    // aconst_null; invokespecial Object.<init>; return
+    c.method(
+        PUBLIC | STATIC,
+        "f",
+        "()V",
+        1,
+        0,
+        &[0x01, 0xb7, h, l, 0xb1],
+        &[],
+    );
+    let result = run_classes(&[("Bad", c.build())]);
+    assert!(
+        result.starts_with("java.lang.NullPointerException"),
+        "got {result}"
+    );
+}
+
 #[test]
 fn athrow_of_an_object_that_is_not_a_throwable_is_refused() {
     // new Object; dup; invokespecial Object.<init>; athrow

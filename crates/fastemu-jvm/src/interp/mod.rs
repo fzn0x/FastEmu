@@ -10,8 +10,6 @@ mod flow;
 mod insn;
 mod resolve;
 
-use std::sync::Arc;
-
 pub(crate) use decode::decode;
 pub(crate) use exec::run;
 pub(crate) use insn::Code;
@@ -87,7 +85,7 @@ impl Fault {
 
 /// Pushes a frame for bytecode method `method` whose arguments are in the
 /// slots from `bp`. Decodes the method on its first call.
-pub(crate) fn push_frame(ctx: &mut Ctx<'_>, method: &Arc<Method>, bp: usize) -> Result<(), Fault> {
+pub(crate) fn push_frame(ctx: &mut Ctx<'_>, method: &Method, bp: usize) -> Result<(), Fault> {
     let code = match method.code() {
         Some(Ok(code)) => code,
         Some(Err(e)) => {
@@ -113,7 +111,7 @@ pub(crate) fn push_frame(ctx: &mut Ctx<'_>, method: &Arc<Method>, bp: usize) -> 
     }
     t.slots[bp + method.arg_slots as usize..locals_end].fill(Value::Void);
     t.frames.push(Frame {
-        method: Arc::clone(method),
+        method: method.id,
         pc: 0,
         bp: bp as u32,
         sp: locals_end as u32,

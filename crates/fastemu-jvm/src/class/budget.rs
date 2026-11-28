@@ -43,10 +43,11 @@ const POOL_ENTRY: usize = size_of::<Constant>() + size_of::<OnceLock<Resolved>>(
 const FIELD: usize = size_of::<Field>();
 /// A static field's value, or an instance field's slot in a template.
 const SLOT: usize = size_of::<Value>();
-/// A declared method: its `Method` in an `Arc`, and its entry in the
-/// table of selectors, which keeps its own copy of the name and the
-/// descriptor (counted by length).
-const METHOD: usize = size_of::<Method>() + ARC_HEADER + 96;
+/// A declared method: its `Method` in an `Arc`, its entry in the
+/// machine's arena of methods, and its entry in the table of selectors,
+/// which keeps its own copy of the name and the descriptor (counted by
+/// length).
+const METHOD: usize = size_of::<Method>() + ARC_HEADER + size_of::<OnceLock<Arc<Method>>>() + 96;
 /// What a method with code adds: its `Bytecode`, with the room for the
 /// decoded code.
 const BYTECODE: usize = size_of::<Bytecode>();
@@ -272,9 +273,10 @@ mod tests {
 
     #[test]
     fn the_model_follows_the_size_of_what_it_counts() {
-        // A pool entry with its cache slot is about 100 bytes, as measured
-        // on a pool of 65535 entries (6.3 MiB).
-        assert!((96..=128).contains(&POOL_ENTRY), "{POOL_ENTRY}");
+        // A pool entry with its cache slot was about 100 bytes, as measured
+        // on a pool of 65535 entries (6.3 MiB), and is 88 since a resolved
+        // call names its method by id.
+        assert!((80..=128).contains(&POOL_ENTRY), "{POOL_ENTRY}");
         assert_eq!(size_of::<Field>(), FIELD);
         assert_eq!(size_of::<Value>(), SLOT);
         assert!(size_of::<Class>() + ARC_HEADER + 64 <= CLASS);

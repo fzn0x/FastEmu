@@ -77,6 +77,9 @@ pub struct NativeMethod {
     pub(crate) access: u16,
     /// `None` for abstract methods.
     pub(crate) body: Option<NativeFn>,
+    /// The method does nothing and returns nothing (see
+    /// [`NativeClass::empty_method`]).
+    pub(crate) empty: bool,
 }
 
 impl NativeMethod {
@@ -304,6 +307,22 @@ impl NativeClass {
             desc: desc.to_owned(),
             access,
             body: Some(Arc::new(f)),
+            empty: false,
+        });
+        self
+    }
+
+    /// A public method that does nothing and returns nothing. The
+    /// interpreter calls it without a native frame: `Object.<init>`, which
+    /// every constructor ends in, is one.
+    #[must_use]
+    pub(crate) fn empty_method(mut self, name: &str, desc: &str) -> Self {
+        self.methods.push(NativeMethod {
+            name: name.to_owned(),
+            desc: desc.to_owned(),
+            access: access::PUBLIC,
+            body: Some(Arc::new(|_, _| Ok(Value::Void))),
+            empty: true,
         });
         self
     }
@@ -324,6 +343,7 @@ impl NativeClass {
             desc: desc.to_owned(),
             access: access | access::ABSTRACT,
             body: None,
+            empty: false,
         });
         self
     }

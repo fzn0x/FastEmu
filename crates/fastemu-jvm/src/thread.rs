@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use fastemu_core::LogLevel;
 
-use crate::class::Method;
+use crate::class::MethodId;
 use crate::ctx::{Ctx, JResult, Throw};
 use crate::lang;
 use crate::value::{ObjRef, Value};
@@ -18,7 +18,7 @@ pub struct ThreadId(pub(crate) u32);
 
 /// One activation on a thread's stack.
 pub(crate) struct Frame {
-    pub(crate) method: Arc<Method>,
+    pub(crate) method: MethodId,
     /// For bytecode: the instruction to run next, so `pc - 1` is the one
     /// running (the call, in a caller's frame).
     pub(crate) pc: u32,

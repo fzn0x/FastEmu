@@ -395,14 +395,23 @@ impl Heap {
         let mut freed = 0;
         let mut used = 0;
         let mut live = 0;
+        // The free slots are gathered in the same pass, lowest first.
+        self.free.clear();
         for (index, slot) in self.objects.iter_mut().enumerate() {
-            let Some(obj) = slot else { continue };
+            let Some(obj) = slot else {
+                self.free.push(index as u32);
+                continue;
+            };
             if self.marks[index / 64] & (1 << (index % 64)) == 0 {
                 *slot = None;
                 self.free.push(index as u32);
                 freed += 1;
             } else {
-                obj.counted = obj.measure();
+                // Only a payload can change size after allocation; fields
+                // and arrays keep theirs.
+                if obj.payload.is_some() {
+                    obj.counted = obj.measure();
+                }
                 used += obj.counted as usize;
                 live += 1;
             }
@@ -412,9 +421,12 @@ impl Heap {
         while matches!(self.objects.last(), Some(None)) {
             self.objects.pop();
         }
+        // The slots past the shrunk slab are at the list's end. The rest
+        // go highest first, so that allocation takes the lowest one.
         let len = self.objects.len() as u32;
-        self.free.retain(|&i| i < len);
-        self.free.sort_unstable_by(|a, b| b.cmp(a));
+        let kept = self.free.partition_point(|&index| index < len);
+        self.free.truncate(kept);
+        self.free.reverse();
         self.used = used;
         self.live = live;
         self.collections += 1;

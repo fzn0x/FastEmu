@@ -5,6 +5,213 @@
 //! the pool can give at decode time are inlined, and the typed loads and
 //! stores that only move slots are merged.
 
+/// An `int` operation that cannot throw, in a fused instruction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IntOp {
+    Add,
+    Sub,
+    Mul,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+    Ushr,
+}
+
+impl IntOp {
+    /// The operation of `insn`, if it is one of these.
+    pub(crate) fn of(insn: Insn) -> Option<IntOp> {
+        Some(match insn {
+            Insn::Iadd => IntOp::Add,
+            Insn::Isub => IntOp::Sub,
+            Insn::Imul => IntOp::Mul,
+            Insn::Iand => IntOp::And,
+            Insn::Ior => IntOp::Or,
+            Insn::Ixor => IntOp::Xor,
+            Insn::Ishl => IntOp::Shl,
+            Insn::Ishr => IntOp::Shr,
+            Insn::Iushr => IntOp::Ushr,
+            _ => return None,
+        })
+    }
+
+    /// `a op b`, as the instruction computes it.
+    #[inline]
+    pub(crate) fn apply(self, a: i32, b: i32) -> i32 {
+        match self {
+            IntOp::Add => a.wrapping_add(b),
+            IntOp::Sub => a.wrapping_sub(b),
+            IntOp::Mul => a.wrapping_mul(b),
+            IntOp::And => a & b,
+            IntOp::Or => a | b,
+            IntOp::Xor => a ^ b,
+            IntOp::Shl => a.wrapping_shl(b as u32),
+            IntOp::Shr => a.wrapping_shr(b as u32),
+            IntOp::Ushr => (a as u32).wrapping_shr(b as u32) as i32,
+        }
+    }
+}
+
+/// A `long` operation that cannot throw, in a fused instruction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LongOp {
+    Add,
+    Sub,
+    Mul,
+    And,
+    Or,
+    Xor,
+}
+
+impl LongOp {
+    pub(crate) fn of(insn: Insn) -> Option<LongOp> {
+        Some(match insn {
+            Insn::Ladd => LongOp::Add,
+            Insn::Lsub => LongOp::Sub,
+            Insn::Lmul => LongOp::Mul,
+            Insn::Land => LongOp::And,
+            Insn::Lor => LongOp::Or,
+            Insn::Lxor => LongOp::Xor,
+            _ => return None,
+        })
+    }
+
+    #[inline]
+    pub(crate) fn apply(self, a: i64, b: i64) -> i64 {
+        match self {
+            LongOp::Add => a.wrapping_add(b),
+            LongOp::Sub => a.wrapping_sub(b),
+            LongOp::Mul => a.wrapping_mul(b),
+            LongOp::And => a & b,
+            LongOp::Or => a | b,
+            LongOp::Xor => a ^ b,
+        }
+    }
+}
+
+/// A `float` or `double` operation, in a fused instruction. None of them
+/// throws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FloatOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+}
+
+impl FloatOp {
+    /// The operation of `insn`, a `float` one when `double` is false.
+    pub(crate) fn of(insn: Insn, double: bool) -> Option<FloatOp> {
+        Some(match (insn, double) {
+            (Insn::Fadd, false) | (Insn::Dadd, true) => FloatOp::Add,
+            (Insn::Fsub, false) | (Insn::Dsub, true) => FloatOp::Sub,
+            (Insn::Fmul, false) | (Insn::Dmul, true) => FloatOp::Mul,
+            (Insn::Fdiv, false) | (Insn::Ddiv, true) => FloatOp::Div,
+            (Insn::Frem, false) | (Insn::Drem, true) => FloatOp::Rem,
+            _ => return None,
+        })
+    }
+
+    #[inline]
+    pub(crate) fn apply<
+        T: std::ops::Add<Output = T>
+            + std::ops::Sub<Output = T>
+            + std::ops::Mul<Output = T>
+            + std::ops::Div<Output = T>
+            + std::ops::Rem<Output = T>,
+    >(
+        self,
+        a: T,
+        b: T,
+    ) -> T {
+        match self {
+            FloatOp::Add => a + b,
+            FloatOp::Sub => a - b,
+            FloatOp::Mul => a * b,
+            FloatOp::Div => a / b,
+            FloatOp::Rem => a % b,
+        }
+    }
+}
+
+/// The comparison instruction of a fused compare and branch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Cmp {
+    Long,
+    /// `fcmpl` and `fcmpg`: NaN compares as -1 and as 1.
+    FloatL,
+    FloatG,
+    DoubleL,
+    DoubleG,
+}
+
+impl Cmp {
+    pub(crate) fn of(insn: Insn) -> Option<Cmp> {
+        Some(match insn {
+            Insn::Lcmp => Cmp::Long,
+            Insn::Fcmpl => Cmp::FloatL,
+            Insn::Fcmpg => Cmp::FloatG,
+            Insn::Dcmpl => Cmp::DoubleL,
+            Insn::Dcmpg => Cmp::DoubleG,
+            _ => return None,
+        })
+    }
+}
+
+/// The comparison of an `if_icmp<cond>`, in a fused instruction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Cond {
+    Eq,
+    Ne,
+    Lt,
+    Ge,
+    Gt,
+    Le,
+}
+
+impl Cond {
+    /// The comparison and the target of `insn`, if it is an `if_icmp`.
+    pub(crate) fn of(insn: Insn) -> Option<(Cond, u32)> {
+        Some(match insn {
+            Insn::IfIcmpeq(t) => (Cond::Eq, t),
+            Insn::IfIcmpne(t) => (Cond::Ne, t),
+            Insn::IfIcmplt(t) => (Cond::Lt, t),
+            Insn::IfIcmpge(t) => (Cond::Ge, t),
+            Insn::IfIcmpgt(t) => (Cond::Gt, t),
+            Insn::IfIcmple(t) => (Cond::Le, t),
+            _ => return None,
+        })
+    }
+
+    /// The comparison and the target of `insn`, if it is an `if<cond>`,
+    /// which compares with zero.
+    pub(crate) fn of_zero(insn: Insn) -> Option<(Cond, u32)> {
+        Some(match insn {
+            Insn::Ifeq(t) => (Cond::Eq, t),
+            Insn::Ifne(t) => (Cond::Ne, t),
+            Insn::Iflt(t) => (Cond::Lt, t),
+            Insn::Ifge(t) => (Cond::Ge, t),
+            Insn::Ifgt(t) => (Cond::Gt, t),
+            Insn::Ifle(t) => (Cond::Le, t),
+            _ => return None,
+        })
+    }
+
+    #[inline]
+    pub(crate) fn holds(self, a: i32, b: i32) -> bool {
+        match self {
+            Cond::Eq => a == b,
+            Cond::Ne => a != b,
+            Cond::Lt => a < b,
+            Cond::Ge => a >= b,
+            Cond::Gt => a > b,
+            Cond::Le => a <= b,
+        }
+    }
+}
+
 /// One decoded instruction. Operands named `u16` are constant pool
 /// indices unless the name says otherwise; `u32` operands are instruction
 /// indices.
@@ -20,12 +227,22 @@ pub(crate) enum Insn {
     LdcString(u16),
     /// `ldc` of a `CONSTANT_Class`.
     LdcClass(u16),
-    /// A one-slot load (`iload`, `fload`, `aload`) from local `n`.
+    /// `aload` of local `n`: a whole slot, a reference.
     Load(u16),
-    /// A two-slot load (`lload`, `dload`).
-    Load2(u16),
+    /// `iload`, `fload`, `lload` and `dload`: each copies only the value of
+    /// its type, so that a value just written is read back at the size it
+    /// was written, and the processor forwards it from the store.
+    ILoad(u16),
+    FLoad(u16),
+    LLoad(u16),
+    DLoad(u16),
+    /// `astore` of local `n`: a whole slot, a reference or a `jsr`
+    /// return address.
     Store(u16),
-    Store2(u16),
+    IStore(u16),
+    FStore(u16),
+    LStore(u16),
+    DStore(u16),
     Iaload,
     Laload,
     Faload,
@@ -153,6 +370,37 @@ pub(crate) enum Insn {
     InstanceOf(u16),
     MonitorEnter,
     MonitorExit,
+    // Fused instructions. Each stands in the place of the first instruction
+    // of a common sequence and does the whole sequence, and the others stay
+    // behind it, so every index keeps its meaning. None of them can throw.
+    // A sequence is fused only when nothing branches into its middle (see
+    // `decode::fuse`).
+    /// `iload a; iconst k; op`.
+    ILoadConstOp(u16, i32, IntOp),
+    /// `iload a; iload b; op`.
+    ILoadLoadOp(u16, u16, IntOp),
+    /// `op; istore c`.
+    OpIStore(IntOp, u16),
+    /// `iload a; iload b; if_icmp<cond> t`.
+    IfLocals(u16, u16, Cond, u32),
+    /// `iload a; iconst k; if_icmp<cond> t`.
+    IfLocalConst(u16, i32, Cond, u32),
+    /// `iinc a k; goto t`.
+    IincGoto(u16, i16, u32),
+    /// `lload a; ldc2_w k; op`.
+    LLoadConstOp(u16, i64, LongOp),
+    /// `op; lstore c`.
+    OpLStore(LongOp, u16),
+    /// `fload a; ldc k; op`.
+    FLoadConstOp(u16, f32, FloatOp),
+    /// `op; fstore c`.
+    OpFStore(FloatOp, u16),
+    /// `dload a; ldc2_w k; op`.
+    DLoadConstOp(u16, f64, FloatOp),
+    /// `op; dstore c`.
+    OpDStore(FloatOp, u16),
+    /// `lcmp`, `fcmpl`, `fcmpg`, `dcmpl` or `dcmpg`, then `if<cond> t`.
+    CmpIf(Cmp, Cond, u32),
     /// `multianewarray class, dimensions`.
     MultiANewArray(u16, u8),
     IfNull(u32),

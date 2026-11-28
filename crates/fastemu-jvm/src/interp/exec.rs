@@ -6,12 +6,11 @@
 //! creating an exception (its stack trace reads the frame) or running a
 //! static initializer (which pushes frames above this one).
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use smallvec::SmallVec;
 
-use super::insn::Insn;
+use super::insn::{Cmp, Insn};
 use super::resolve::{FieldRes, MethodRes, Resolved};
 use super::{Fault, push_frame};
 use crate::class::{ArrayType, ClassId, ClassKind, InitState, Method, MethodBody, RtPool};
@@ -20,7 +19,7 @@ use crate::descriptor::Kind;
 use crate::heap::{Body, Heap};
 use crate::lang;
 use crate::value::{ObjRef, Value};
-use crate::vm::VmState;
+use crate::vm::{VmShared, VmState};
 
 /// Backward branches and calls between safepoints.
 const YIELD_INTERVAL: u32 = 4096;
@@ -38,6 +37,13 @@ enum Flow {
     Return(Value),
 }
 
+// The run loop keeps its rare and long paths out of line, in the
+// functions below, each `#[inline(never)]`. Its code is sensitive to its
+// size: one more path inlined into it can make the compiler keep less in
+// registers, and every instruction slower.
+
+#[cold]
+#[inline(never)]
 fn wrong_array() -> Fault {
     Fault::Error(
         "java/lang/VerifyError",
@@ -45,6 +51,8 @@ fn wrong_array() -> Fault {
     )
 }
 
+#[cold]
+#[inline(never)]
 fn wrong_field() -> Fault {
     Fault::Error(
         "java/lang/VerifyError",
@@ -52,12 +60,190 @@ fn wrong_field() -> Fault {
     )
 }
 
+#[cold]
+#[inline(never)]
 fn incompatible(message: String) -> Fault {
     Fault::Error("java/lang/IncompatibleClassChangeError", message)
 }
 
+#[cold]
+#[inline(never)]
+fn verify_error(message: &str) -> Fault {
+    Fault::Error("java/lang/VerifyError", message.to_owned())
+}
+
+#[cold]
+#[inline(never)]
+fn unsupported(op: u8) -> Fault {
+    incompatible(format!(
+        "bytecode {op:#x} (invokedynamic or a method handle) is not supported"
+    ))
+}
+
+#[cold]
+#[inline(never)]
+fn safepoint(ctx: &mut Ctx<'_>) -> JResult<()> {
+    ctx.safepoint()
+}
+
+#[cold]
+#[inline(never)]
+fn safepoint_after_native(ctx: &mut Ctx<'_>) -> JResult<()> {
+    ctx.safepoint_after_native()
+}
+
+#[cold]
+#[inline(never)]
+fn initialize(ctx: &mut Ctx<'_>, class: ClassId) -> JResult<()> {
+    ctx.initialize(class)
+}
+
+#[cold]
+#[inline(never)]
+fn resolve_class(ctx: &mut Ctx<'_>, pool: &RtPool, index: u16) -> JResult<ClassId> {
+    ctx.resolve_class(pool, index)
+}
+
+#[cold]
+#[inline(never)]
+fn ldc_string(ctx: &mut Ctx<'_>, pool: &RtPool, index: u16) -> JResult<ObjRef> {
+    ctx.resolve_string(pool, index)
+}
+
+#[cold]
+#[inline(never)]
+fn ldc_class(ctx: &mut Ctx<'_>, pool: &RtPool, index: u16) -> Result<ObjRef, Fault> {
+    let c = class_res(ctx, pool, index)?;
+    Ok(lang::class::mirror(&mut ctx.state, c))
+}
+
+/// Resolves a `getstatic` or `putstatic`: the class, the index of its
+/// static and whether it takes two slots.
+#[cold]
+#[inline(never)]
+fn static_field(
+    ctx: &mut Ctx<'_>,
+    pool: &RtPool,
+    index: u16,
+) -> Result<(ClassId, u32, bool), Fault> {
+    match ctx.resolve_field_ref(pool, index)? {
+        FieldRes::Static { class, index, wide } => Ok((class, index, wide)),
+        FieldRes::Instance { .. } => Err(incompatible("Expected static field".to_owned())),
+    }
+}
+
+/// Resolves a `getfield` or `putfield`: the field's slot in the object and
+/// whether it takes two slots.
+#[cold]
+#[inline(never)]
+fn instance_field(ctx: &mut Ctx<'_>, pool: &RtPool, index: u16) -> Result<(usize, bool), Fault> {
+    match ctx.resolve_field_ref(pool, index)? {
+        FieldRes::Instance { slot, wide } => Ok((slot as usize, wide)),
+        FieldRes::Static { .. } => Err(incompatible("Expected non-static field".to_owned())),
+    }
+}
+
+/// `new`: resolves and initializes the class, and allocates the object.
+#[inline(never)]
+fn new_object(ctx: &mut Ctx<'_>, pool: &RtPool, index: u16) -> Result<ObjRef, Fault> {
+    let cid = class_res(ctx, pool, index)?;
+    if ctx.state.classes.init[cid.index()] != InitState::Done {
+        initialize(ctx, cid)?;
+    }
+    let class = ctx.state.classes.get(cid);
+    if class.is_abstract() || class.is_interface() || class.is_array() {
+        let name = class.name.replace('/', ".");
+        return Err(Fault::Error("java/lang/InstantiationError", name));
+    }
+    let bytes = 16 + class.template.len() * 8;
+    if ctx.state.heap.gc_requested() || ctx.state.heap.would_exceed(bytes) {
+        gc_for(ctx, bytes)?;
+    }
+    Ok(ctx.state.alloc_instance(cid))
+}
+
+/// `newarray`: an array of `n` primitives of type `atype`.
+#[inline(never)]
+fn new_prim_array(ctx: &mut Ctx<'_>, atype: u8, n: i32) -> Result<ObjRef, Fault> {
+    if n < 0 {
+        return Err(Fault::NegativeSize(n));
+    }
+    let t = ArrayType::from_atype(atype).expect("checked when decoded");
+    let bytes = Heap::array_bytes(n as usize, t.elem_bytes());
+    if ctx.state.heap.gc_requested() || ctx.state.heap.would_exceed(bytes) {
+        gc_for(ctx, bytes)?;
+    }
+    Ok(ctx.state.alloc_prim_array(t, n as usize))
+}
+
+/// `anewarray`: an array of `n` references to the class of entry `index`.
+#[inline(never)]
+fn new_ref_array(ctx: &mut Ctx<'_>, pool: &RtPool, index: u16, n: i32) -> Result<ObjRef, Fault> {
+    let elem = class_res(ctx, pool, index)?;
+    if n < 0 {
+        return Err(Fault::NegativeSize(n));
+    }
+    let class = ctx.array_class_of(elem)?;
+    let bytes = Heap::array_bytes(n as usize, 4);
+    if ctx.state.heap.gc_requested() || ctx.state.heap.would_exceed(bytes) {
+        gc_for(ctx, bytes)?;
+    }
+    Ok(ctx.state.alloc_ref_array(class, n as usize))
+}
+
+/// `multianewarray`: the array class of entry `index`, with the sizes
+/// `counts`.
+#[cold]
+#[inline(never)]
+fn new_multi_array(
+    ctx: &mut Ctx<'_>,
+    pool: &RtPool,
+    index: u16,
+    counts: &[i32],
+) -> Result<ObjRef, Fault> {
+    let class = class_res(ctx, pool, index)?;
+    if let Some(&n) = counts.iter().find(|&&n| n < 0) {
+        return Err(Fault::NegativeSize(n));
+    }
+    if !ctx.state.classes.get(class).is_array() {
+        return Err(verify_error(
+            "multianewarray of a class that is not an array",
+        ));
+    }
+    let bytes = multi_bytes(&ctx.state, class, counts);
+    if ctx.state.heap.gc_requested() || ctx.state.heap.would_exceed(bytes) {
+        gc_for(ctx, bytes)?;
+    }
+    Ok(alloc_multi(&mut ctx.state, class, counts))
+}
+
+/// `athrow` of `e`.
+#[cold]
+#[inline(never)]
+fn athrow(ctx: &Ctx<'_>, e: ObjRef) -> Fault {
+    // Handlers and the report of an uncaught exception read the object as
+    // a Throwable, as a verifier would ensure.
+    let class = ctx.state.heap.class_of(e);
+    if !ctx.state.classes.is_subclass(class, ctx.state.wk.throwable) {
+        return verify_error("athrow of an object that is not a Throwable");
+    }
+    Fault::Throw(Throw::Exception(e))
+}
+
+/// `monitorenter` or `monitorexit` of `obj`.
+#[inline(never)]
+fn monitor(ctx: &mut Ctx<'_>, obj: ObjRef, enter: bool) -> JResult<()> {
+    if enter {
+        ctx.monitor_enter(obj)
+    } else {
+        ctx.monitor_exit(obj)
+    }
+}
+
 /// Collects before an allocation of `bytes`; throws `OutOfMemoryError` if
 /// the heap still has no room.
+#[cold]
+#[inline(never)]
 fn gc_for(ctx: &mut Ctx<'_>, bytes: usize) -> JResult<()> {
     ctx.collect();
     if ctx.state.heap.would_exceed(bytes) {
@@ -140,6 +326,8 @@ fn receiver(ctx: &Ctx<'_>, sp: usize, res: &MethodRes) -> Result<ObjRef, Fault> 
         .ok_or(Fault::NullPointer)
 }
 
+#[cold]
+#[inline(never)]
 fn abstract_error(m: &Method) -> Fault {
     Fault::Error(
         "java/lang/AbstractMethodError",
@@ -147,12 +335,21 @@ fn abstract_error(m: &Method) -> Fault {
     )
 }
 
-/// Picks the method an invoke instruction runs.
-fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc<Method>, Fault> {
+/// Picks the method an invoke instruction runs. The method is the
+/// machine's, borrowed from its arena, so the call counts no reference.
+#[inline(never)]
+fn select<'vm>(
+    ctx: &mut Ctx<'vm>,
+    pool: &RtPool,
+    insn: Insn,
+    sp: usize,
+) -> Result<&'vm Method, Fault> {
+    let shared: &'vm VmShared = ctx.shared;
+    let methods = &*shared.methods;
     match insn {
         Insn::InvokeStatic(i) => {
             let res = method_res(ctx, pool, i)?;
-            let m = res.target();
+            let m = res.target(methods);
             if !res.is_static {
                 return Err(incompatible(format!(
                     "Expected static method '{}'",
@@ -165,7 +362,7 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
         Insn::InvokeVirtual(i) => {
             let res = method_res(ctx, pool, i)?;
             if res.is_static {
-                let m = res.target();
+                let m = res.target(methods);
                 return Err(incompatible(format!(
                     "Expecting non-static method '{}'",
                     m.describe()
@@ -173,7 +370,7 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
             }
             let recv = receiver(ctx, sp, res)?;
             if res.direct {
-                return Ok(res.target());
+                return Ok(res.target(methods));
             }
             let rc = ctx.state.heap.class_of(recv);
             let class = ctx.state.classes.get(rc);
@@ -189,11 +386,11 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
                 None => class.virtual_method(res.selector),
             };
             match found {
-                Some(m) => Ok(Arc::clone(m)),
+                Some(m) => Ok(methods.method(m.id)),
                 None => Err(incompatible(format!(
                     "Class {} does not have the method '{}'",
                     ctx.class_name(rc).replace('/', "."),
-                    res.target().describe().replace('/', ".")
+                    res.target(methods).describe().replace('/', ".")
                 ))),
             }
         }
@@ -204,7 +401,7 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
             let class = ctx.state.classes.get(rc);
             let packed = res.icache.load(Ordering::Relaxed);
             if (packed >> 32) as u32 == rc.0 + 1 {
-                return Ok(Arc::clone(&class.vtable[packed as u32 as usize]));
+                return Ok(methods.method(class.vtable[packed as u32 as usize].id));
             }
             match class.vmap.get(&res.selector) {
                 Some(&v) => {
@@ -212,11 +409,11 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
                         (u64::from(rc.0) + 1) << 32 | u64::from(v),
                         Ordering::Relaxed,
                     );
-                    Ok(Arc::clone(&class.vtable[v as usize]))
+                    Ok(methods.method(class.vtable[v as usize].id))
                 }
                 None => {
                     if ctx.state.classes.is_assignable(rc, res.class) {
-                        Err(abstract_error(&res.target()))
+                        Err(abstract_error(res.target(methods)))
                     } else {
                         Err(incompatible(format!(
                             "Class {} does not implement the requested interface {}",
@@ -230,23 +427,21 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
         Insn::InvokeSpecial(i) => {
             let res = method_res(ctx, pool, i)?;
             if res.is_static {
-                let m = res.target();
+                let m = res.target(methods);
                 return Err(incompatible(format!(
                     "Expecting non-static method '{}'",
                     m.describe()
                 )));
             }
             receiver(ctx, sp, res)?;
-            let chosen = res.special.get_or_init(|| {
-                Arc::downgrade(&ctx.state.classes.select_special(
+            let chosen = *res.special.get_or_init(|| {
+                ctx.state.classes.select_special(
                     pool.class,
                     pool.super_semantics,
-                    &res.target(),
-                ))
+                    res.target(methods),
+                )
             });
-            Ok(chosen
-                .upgrade()
-                .expect("methods live as long as their class table"))
+            Ok(methods.method(chosen))
         }
         _ => unreachable!("select is only called for invoke instructions"),
     }
@@ -255,7 +450,7 @@ fn select(ctx: &mut Ctx<'_>, pool: &RtPool, insn: Insn, sp: usize) -> Result<Arc
 /// Calls `m` with its arguments on top of frame `fi`'s operand stack.
 /// Returns whether a callee frame was pushed; for natives, runs them and
 /// leaves the result on the stack.
-fn call(ctx: &mut Ctx<'_>, fi: usize, m: Arc<Method>, sp: &mut usize) -> Result<bool, Fault> {
+fn call(ctx: &mut Ctx<'_>, fi: usize, m: &Method, sp: &mut usize) -> Result<bool, Fault> {
     // The stack walk counted these arguments, so this holds for code that
     // passed it. A release build would wrap on a bug and run far off the
     // frame.
@@ -268,79 +463,114 @@ fn call(ctx: &mut Ctx<'_>, fi: usize, m: Arc<Method>, sp: &mut usize) -> Result<
     match &m.body {
         MethodBody::Bytecode(_) => {
             ctx.thread.frames[fi].sp = new_bp as u32;
-            if let Err(f) = push_frame(ctx, &m, new_bp) {
+            if let Err(f) = push_frame(ctx, m, new_bp) {
                 ctx.thread.frames[fi].sp = *sp as u32;
                 return Err(f);
             }
             if m.is_synchronized() {
-                let obj = if m.is_static() {
-                    lang::class::mirror(&mut ctx.state, m.class)
-                } else {
-                    ctx.thread.slots[new_bp]
-                        .obj()
-                        .expect("the receiver was null-checked")
-                };
-                if let Err(e) = ctx.monitor_enter(obj) {
-                    ctx.thread.frames.pop();
-                    ctx.thread.frames[fi].sp = *sp as u32;
-                    return Err(e.into());
-                }
-                if let Some(frame) = ctx.thread.frames.last_mut() {
-                    frame.sync = Some(obj);
-                }
+                enter_synchronized(ctx, fi, m, new_bp, *sp)?;
             }
             Ok(true)
         }
-        MethodBody::Native(f) => {
-            let f = Arc::clone(f);
-            let args: SmallVec<[Value; 8]> = ctx.thread.slots[new_bp..*sp]
-                .iter()
-                .copied()
-                .filter(|v| !matches!(v, Value::Void))
-                .collect();
-            ctx.baseline = ctx.state.heap.used();
-            let v = ctx.call_native(&m, &f, new_bp, &args)?;
-            let s = &mut ctx.thread.slots;
-            let mut top = new_bp;
-            match m.ret {
-                Kind::Void => {}
-                Kind::Long | Kind::Double => {
-                    s[top] = if v == Value::Void {
-                        m.ret.default_value()
-                    } else {
-                        v
-                    };
-                    s[top + 1] = Value::Void;
-                    top += 2;
-                }
-                kind => {
-                    s[top] = if v == Value::Void {
-                        kind.default_value()
-                    } else {
-                        v
-                    };
-                    top += 1;
-                }
-            }
-            *sp = top;
+        // It cannot throw, allocate, wait or look at the frames, so no
+        // frame is pushed for it. The call itself counted in the budget.
+        MethodBody::Empty => {
+            *sp = new_bp;
             Ok(false)
         }
-        MethodBody::Abstract => Err(abstract_error(&m)),
-        MethodBody::Unlinked => Err(Fault::Error(
-            "java/lang/UnsatisfiedLinkError",
-            m.describe().replace('/', "."),
-        )),
+        _ => call_native(ctx, m, new_bp, sp).map(|()| false),
     }
+}
+
+/// Takes the monitor of a synchronized method whose frame was just pushed
+/// above frame `fi`, whose operand stack ended at `sp` before the call.
+#[cold]
+#[inline(never)]
+fn enter_synchronized(
+    ctx: &mut Ctx<'_>,
+    fi: usize,
+    m: &Method,
+    new_bp: usize,
+    sp: usize,
+) -> Result<(), Fault> {
+    let obj = if m.is_static() {
+        lang::class::mirror(&mut ctx.state, m.class)
+    } else {
+        ctx.thread.slots[new_bp]
+            .obj()
+            .expect("the receiver was null-checked")
+    };
+    if let Err(e) = ctx.monitor_enter(obj) {
+        ctx.thread.frames.pop();
+        ctx.thread.frames[fi].sp = sp as u32;
+        return Err(e.into());
+    }
+    if let Some(frame) = ctx.thread.frames.last_mut() {
+        frame.sync = Some(obj);
+    }
+    Ok(())
+}
+
+/// Runs native method `m`, whose arguments are on the stack from `new_bp`
+/// to `sp`, and leaves its result there; or throws for a method with no
+/// body.
+#[inline(never)]
+fn call_native(ctx: &mut Ctx<'_>, m: &Method, new_bp: usize, sp: &mut usize) -> Result<(), Fault> {
+    let f = match &m.body {
+        MethodBody::Native(f) => f,
+        MethodBody::Abstract => return Err(abstract_error(m)),
+        MethodBody::Unlinked => {
+            return Err(Fault::Error(
+                "java/lang/UnsatisfiedLinkError",
+                m.describe().replace('/', "."),
+            ));
+        }
+        MethodBody::Bytecode(_) | MethodBody::Empty => {
+            unreachable!("call runs bytecode and empty methods itself")
+        }
+    };
+    let args: SmallVec<[Value; 8]> = ctx.thread.slots[new_bp..*sp]
+        .iter()
+        .copied()
+        .filter(|v| !matches!(v, Value::Void))
+        .collect();
+    ctx.baseline = ctx.state.heap.used();
+    let v = ctx.call_native(m, f, new_bp, &args)?;
+    let s = &mut ctx.thread.slots;
+    let mut top = new_bp;
+    match m.ret {
+        Kind::Void => {}
+        Kind::Long | Kind::Double => {
+            s[top] = if v == Value::Void {
+                m.ret.default_value()
+            } else {
+                v
+            };
+            s[top + 1] = Value::Void;
+            top += 2;
+        }
+        kind => {
+            s[top] = if v == Value::Void {
+                kind.default_value()
+            } else {
+                v
+            };
+            top += 1;
+        }
+    }
+    *sp = top;
+    Ok(())
 }
 
 /// Looks for a handler of `exc` in the frames above `base`, popping the
 /// frames that have none. Returns whether one was found; its frame is
 /// then on top with the exception on its operand stack.
 fn catch(ctx: &mut Ctx<'_>, base: usize, exc: ObjRef) -> bool {
+    let shared = ctx.shared;
     let exc_class = ctx.state.heap.class_of(exc);
     while ctx.thread.frames.len() > base {
         let frame = ctx.thread.frames.last().expect("more frames than base");
-        let method = Arc::clone(&frame.method);
+        let method = shared.methods.method(frame.method);
         let pc = frame.pc.saturating_sub(1);
         if !frame.native
             && let (Some(Ok(code)), Some(pool)) = (method.code(), method.pool())
@@ -406,7 +636,10 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
     let locals_mark = ctx.thread.locals.len();
     loop {
         let fi = ctx.thread.frames.len() - 1;
-        let method = Arc::clone(&ctx.thread.frames[fi].method);
+        // The frame's method is borrowed from the machine's arena, which
+        // outlives this thread, so a call and a return count no reference.
+        let shared: &VmShared = ctx.shared;
+        let method = shared.methods.method(ctx.thread.frames[fi].method);
         let Some(Ok(code)) = method.code() else {
             unreachable!("frames are pushed only for decoded bytecode")
         };
@@ -416,9 +649,19 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
         let mut pc = ctx.thread.frames[fi].pc as usize;
         let mut sp = ctx.thread.frames[fi].sp as usize;
 
+        // The thread's slots as a slice of the loop's own, so that it can
+        // keep their pointer and length in registers. A call that takes
+        // all of `ctx` may grow the slots, and the slice is taken again
+        // after it (`again!`).
+        let mut slots: &mut [Value] = &mut ctx.thread.slots;
         macro_rules! s {
             () => {
-                ctx.thread.slots
+                (*slots)
+            };
+        }
+        macro_rules! again {
+            () => {
+                slots = &mut ctx.thread.slots
             };
         }
         macro_rules! sync {
@@ -445,7 +688,8 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                         budget = YIELD_INTERVAL;
                         pc = t;
                         sync!();
-                        tri!(ctx.safepoint());
+                        tri!(safepoint(ctx));
+                        again!();
                     }
                 }
                 pc = t;
@@ -602,9 +846,9 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
         }
 
         let outcome: Result<Flow, Fault> = loop {
-            let insn = insns[pc];
+            let insn = &insns[pc];
             pc += 1;
-            match insn {
+            match *insn {
                 Insn::Nop => {}
                 Insn::AconstNull => push!(Value::NULL),
                 Insn::Iconst(v) => push!(Value::Int(v)),
@@ -616,15 +860,17 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                         Some(Resolved::String(r)) => *r,
                         _ => {
                             sync!();
-                            tri!(ctx.resolve_string(pool, i))
+                            let r = tri!(ldc_string(ctx, pool, i));
+                            again!();
+                            r
                         }
                     };
                     push!(Value::from(r));
                 }
                 Insn::LdcClass(i) => {
                     sync!();
-                    let c = tri!(class_res(ctx, pool, i));
-                    let mirror = lang::class::mirror(&mut ctx.state, c);
+                    let mirror = tri!(ldc_class(ctx, pool, i));
+                    again!();
                     push!(Value::from(mirror));
                 }
                 Insn::Load(n) => {
@@ -632,11 +878,26 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                     s[sp] = s[bp + n as usize];
                     sp += 1;
                 }
-                Insn::Load2(n) => {
+                Insn::ILoad(n) => {
                     let s = &mut s!();
-                    let i = bp + n as usize;
-                    s[sp] = s[i];
-                    s[sp + 1] = s[i + 1];
+                    s[sp] = Value::Int(s[bp + n as usize].int_or_zero());
+                    sp += 1;
+                }
+                Insn::FLoad(n) => {
+                    let s = &mut s!();
+                    s[sp] = Value::Float(s[bp + n as usize].float_or_zero());
+                    sp += 1;
+                }
+                Insn::LLoad(n) => {
+                    let s = &mut s!();
+                    s[sp] = Value::Long(s[bp + n as usize].long_or_zero());
+                    s[sp + 1] = Value::Void;
+                    sp += 2;
+                }
+                Insn::DLoad(n) => {
+                    let s = &mut s!();
+                    s[sp] = Value::Double(s[bp + n as usize].double_or_zero());
+                    s[sp + 1] = Value::Void;
                     sp += 2;
                 }
                 Insn::Store(n) => {
@@ -644,12 +905,29 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                     sp -= 1;
                     s[bp + n as usize] = s[sp];
                 }
-                Insn::Store2(n) => {
+                Insn::IStore(n) => {
+                    let s = &mut s!();
+                    sp -= 1;
+                    s[bp + n as usize] = Value::Int(s[sp].int_or_zero());
+                }
+                Insn::FStore(n) => {
+                    let s = &mut s!();
+                    sp -= 1;
+                    s[bp + n as usize] = Value::Float(s[sp].float_or_zero());
+                }
+                Insn::LStore(n) => {
                     let s = &mut s!();
                     sp -= 2;
                     let i = bp + n as usize;
-                    s[i] = s[sp];
-                    s[i + 1] = s[sp + 1];
+                    s[i] = Value::Long(s[sp].long_or_zero());
+                    s[i + 1] = Value::Void;
+                }
+                Insn::DStore(n) => {
+                    let s = &mut s!();
+                    sp -= 2;
+                    let i = bp + n as usize;
+                    s[i] = Value::Double(s[sp].double_or_zero());
+                    s[i + 1] = Value::Void;
                 }
                 Insn::Iaload => aload!(Ints, Value::Int, false),
                 Insn::Laload => aload!(Longs, Value::Long, true),
@@ -791,7 +1069,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                         break Err(Fault::DivideByZero);
                     }
                     let a = s[sp - 2].int();
-                    s[sp - 2] = Value::Int(if insn == Insn::Idiv {
+                    s[sp - 2] = Value::Int(if matches!(*insn, Insn::Idiv) {
                         a.wrapping_div(b)
                     } else {
                         a.wrapping_rem(b)
@@ -805,7 +1083,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                         break Err(Fault::DivideByZero);
                     }
                     let a = s[sp - 4].long();
-                    s[sp - 4] = Value::Long(if insn == Insn::Ldiv {
+                    s[sp - 4] = Value::Long(if matches!(*insn, Insn::Ldiv) {
                         a.wrapping_div(b)
                     } else {
                         a.wrapping_rem(b)
@@ -943,14 +1221,14 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                 Insn::IfAcmpeq(t) | Insn::IfAcmpne(t) => {
                     sp -= 2;
                     let same = s!()[sp].obj() == s!()[sp + 1].obj();
-                    if same == matches!(insn, Insn::IfAcmpeq(_)) {
+                    if same == matches!(*insn, Insn::IfAcmpeq(_)) {
                         jump!(t);
                     }
                 }
                 Insn::IfNull(t) | Insn::IfNonNull(t) => {
                     sp -= 1;
                     let null = s!()[sp].obj().is_none();
-                    if null == matches!(insn, Insn::IfNull(_)) {
+                    if null == matches!(*insn, Insn::IfNull(_)) {
                         jump!(t);
                     }
                 }
@@ -961,19 +1239,15 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                 }
                 Insn::Ret(n) => {
                     let Value::RetAddr(t) = s!()[bp + n as usize] else {
-                        break Err(Fault::Error(
-                            "java/lang/VerifyError",
-                            "ret through a local without a return address".to_owned(),
-                        ));
+                        break Err(verify_error("ret through a local without a return address"));
                     };
                     // The decoder assumed the subroutine leaves the stack
                     // as its jsr found it; a return address from another
                     // method or another height would run off the frame.
                     let depth = sp - bp - code.max_locals as usize;
                     if code.ret_heights.get(t as usize) != Some(&(depth as u32)) {
-                        break Err(Fault::Error(
-                            "java/lang/VerifyError",
-                            "a subroutine returns with a different operand stack".to_owned(),
+                        break Err(verify_error(
+                            "a subroutine returns with a different operand stack",
                         ));
                     }
                     jump!(t);
@@ -993,20 +1267,18 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                         }
                         _ => {
                             sync!();
-                            match tri!(ctx.resolve_field_ref(pool, i)) {
-                                FieldRes::Static { class, index, wide } => (class, index, wide),
-                                FieldRes::Instance { .. } => {
-                                    break Err(incompatible("Expected static field".to_owned()));
-                                }
-                            }
+                            let r = tri!(static_field(ctx, pool, i));
+                            again!();
+                            r
                         }
                     };
                     if ctx.state.classes.init[class.index()] != InitState::Done {
                         sync!();
-                        tri!(ctx.initialize(class));
+                        tri!(initialize(ctx, class));
+                        again!();
                     }
                     let index = index as usize;
-                    if matches!(insn, Insn::GetStatic(_)) {
+                    if matches!(*insn, Insn::GetStatic(_)) {
                         let v = ctx.state.classes.statics[index];
                         if wide {
                             push2!(v);
@@ -1026,17 +1298,12 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                         }
                         _ => {
                             sync!();
-                            match tri!(ctx.resolve_field_ref(pool, i)) {
-                                FieldRes::Instance { slot, wide } => (slot as usize, wide),
-                                FieldRes::Static { .. } => {
-                                    break Err(incompatible(
-                                        "Expected non-static field".to_owned(),
-                                    ));
-                                }
-                            }
+                            let r = tri!(instance_field(ctx, pool, i));
+                            again!();
+                            r
                         }
                     };
-                    if matches!(insn, Insn::GetField(_)) {
+                    if matches!(*insn, Insn::GetField(_)) {
                         let Some(obj) = s!()[sp - 1].obj() else {
                             break Err(Fault::NullPointer);
                         };
@@ -1077,9 +1344,9 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                     budget -= 1;
                     if budget == 0 {
                         budget = YIELD_INTERVAL;
-                        tri!(ctx.safepoint());
+                        tri!(safepoint(ctx));
                     }
-                    let target = match select(ctx, pool, insn, sp) {
+                    let target = match select(ctx, pool, *insn, sp) {
                         Ok(m) => m,
                         Err(f) => break Err(f),
                     };
@@ -1091,82 +1358,40 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                                 || ctx.shared.is_paused()
                             {
                                 sync!();
-                                tri!(ctx.safepoint_after_native());
+                                tri!(safepoint_after_native(ctx));
                             }
+                            again!();
                         }
                         Err(f) => break Err(f),
                     }
                 }
                 Insn::New(i) => {
                     sync!();
-                    let cid = tri!(class_res(ctx, pool, i));
-                    if ctx.state.classes.init[cid.index()] != InitState::Done {
-                        tri!(ctx.initialize(cid));
-                    }
-                    let class = ctx.state.classes.get(cid);
-                    if class.is_abstract() || class.is_interface() || class.is_array() {
-                        let name = class.name.replace('/', ".");
-                        break Err(Fault::Error("java/lang/InstantiationError", name));
-                    }
-                    let bytes = 16 + class.template.len() * 8;
-                    if ctx.state.heap.gc_requested() || ctx.state.heap.would_exceed(bytes) {
-                        tri!(gc_for(ctx, bytes));
-                    }
-                    let obj = ctx.state.alloc_instance(cid);
+                    let obj = tri!(new_object(ctx, pool, i));
+                    again!();
                     push!(Value::from(obj));
                 }
                 Insn::NewArray(atype) => {
                     let n = s!()[sp - 1].int();
-                    if n < 0 {
-                        break Err(Fault::NegativeSize(n));
-                    }
-                    let t = ArrayType::from_atype(atype).expect("checked when decoded");
-                    let bytes = Heap::array_bytes(n as usize, t.elem_bytes());
-                    if ctx.state.heap.gc_requested() || ctx.state.heap.would_exceed(bytes) {
-                        sync!();
-                        tri!(gc_for(ctx, bytes));
-                    }
-                    let arr = ctx.state.alloc_prim_array(t, n as usize);
+                    sync!();
+                    let arr = tri!(new_prim_array(ctx, atype, n));
+                    again!();
                     s!()[sp - 1] = Value::from(arr);
                 }
                 Insn::ANewArray(i) => {
                     let n = s!()[sp - 1].int();
                     sync!();
-                    let elem = tri!(class_res(ctx, pool, i));
-                    if n < 0 {
-                        break Err(Fault::NegativeSize(n));
-                    }
-                    let class = match ctx.array_class_of(elem) {
-                        Ok(c) => c,
-                        Err(t) => break Err(Fault::Throw(t)),
-                    };
-                    let bytes = Heap::array_bytes(n as usize, 4);
-                    if ctx.state.heap.gc_requested() || ctx.state.heap.would_exceed(bytes) {
-                        tri!(gc_for(ctx, bytes));
-                    }
-                    let arr = ctx.state.alloc_ref_array(class, n as usize);
+                    let arr = tri!(new_ref_array(ctx, pool, i, n));
+                    again!();
                     s!()[sp - 1] = Value::from(arr);
                 }
                 Insn::MultiANewArray(i, dims) => {
                     sync!();
-                    let class = tri!(class_res(ctx, pool, i));
                     let dims = dims as usize;
                     let counts: SmallVec<[i32; 4]> =
                         s!()[sp - dims..sp].iter().map(|v| v.int()).collect();
-                    if let Some(&n) = counts.iter().find(|&&n| n < 0) {
-                        break Err(Fault::NegativeSize(n));
-                    }
-                    if !ctx.state.classes.get(class).is_array() {
-                        break Err(Fault::Error(
-                            "java/lang/VerifyError",
-                            "multianewarray of a class that is not an array".to_owned(),
-                        ));
-                    }
-                    let bytes = multi_bytes(&ctx.state, class, &counts);
-                    if ctx.state.heap.gc_requested() || ctx.state.heap.would_exceed(bytes) {
-                        tri!(gc_for(ctx, bytes));
-                    }
-                    let arr = alloc_multi(&mut ctx.state, class, &counts);
+                    let arr = tri!(new_multi_array(ctx, pool, i, &counts));
+                    again!();
                     sp -= dims;
                     push!(Value::from(arr));
                 }
@@ -1183,16 +1408,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                     let Some(e) = s!()[sp - 1].obj() else {
                         break Err(Fault::NullPointer);
                     };
-                    // Handlers and the report of an uncaught exception read
-                    // the object as a Throwable, as a verifier would ensure.
-                    let class = ctx.state.heap.class_of(e);
-                    if !ctx.state.classes.is_subclass(class, ctx.state.wk.throwable) {
-                        break Err(Fault::Error(
-                            "java/lang/VerifyError",
-                            "athrow of an object that is not a Throwable".to_owned(),
-                        ));
-                    }
-                    break Err(Fault::Throw(Throw::Exception(e)));
+                    break Err(athrow(ctx, e));
                 }
                 Insn::CheckCast(i) => {
                     if let Some(obj) = s!()[sp - 1].obj() {
@@ -1200,7 +1416,9 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                             Some(Resolved::Class(c)) => *c,
                             _ => {
                                 sync!();
-                                tri!(class_res(ctx, pool, i))
+                                let r = tri!(resolve_class(ctx, pool, i));
+                                again!();
+                                r
                             }
                         };
                         let oc = ctx.state.heap.class_of(obj);
@@ -1220,7 +1438,9 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                                 Some(Resolved::Class(c)) => *c,
                                 _ => {
                                     sync!();
-                                    tri!(class_res(ctx, pool, i))
+                                    let r = tri!(resolve_class(ctx, pool, i));
+                                    again!();
+                                    r
                                 }
                             };
                             let oc = ctx.state.heap.class_of(obj);
@@ -1235,16 +1455,120 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                         break Err(Fault::NullPointer);
                     };
                     sync!();
-                    if insn == Insn::MonitorEnter {
-                        tri!(ctx.monitor_enter(obj));
+                    tri!(monitor(ctx, obj, matches!(*insn, Insn::MonitorEnter)));
+                    again!();
+                }
+                Insn::Unsupported(op) => break Err(unsupported(op)),
+                Insn::ILoadConstOp(a, k, op) => {
+                    let v = op.apply(s!()[bp + a as usize].int_or_zero(), k);
+                    push!(Value::Int(v));
+                    pc += 2;
+                }
+                Insn::ILoadLoadOp(a, b, op) => {
+                    let s = &mut s!();
+                    let v = op.apply(
+                        s[bp + a as usize].int_or_zero(),
+                        s[bp + b as usize].int_or_zero(),
+                    );
+                    s[sp] = Value::Int(v);
+                    sp += 1;
+                    pc += 2;
+                }
+                Insn::OpIStore(op, c) => {
+                    let s = &mut s!();
+                    let v = op.apply(s[sp - 2].int(), s[sp - 1].int());
+                    sp -= 2;
+                    s[bp + c as usize] = Value::Int(v);
+                    pc += 1;
+                }
+                Insn::IfLocals(a, b, cond, t) => {
+                    let s = &s!();
+                    let (x, y) = (
+                        s[bp + a as usize].int_or_zero(),
+                        s[bp + b as usize].int_or_zero(),
+                    );
+                    if cond.holds(x, y) {
+                        jump!(t);
                     } else {
-                        tri!(ctx.monitor_exit(obj));
+                        pc += 2;
                     }
                 }
-                Insn::Unsupported(op) => {
-                    break Err(incompatible(format!(
-                        "bytecode {op:#x} (invokedynamic or a method handle) is not supported"
-                    )));
+                Insn::IfLocalConst(a, k, cond, t) => {
+                    if cond.holds(s!()[bp + a as usize].int_or_zero(), k) {
+                        jump!(t);
+                    } else {
+                        pc += 2;
+                    }
+                }
+                Insn::IincGoto(a, k, t) => {
+                    let s = &mut s!();
+                    let i = bp + a as usize;
+                    s[i] = Value::Int(s[i].int().wrapping_add(i32::from(k)));
+                    jump!(t);
+                }
+                Insn::LLoadConstOp(a, k, op) => {
+                    let v = op.apply(s!()[bp + a as usize].long_or_zero(), k);
+                    push2!(Value::Long(v));
+                    pc += 2;
+                }
+                Insn::OpLStore(op, c) => {
+                    let s = &mut s!();
+                    let v = op.apply(s[sp - 4].long(), s[sp - 2].long());
+                    sp -= 4;
+                    let i = bp + c as usize;
+                    s[i] = Value::Long(v);
+                    s[i + 1] = Value::Void;
+                    pc += 1;
+                }
+                Insn::FLoadConstOp(a, k, op) => {
+                    let v = op.apply(s!()[bp + a as usize].float_or_zero(), k);
+                    push!(Value::Float(v));
+                    pc += 2;
+                }
+                Insn::OpFStore(op, c) => {
+                    let s = &mut s!();
+                    let v = op.apply(s[sp - 2].float(), s[sp - 1].float());
+                    sp -= 2;
+                    s[bp + c as usize] = Value::Float(v);
+                    pc += 1;
+                }
+                Insn::DLoadConstOp(a, k, op) => {
+                    let v = op.apply(s!()[bp + a as usize].double_or_zero(), k);
+                    push2!(Value::Double(v));
+                    pc += 2;
+                }
+                Insn::OpDStore(op, c) => {
+                    let s = &mut s!();
+                    let v = op.apply(s[sp - 4].double(), s[sp - 2].double());
+                    sp -= 4;
+                    let i = bp + c as usize;
+                    s[i] = Value::Double(v);
+                    s[i + 1] = Value::Void;
+                    pc += 1;
+                }
+                Insn::CmpIf(cmp, cond, t) => {
+                    let s = &s!();
+                    let r = match cmp {
+                        Cmp::Long => {
+                            sp -= 4;
+                            s[sp].long().cmp(&s[sp + 2].long()) as i32
+                        }
+                        Cmp::FloatL | Cmp::FloatG => {
+                            sp -= 2;
+                            let nan = if cmp == Cmp::FloatL { -1 } else { 1 };
+                            compare(s[sp].float(), s[sp + 1].float(), nan)
+                        }
+                        Cmp::DoubleL | Cmp::DoubleG => {
+                            sp -= 4;
+                            let nan = if cmp == Cmp::DoubleL { -1 } else { 1 };
+                            compare(s[sp].double(), s[sp + 2].double(), nan)
+                        }
+                    };
+                    if cond.holds(r, 0) {
+                        jump!(t);
+                    } else {
+                        pc += 1;
+                    }
                 }
             }
         };
@@ -1270,7 +1594,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                 // returned: the caller's stack walk counted on that, and
                 // bytecode can load a long as one slot or the second half
                 // of one.
-                match frame.method.ret.slots() {
+                match method.ret.slots() {
                     0 => {}
                     2 => {
                         t.slots[at] = v;

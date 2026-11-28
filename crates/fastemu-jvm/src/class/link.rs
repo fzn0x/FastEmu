@@ -6,8 +6,8 @@ use std::sync::{Arc, OnceLock};
 
 use super::table::{ClassTable, LoadError, MAX_HIERARCHY_DEPTH, too_deep};
 use super::{
-    Bytecode, Class, ClassId, ClassKind, ConstValue, Field, Method, MethodBody, PayloadFactory,
-    RtPool, package_of,
+    Bytecode, Class, ClassId, ClassKind, ConstValue, Field, MAX_METHODS, Method, MethodBody,
+    PayloadFactory, RtPool, package_of,
 };
 use crate::classfile::{ClassFile, CodeAttr, Constant, ConstantPool, access};
 use crate::descriptor::{Kind, is_field_descriptor, kind_of, method_shape};
@@ -38,6 +38,7 @@ pub(super) struct FieldDef {
 pub(super) enum MethodSrc {
     Code(CodeAttr),
     Native(NativeFn),
+    Empty,
     Abstract,
     Unlinked,
 }
@@ -81,6 +82,7 @@ pub(super) fn from_native(native: NativeClass) -> Result<ClassDef, LoadError> {
             desc: m.desc.into(),
             access: m.access,
             src: match m.body {
+                _ if m.empty => MethodSrc::Empty,
                 Some(f) => MethodSrc::Native(f),
                 None => MethodSrc::Abstract,
             },
@@ -296,6 +298,15 @@ impl ClassTable {
         // that share a text share its `Arc`, so the descriptor is walked
         // once for each text, not once for each method: 65535 methods of
         // one descriptor of 65532 parameters took six minutes.
+        if !self.arena.has_room(def.methods.len()) {
+            return Err(LoadError::new(
+                "java/lang/OutOfMemoryError",
+                format!(
+                    "class {} would take the machine past {MAX_METHODS} methods",
+                    def.name
+                ),
+            ));
+        }
         let mut shapes = Vec::with_capacity(def.methods.len());
         let mut walked: HashMap<usize, (usize, Kind)> = HashMap::new();
         for m in &def.methods {
@@ -382,13 +393,16 @@ impl ClassTable {
                     }))
                 }
                 MethodSrc::Native(f) => MethodBody::Native(f),
+                MethodSrc::Empty => MethodBody::Empty,
                 MethodSrc::Abstract => MethodBody::Abstract,
                 MethodSrc::Unlinked => MethodBody::Unlinked,
             };
-            methods.push(Arc::new(Method {
+            let selector = self.selector(&m.name, &m.desc);
+            methods.push(self.arena.add(|method_id| Method {
+                id: method_id,
                 class: id,
                 class_name: Arc::clone(&def.name),
-                selector: self.selector(&m.name, &m.desc),
+                selector,
                 name: m.name,
                 desc: m.desc,
                 access: m.access,

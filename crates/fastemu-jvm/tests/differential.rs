@@ -188,6 +188,7 @@ programs! {
     data_streams: "DataStreams", 8;
     exceptions: "Exceptions", 8;
     float_math: "FloatMath", 8;
+    fused: "Fused", 8;
     gc_stress: "GcStress", 4;
     hashtables: "Hashtables", 8;
     hello: "Hello", 8;
