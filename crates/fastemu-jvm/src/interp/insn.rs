@@ -5,6 +5,92 @@
 //! the pool can give at decode time are inlined, and the typed loads and
 //! stores that only move slots are merged.
 
+/// An `int` operation that cannot throw, in a fused instruction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IntOp {
+    Add,
+    Sub,
+    Mul,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+    Ushr,
+}
+
+impl IntOp {
+    /// The operation of `insn`, if it is one of these.
+    pub(crate) fn of(insn: Insn) -> Option<IntOp> {
+        Some(match insn {
+            Insn::Iadd => IntOp::Add,
+            Insn::Isub => IntOp::Sub,
+            Insn::Imul => IntOp::Mul,
+            Insn::Iand => IntOp::And,
+            Insn::Ior => IntOp::Or,
+            Insn::Ixor => IntOp::Xor,
+            Insn::Ishl => IntOp::Shl,
+            Insn::Ishr => IntOp::Shr,
+            Insn::Iushr => IntOp::Ushr,
+            _ => return None,
+        })
+    }
+
+    /// `a op b`, as the instruction computes it.
+    #[inline]
+    pub(crate) fn apply(self, a: i32, b: i32) -> i32 {
+        match self {
+            IntOp::Add => a.wrapping_add(b),
+            IntOp::Sub => a.wrapping_sub(b),
+            IntOp::Mul => a.wrapping_mul(b),
+            IntOp::And => a & b,
+            IntOp::Or => a | b,
+            IntOp::Xor => a ^ b,
+            IntOp::Shl => a.wrapping_shl(b as u32),
+            IntOp::Shr => a.wrapping_shr(b as u32),
+            IntOp::Ushr => (a as u32).wrapping_shr(b as u32) as i32,
+        }
+    }
+}
+
+/// The comparison of an `if_icmp<cond>`, in a fused instruction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Cond {
+    Eq,
+    Ne,
+    Lt,
+    Ge,
+    Gt,
+    Le,
+}
+
+impl Cond {
+    /// The comparison and the target of `insn`, if it is an `if_icmp`.
+    pub(crate) fn of(insn: Insn) -> Option<(Cond, u32)> {
+        Some(match insn {
+            Insn::IfIcmpeq(t) => (Cond::Eq, t),
+            Insn::IfIcmpne(t) => (Cond::Ne, t),
+            Insn::IfIcmplt(t) => (Cond::Lt, t),
+            Insn::IfIcmpge(t) => (Cond::Ge, t),
+            Insn::IfIcmpgt(t) => (Cond::Gt, t),
+            Insn::IfIcmple(t) => (Cond::Le, t),
+            _ => return None,
+        })
+    }
+
+    #[inline]
+    pub(crate) fn holds(self, a: i32, b: i32) -> bool {
+        match self {
+            Cond::Eq => a == b,
+            Cond::Ne => a != b,
+            Cond::Lt => a < b,
+            Cond::Ge => a >= b,
+            Cond::Gt => a > b,
+            Cond::Le => a <= b,
+        }
+    }
+}
+
 /// One decoded instruction. Operands named `u16` are constant pool
 /// indices unless the name says otherwise; `u32` operands are instruction
 /// indices.
@@ -163,6 +249,23 @@ pub(crate) enum Insn {
     InstanceOf(u16),
     MonitorEnter,
     MonitorExit,
+    // Fused instructions. Each stands in the place of the first instruction
+    // of a common sequence and does the whole sequence, and the others stay
+    // behind it, so every index keeps its meaning. None of them can throw.
+    // A sequence is fused only when nothing branches into its middle (see
+    // `decode::fuse`).
+    /// `iload a; iconst k; op`.
+    ILoadConstOp(u16, i32, IntOp),
+    /// `iload a; iload b; op`.
+    ILoadLoadOp(u16, u16, IntOp),
+    /// `op; istore c`.
+    OpIStore(IntOp, u16),
+    /// `iload a; iload b; if_icmp<cond> t`.
+    IfLocals(u16, u16, Cond, u32),
+    /// `iload a; iconst k; if_icmp<cond> t`.
+    IfLocalConst(u16, i32, Cond, u32),
+    /// `iinc a k; goto t`.
+    IincGoto(u16, i16, u32),
     /// `multianewarray class, dimensions`.
     MultiANewArray(u16, u8),
     IfNull(u32),

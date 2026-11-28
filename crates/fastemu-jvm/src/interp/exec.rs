@@ -1424,6 +1424,53 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                     again!();
                 }
                 Insn::Unsupported(op) => break Err(unsupported(op)),
+                Insn::ILoadConstOp(a, k, op) => {
+                    let v = op.apply(s!()[bp + a as usize].int_or_zero(), k);
+                    push!(Value::Int(v));
+                    pc += 2;
+                }
+                Insn::ILoadLoadOp(a, b, op) => {
+                    let s = &mut s!();
+                    let v = op.apply(
+                        s[bp + a as usize].int_or_zero(),
+                        s[bp + b as usize].int_or_zero(),
+                    );
+                    s[sp] = Value::Int(v);
+                    sp += 1;
+                    pc += 2;
+                }
+                Insn::OpIStore(op, c) => {
+                    let s = &mut s!();
+                    let v = op.apply(s[sp - 2].int(), s[sp - 1].int());
+                    sp -= 2;
+                    s[bp + c as usize] = Value::Int(v);
+                    pc += 1;
+                }
+                Insn::IfLocals(a, b, cond, t) => {
+                    let s = &s!();
+                    let (x, y) = (
+                        s[bp + a as usize].int_or_zero(),
+                        s[bp + b as usize].int_or_zero(),
+                    );
+                    if cond.holds(x, y) {
+                        jump!(t);
+                    } else {
+                        pc += 2;
+                    }
+                }
+                Insn::IfLocalConst(a, k, cond, t) => {
+                    if cond.holds(s!()[bp + a as usize].int_or_zero(), k) {
+                        jump!(t);
+                    } else {
+                        pc += 2;
+                    }
+                }
+                Insn::IincGoto(a, k, t) => {
+                    let s = &mut s!();
+                    let i = bp + a as usize;
+                    s[i] = Value::Int(s[i].int().wrapping_add(i32::from(k)));
+                    jump!(t);
+                }
             }
         };
 

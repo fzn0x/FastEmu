@@ -1,6 +1,6 @@
 //! Decoding bytecode into [`Insn`] arrays.
 
-use super::insn::{Code, Handler, Insn, Switch};
+use super::insn::{Code, Cond, Handler, Insn, IntOp, Switch};
 use crate::classfile::{CodeAttr, Constant, ConstantPool};
 
 struct Bytes<'a> {
@@ -360,6 +360,101 @@ fn map_branch(insn: &mut Insn, map: &impl Fn(u32) -> Result<u32, String>) -> Res
     Ok(())
 }
 
+/// Fuses common sequences in place, once the stack walk has accepted the
+/// code: the first instruction of a sequence becomes one that does the
+/// whole sequence ([`Insn::ILoadConstOp`] and the ones after it), and the
+/// others stay behind it, so every index keeps its meaning. A sequence is
+/// fused only when no branch, switch, handler start, end or target, and no
+/// `jsr` return lands inside it: the plain instructions there run for
+/// whatever enters in the middle.
+fn fuse(insns: &mut [Insn], switches: &[Switch], handlers: &[Handler]) {
+    let n = insns.len();
+    let mut entered = vec![false; n + 1];
+    let mut mark = |t: u32| {
+        if let Some(e) = entered.get_mut(t as usize) {
+            *e = true;
+        }
+    };
+    for (i, insn) in insns.iter().enumerate() {
+        match *insn {
+            Insn::Goto(t)
+            | Insn::Ifeq(t)
+            | Insn::Ifne(t)
+            | Insn::Iflt(t)
+            | Insn::Ifge(t)
+            | Insn::Ifgt(t)
+            | Insn::Ifle(t)
+            | Insn::IfIcmpeq(t)
+            | Insn::IfIcmpne(t)
+            | Insn::IfIcmplt(t)
+            | Insn::IfIcmpge(t)
+            | Insn::IfIcmpgt(t)
+            | Insn::IfIcmple(t)
+            | Insn::IfAcmpeq(t)
+            | Insn::IfAcmpne(t)
+            | Insn::IfNull(t)
+            | Insn::IfNonNull(t) => mark(t),
+            Insn::Jsr(t) => {
+                mark(t);
+                mark(i as u32 + 1);
+            }
+            _ => {}
+        }
+    }
+    for switch in switches {
+        let (Switch::Table {
+            targets, default, ..
+        }
+        | Switch::Lookup {
+            targets, default, ..
+        }) = switch;
+        mark(*default);
+        targets.iter().for_each(|&t| mark(t));
+    }
+    for h in handlers {
+        mark(h.start);
+        mark(h.end);
+        mark(h.target);
+    }
+    let mut i = 0;
+    while i < n {
+        let fused = sequence(&insns[i..]);
+        match fused {
+            Some((insn, len)) if !entered[i + 1..i + len].contains(&true) => {
+                insns[i] = insn;
+                i += len;
+            }
+            _ => i += 1,
+        }
+    }
+}
+
+/// The fused instruction for the sequence at the start of `code`, and how
+/// many instructions it stands for.
+fn sequence(code: &[Insn]) -> Option<(Insn, usize)> {
+    use Insn as I;
+    let at = |i: usize| code.get(i).copied();
+    match (at(0)?, at(1), at(2)) {
+        (I::ILoad(a), Some(I::ILoad(b)), Some(third)) => {
+            if let Some((cond, t)) = Cond::of(third) {
+                Some((I::IfLocals(a, b, cond, t), 3))
+            } else {
+                IntOp::of(third).map(|op| (I::ILoadLoadOp(a, b, op), 3))
+            }
+        }
+        (I::ILoad(a), Some(I::Iconst(k)), Some(third)) => {
+            if let Some((cond, t)) = Cond::of(third) {
+                Some((I::IfLocalConst(a, k, cond, t), 3))
+            } else {
+                IntOp::of(third).map(|op| (I::ILoadConstOp(a, k, op), 3))
+            }
+        }
+        (I::Iinc(a, k), Some(I::Goto(t)), _) => Some((I::IincGoto(a, k, t), 2)),
+        (first, Some(I::IStore(c)), _) => IntOp::of(first).map(|op| (I::OpIStore(op, c), 2)),
+        _ => None,
+    }
+}
+
 /// The load or store of local `index` that `kind` names: 0 to 4 for
 /// `iload`, `lload`, `fload`, `dload` and `aload`, and 5 to 9 for the
 /// stores, in the order of their opcodes.
@@ -491,6 +586,7 @@ pub(crate) fn decode(
     } else {
         Box::default()
     };
+    fuse(&mut insns, &switches, &handlers);
     Ok(Code {
         insns: insns.into(),
         pcs: pcs.into(),
@@ -530,7 +626,9 @@ mod tests {
                 Insn::Iconst(0),
                 Insn::IStore(0),
                 Insn::Iinc(0, 1),
-                Insn::ILoad(0),
+                // iload_0; bipush 10; if_icmplt, fused: the plain
+                // instructions stay behind it.
+                Insn::IfLocalConst(0, 10, Cond::Lt, 2),
                 Insn::Iconst(10),
                 Insn::IfIcmplt(2),
                 Insn::Return,
@@ -557,6 +655,67 @@ mod tests {
             panic!("a table switch")
         };
         assert_eq!((&**targets, *default), (&[2, 4][..], 6));
+    }
+
+    #[test]
+    fn sequences_fuse_in_place() {
+        let mut code = [
+            Insn::ILoad(0),
+            Insn::ILoad(1),
+            Insn::Iadd,
+            Insn::IStore(2),
+            Insn::Iinc(0, 1),
+            Insn::Goto(0),
+        ];
+        let plain = code;
+        fuse(&mut code, &[], &[]);
+        assert_eq!(code[0], Insn::ILoadLoadOp(0, 1, IntOp::Add));
+        // The plain instructions stay behind the fused one.
+        assert_eq!(&code[1..4], &plain[1..4]);
+        assert_eq!(code[4], Insn::IincGoto(0, 1, 0));
+        assert_eq!(code[5], Insn::Goto(0));
+    }
+
+    #[test]
+    fn a_sequence_something_enters_in_the_middle_is_not_fused() {
+        let code = [
+            Insn::ILoad(0),
+            Insn::ILoad(1),
+            Insn::IfIcmplt(0),
+            Insn::Iinc(0, 1),
+            Insn::Goto(0),
+        ];
+        let fused = |switches: &[Switch], handlers: &[Handler], extra: Option<Insn>| {
+            let mut code = code.to_vec();
+            code.extend(extra);
+            fuse(&mut code, switches, handlers);
+            (code[0], code[3])
+        };
+        let both = (Insn::IfLocals(0, 1, Cond::Lt, 0), Insn::IincGoto(0, 1, 0));
+        assert_eq!(fused(&[], &[], None), both);
+        // A branch into each sequence.
+        let (first, second) = fused(&[], &[], Some(Insn::IfNull(1)));
+        assert_eq!((first, second), (Insn::ILoad(0), both.1));
+        let (_, second) = fused(&[], &[], Some(Insn::Ifeq(4)));
+        assert_eq!(second, Insn::Iinc(0, 1));
+        // A switch's target or default.
+        let switch = |targets: Vec<u32>, default: u32| Switch::Table {
+            low: 0,
+            targets: targets.into(),
+            default,
+        };
+        assert_eq!(fused(&[switch(vec![2], 0)], &[], None).0, Insn::ILoad(0));
+        assert_eq!(fused(&[switch(vec![], 4)], &[], None).1, Insn::Iinc(0, 1));
+        // A handler's start, end or target.
+        let handler = |start, end, target| Handler {
+            start,
+            end,
+            target,
+            catch_type: 0,
+        };
+        for h in [handler(1, 3, 3), handler(0, 2, 3), handler(3, 3, 1)] {
+            assert_eq!(fused(&[], &[h], None).0, Insn::ILoad(0), "{h:?}");
+        }
     }
 
     #[test]

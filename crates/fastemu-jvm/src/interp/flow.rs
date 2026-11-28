@@ -175,6 +175,12 @@ fn effect(insn: Insn, cp: &ConstantPool) -> Result<(usize, usize), String> {
             class_entry(cp, i)?;
             (usize::from(dims), 1)
         }
+        I::ILoadConstOp(..)
+        | I::ILoadLoadOp(..)
+        | I::OpIStore(..)
+        | I::IfLocals(..)
+        | I::IfLocalConst(..)
+        | I::IincGoto(..) => return Err("an instruction fused before the stack walk".to_owned()),
     })
 }
 
