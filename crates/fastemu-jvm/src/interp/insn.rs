@@ -53,6 +53,113 @@ impl IntOp {
     }
 }
 
+/// A `long` operation that cannot throw, in a fused instruction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LongOp {
+    Add,
+    Sub,
+    Mul,
+    And,
+    Or,
+    Xor,
+}
+
+impl LongOp {
+    pub(crate) fn of(insn: Insn) -> Option<LongOp> {
+        Some(match insn {
+            Insn::Ladd => LongOp::Add,
+            Insn::Lsub => LongOp::Sub,
+            Insn::Lmul => LongOp::Mul,
+            Insn::Land => LongOp::And,
+            Insn::Lor => LongOp::Or,
+            Insn::Lxor => LongOp::Xor,
+            _ => return None,
+        })
+    }
+
+    #[inline]
+    pub(crate) fn apply(self, a: i64, b: i64) -> i64 {
+        match self {
+            LongOp::Add => a.wrapping_add(b),
+            LongOp::Sub => a.wrapping_sub(b),
+            LongOp::Mul => a.wrapping_mul(b),
+            LongOp::And => a & b,
+            LongOp::Or => a | b,
+            LongOp::Xor => a ^ b,
+        }
+    }
+}
+
+/// A `float` or `double` operation, in a fused instruction. None of them
+/// throws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FloatOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+}
+
+impl FloatOp {
+    /// The operation of `insn`, a `float` one when `double` is false.
+    pub(crate) fn of(insn: Insn, double: bool) -> Option<FloatOp> {
+        Some(match (insn, double) {
+            (Insn::Fadd, false) | (Insn::Dadd, true) => FloatOp::Add,
+            (Insn::Fsub, false) | (Insn::Dsub, true) => FloatOp::Sub,
+            (Insn::Fmul, false) | (Insn::Dmul, true) => FloatOp::Mul,
+            (Insn::Fdiv, false) | (Insn::Ddiv, true) => FloatOp::Div,
+            (Insn::Frem, false) | (Insn::Drem, true) => FloatOp::Rem,
+            _ => return None,
+        })
+    }
+
+    #[inline]
+    pub(crate) fn apply<
+        T: std::ops::Add<Output = T>
+            + std::ops::Sub<Output = T>
+            + std::ops::Mul<Output = T>
+            + std::ops::Div<Output = T>
+            + std::ops::Rem<Output = T>,
+    >(
+        self,
+        a: T,
+        b: T,
+    ) -> T {
+        match self {
+            FloatOp::Add => a + b,
+            FloatOp::Sub => a - b,
+            FloatOp::Mul => a * b,
+            FloatOp::Div => a / b,
+            FloatOp::Rem => a % b,
+        }
+    }
+}
+
+/// The comparison instruction of a fused compare and branch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Cmp {
+    Long,
+    /// `fcmpl` and `fcmpg`: NaN compares as -1 and as 1.
+    FloatL,
+    FloatG,
+    DoubleL,
+    DoubleG,
+}
+
+impl Cmp {
+    pub(crate) fn of(insn: Insn) -> Option<Cmp> {
+        Some(match insn {
+            Insn::Lcmp => Cmp::Long,
+            Insn::Fcmpl => Cmp::FloatL,
+            Insn::Fcmpg => Cmp::FloatG,
+            Insn::Dcmpl => Cmp::DoubleL,
+            Insn::Dcmpg => Cmp::DoubleG,
+            _ => return None,
+        })
+    }
+}
+
 /// The comparison of an `if_icmp<cond>`, in a fused instruction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Cond {
@@ -74,6 +181,20 @@ impl Cond {
             Insn::IfIcmpge(t) => (Cond::Ge, t),
             Insn::IfIcmpgt(t) => (Cond::Gt, t),
             Insn::IfIcmple(t) => (Cond::Le, t),
+            _ => return None,
+        })
+    }
+
+    /// The comparison and the target of `insn`, if it is an `if<cond>`,
+    /// which compares with zero.
+    pub(crate) fn of_zero(insn: Insn) -> Option<(Cond, u32)> {
+        Some(match insn {
+            Insn::Ifeq(t) => (Cond::Eq, t),
+            Insn::Ifne(t) => (Cond::Ne, t),
+            Insn::Iflt(t) => (Cond::Lt, t),
+            Insn::Ifge(t) => (Cond::Ge, t),
+            Insn::Ifgt(t) => (Cond::Gt, t),
+            Insn::Ifle(t) => (Cond::Le, t),
             _ => return None,
         })
     }
@@ -266,6 +387,20 @@ pub(crate) enum Insn {
     IfLocalConst(u16, i32, Cond, u32),
     /// `iinc a k; goto t`.
     IincGoto(u16, i16, u32),
+    /// `lload a; ldc2_w k; op`.
+    LLoadConstOp(u16, i64, LongOp),
+    /// `op; lstore c`.
+    OpLStore(LongOp, u16),
+    /// `fload a; ldc k; op`.
+    FLoadConstOp(u16, f32, FloatOp),
+    /// `op; fstore c`.
+    OpFStore(FloatOp, u16),
+    /// `dload a; ldc2_w k; op`.
+    DLoadConstOp(u16, f64, FloatOp),
+    /// `op; dstore c`.
+    OpDStore(FloatOp, u16),
+    /// `lcmp`, `fcmpl`, `fcmpg`, `dcmpl` or `dcmpg`, then `if<cond> t`.
+    CmpIf(Cmp, Cond, u32),
     /// `multianewarray class, dimensions`.
     MultiANewArray(u16, u8),
     IfNull(u32),

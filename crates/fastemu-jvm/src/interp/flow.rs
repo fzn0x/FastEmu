@@ -180,7 +180,14 @@ fn effect(insn: Insn, cp: &ConstantPool) -> Result<(usize, usize), String> {
         | I::OpIStore(..)
         | I::IfLocals(..)
         | I::IfLocalConst(..)
-        | I::IincGoto(..) => return Err("an instruction fused before the stack walk".to_owned()),
+        | I::IincGoto(..)
+        | I::LLoadConstOp(..)
+        | I::OpLStore(..)
+        | I::FLoadConstOp(..)
+        | I::OpFStore(..)
+        | I::DLoadConstOp(..)
+        | I::OpDStore(..)
+        | I::CmpIf(..) => return Err("an instruction fused before the stack walk".to_owned()),
     })
 }
 

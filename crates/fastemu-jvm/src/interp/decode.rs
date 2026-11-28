@@ -1,6 +1,6 @@
 //! Decoding bytecode into [`Insn`] arrays.
 
-use super::insn::{Code, Cond, Handler, Insn, IntOp, Switch};
+use super::insn::{Cmp, Code, Cond, FloatOp, Handler, Insn, IntOp, LongOp, Switch};
 use crate::classfile::{CodeAttr, Constant, ConstantPool};
 
 struct Bytes<'a> {
@@ -449,8 +449,29 @@ fn sequence(code: &[Insn]) -> Option<(Insn, usize)> {
                 IntOp::of(third).map(|op| (I::ILoadConstOp(a, k, op), 3))
             }
         }
+        (I::LLoad(a), Some(I::Lconst(k)), Some(third)) => {
+            LongOp::of(third).map(|op| (I::LLoadConstOp(a, k, op), 3))
+        }
+        (I::FLoad(a), Some(I::Fconst(k)), Some(third)) => {
+            FloatOp::of(third, false).map(|op| (I::FLoadConstOp(a, k, op), 3))
+        }
+        (I::DLoad(a), Some(I::Dconst(k)), Some(third)) => {
+            FloatOp::of(third, true).map(|op| (I::DLoadConstOp(a, k, op), 3))
+        }
         (I::Iinc(a, k), Some(I::Goto(t)), _) => Some((I::IincGoto(a, k, t), 2)),
         (first, Some(I::IStore(c)), _) => IntOp::of(first).map(|op| (I::OpIStore(op, c), 2)),
+        (first, Some(I::LStore(c)), _) => LongOp::of(first).map(|op| (I::OpLStore(op, c), 2)),
+        (first, Some(I::FStore(c)), _) => {
+            FloatOp::of(first, false).map(|op| (I::OpFStore(op, c), 2))
+        }
+        (first, Some(I::DStore(c)), _) => {
+            FloatOp::of(first, true).map(|op| (I::OpDStore(op, c), 2))
+        }
+        (first, Some(second), _) => {
+            let cmp = Cmp::of(first)?;
+            let (cond, t) = Cond::of_zero(second)?;
+            Some((I::CmpIf(cmp, cond, t), 2))
+        }
         _ => None,
     }
 }

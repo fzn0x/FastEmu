@@ -10,7 +10,7 @@ use std::sync::atomic::Ordering;
 
 use smallvec::SmallVec;
 
-use super::insn::Insn;
+use super::insn::{Cmp, Insn};
 use super::resolve::{FieldRes, MethodRes, Resolved};
 use super::{Fault, push_frame};
 use crate::class::{ArrayType, ClassId, ClassKind, InitState, Method, MethodBody, RtPool};
@@ -1470,6 +1470,70 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, base: usize) -> JResult<Value> {
                     let i = bp + a as usize;
                     s[i] = Value::Int(s[i].int().wrapping_add(i32::from(k)));
                     jump!(t);
+                }
+                Insn::LLoadConstOp(a, k, op) => {
+                    let v = op.apply(s!()[bp + a as usize].long_or_zero(), k);
+                    push2!(Value::Long(v));
+                    pc += 2;
+                }
+                Insn::OpLStore(op, c) => {
+                    let s = &mut s!();
+                    let v = op.apply(s[sp - 4].long(), s[sp - 2].long());
+                    sp -= 4;
+                    let i = bp + c as usize;
+                    s[i] = Value::Long(v);
+                    s[i + 1] = Value::Void;
+                    pc += 1;
+                }
+                Insn::FLoadConstOp(a, k, op) => {
+                    let v = op.apply(s!()[bp + a as usize].float_or_zero(), k);
+                    push!(Value::Float(v));
+                    pc += 2;
+                }
+                Insn::OpFStore(op, c) => {
+                    let s = &mut s!();
+                    let v = op.apply(s[sp - 2].float(), s[sp - 1].float());
+                    sp -= 2;
+                    s[bp + c as usize] = Value::Float(v);
+                    pc += 1;
+                }
+                Insn::DLoadConstOp(a, k, op) => {
+                    let v = op.apply(s!()[bp + a as usize].double_or_zero(), k);
+                    push2!(Value::Double(v));
+                    pc += 2;
+                }
+                Insn::OpDStore(op, c) => {
+                    let s = &mut s!();
+                    let v = op.apply(s[sp - 4].double(), s[sp - 2].double());
+                    sp -= 4;
+                    let i = bp + c as usize;
+                    s[i] = Value::Double(v);
+                    s[i + 1] = Value::Void;
+                    pc += 1;
+                }
+                Insn::CmpIf(cmp, cond, t) => {
+                    let s = &s!();
+                    let r = match cmp {
+                        Cmp::Long => {
+                            sp -= 4;
+                            s[sp].long().cmp(&s[sp + 2].long()) as i32
+                        }
+                        Cmp::FloatL | Cmp::FloatG => {
+                            sp -= 2;
+                            let nan = if cmp == Cmp::FloatL { -1 } else { 1 };
+                            compare(s[sp].float(), s[sp + 1].float(), nan)
+                        }
+                        Cmp::DoubleL | Cmp::DoubleG => {
+                            sp -= 4;
+                            let nan = if cmp == Cmp::DoubleL { -1 } else { 1 };
+                            compare(s[sp].double(), s[sp + 2].double(), nan)
+                        }
+                    };
+                    if cond.holds(r, 0) {
+                        jump!(t);
+                    } else {
+                        pc += 1;
+                    }
                 }
             }
         };
