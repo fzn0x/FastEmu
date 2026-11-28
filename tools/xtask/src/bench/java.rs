@@ -79,11 +79,22 @@ pub const MICROEMU_JARS: [&str; 4] = [
     "lib/microemu-siemensapi.jar",
 ];
 
+/// A packing: its file, its suite's name and its manifest's settings.
+type Packing = (
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str)],
+);
+
 /// The three packings of the MIDlet: the kernels at full size, the paced
-/// scene, and the kernels at the smallest size, for tests.
-const JARS: [(&str, &[(&str, &str)]); 3] = [
+/// scene, and the kernels at the smallest size, for tests. Each with its
+/// suite's name: an emulator that keeps installed suites, as the Android
+/// bench's J2ME Loader does, takes a second suite of the same name for an
+/// update of the first.
+const JARS: [Packing; 3] = [
     (
         "bench.jar",
+        "FastEmu Bench",
         &[
             ("Bench-Mode", "kernels"),
             ("Bench-Scale", "100"),
@@ -92,9 +103,14 @@ const JARS: [(&str, &[(&str, &str)]); 3] = [
             ("Bench-Linger-Ms", "3000"),
         ],
     ),
-    ("scene.jar", &[("Bench-Mode", "scene")]),
+    (
+        "scene.jar",
+        "FastEmu Bench Scene",
+        &[("Bench-Mode", "scene")],
+    ),
     (
         "check.jar",
+        "FastEmu Bench",
         &[
             ("Bench-Mode", "kernels"),
             ("Bench-Scale", "1"),
@@ -142,11 +158,11 @@ fn fresh(dir: &Path) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| io(dir, e))
 }
 
-/// The manifest of one packing.
-fn manifest(properties: &[(&str, &str)]) -> String {
-    let mut text = String::from(
-        "Manifest-Version: 1.0\nMIDlet-Name: FastEmu Bench\nMIDlet-Vendor: FastEmu\n\
-         MIDlet-Version: 1.0\nMIDlet-1: FastEmu Bench, , fastemu.bench.Bench\n\
+/// The manifest of one packing, of the suite `name`.
+fn manifest(name: &str, properties: &[(&str, &str)]) -> String {
+    let mut text = format!(
+        "Manifest-Version: 1.0\nMIDlet-Name: {name}\nMIDlet-Vendor: FastEmu\n\
+         MIDlet-Version: 1.0\nMIDlet-1: {name}, , fastemu.bench.Bench\n\
          MicroEdition-Configuration: CLDC-1.1\nMicroEdition-Profile: MIDP-2.0\n",
     );
     for (key, value) in properties {
@@ -177,9 +193,9 @@ pub fn build(out: &Path, root: &Path, microemu: Option<&Path>) -> Result<Built, 
         .arg(&classes)
         .args(&sources);
     stubs::run(&mut command, "javac on the benchmark MIDlet")?;
-    for (name, properties) in JARS {
+    for (name, suite, properties) in JARS {
         let mf = midlet.join(format!("{name}.mf"));
-        fs::write(&mf, manifest(properties)).map_err(|e| io(&mf, e))?;
+        fs::write(&mf, manifest(suite, properties)).map_err(|e| io(&mf, e))?;
         let jar = out.join(name);
         let _ = fs::remove_file(&jar);
         let mut command = Command::new(&jar_tool);
@@ -239,8 +255,11 @@ mod tests {
 
     #[test]
     fn manifests_name_the_midlet_and_its_settings() {
-        let text = manifest(JARS[2].1);
+        let text = manifest(JARS[2].1, JARS[2].2);
         assert!(text.contains("MIDlet-1: FastEmu Bench, , fastemu.bench.Bench\n"));
+        assert!(manifest(JARS[1].1, JARS[1].2).contains("MIDlet-Name: FastEmu Bench Scene\n"));
+        // The two packings J2ME Loader keeps installed differ in name.
+        assert_ne!(JARS[0].1, JARS[1].1);
         assert!(text.contains("Bench-Scale: 1\n"));
         assert!(text.ends_with('\n'));
         // Every stand-in says it holds no MicroEmulator code.
